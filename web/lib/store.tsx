@@ -18,6 +18,7 @@ import { gradeFor, letterFor } from "./grades";
 import { nowLabel } from "./format";
 import type {
   Assignment,
+  Bucket,
   Comment,
   Course,
   CustomScore,
@@ -75,6 +76,13 @@ interface Marks {
   customScores: CustomScore[];
   submittedAt: Record<string, string | null>;
   attempts: Record<string, number>;
+  /**
+   * Columns you dragged a card into. A plan you made by hand outranks one
+   * derived from a due date, so this lives with the marks and survives every
+   * resync — the estimator may re-read an assignment, but it never gets to
+   * move a card you placed yourself.
+   */
+  buckets: Record<string, Bucket>;
 }
 
 interface Profile {
@@ -100,7 +108,20 @@ const NO_MARKS: Marks = {
   customScores: [],
   submittedAt: {},
   attempts: {},
+  buckets: {},
 };
+
+const BUCKETS: Bucket[] = ["tonight", "soon", "week", "done"];
+
+/** Only keep placements that name a column this build still has. */
+function readBuckets(value: unknown): Record<string, Bucket> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, Bucket] => BUCKETS.includes(entry[1] as Bucket)
+    )
+  );
+}
 
 function readMarks(raw: string | null): Marks | null {
   if (!raw) return null;
@@ -113,6 +134,7 @@ function readMarks(raw: string | null): Marks | null {
       customScores: p.customScores ?? [],
       submittedAt: p.submittedAt ?? {},
       attempts: p.attempts ?? {},
+      buckets: readBuckets(p.buckets),
     };
   } catch {
     return null;
@@ -357,6 +379,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [assignmentId, setAssignmentId] = useState<string | null>(null);
 
   const [status, setStatusMap] = useState<Record<string, Status>>({});
+  const [buckets, setBucketMap] = useState<Record<string, Bucket>>({});
   const [text, setTextMap] = useState<Record<string, string>>({});
   const [files, setFiles] = useState<Record<string, LocalFile[]>>({});
   const [rawFiles, setRawFiles] = useState<Record<string, File[]>>({});
@@ -410,6 +433,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // ticked-off work down with it.
     const marks = loadMarks();
     setStatusMap(marks.status);
+    setBucketMap(marks.buckets);
     setTimeTotals(marks.timeTotals);
     setCustomScores(marks.customScores);
     setSubmittedAt(marks.submittedAt);
@@ -457,14 +481,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         window.localStorage.setItem(
           MARKS_KEY,
-          JSON.stringify({ status, timeTotals, customScores, submittedAt, attempts })
+          JSON.stringify({ status, timeTotals, customScores, submittedAt, attempts, buckets })
         );
       } catch {
         /* quota or private mode — persistence is a nicety, not required */
       }
     }, 300);
     return () => window.clearTimeout(t);
-  }, [status, timeTotals, customScores, submittedAt, attempts]);
+  }, [status, timeTotals, customScores, submittedAt, attempts, buckets]);
 
   // Cache the snapshot after hydration, so the initial demo state can't
   // overwrite a good saved board on first paint.
