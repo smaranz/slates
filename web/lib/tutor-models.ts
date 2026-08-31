@@ -29,24 +29,39 @@ interface TutorModelDef {
   creator: TutorModelCreator;
   backend: TutorModelBackend;
   /** Only set on the 8 Grok variants — drives the composite speed/thinking control. */
-  grok?: { thinking: GrokThinking; fast: boolean };
+  grok?: { thinking: ThinkingLevel; fast: boolean };
   /** Only set on the 2 Composer variants — drives its speed toggle. */
   composer?: { fast: boolean };
 }
 
-export const GROK_THINKING_LEVELS = [
+/**
+ * The four thinking levels every backend has some real lever for: Grok's
+ * model id encodes it directly; OpenAI (`reasoningEffort`), Claude Code
+ * (`effort`), and OpenRouter (`reasoning.effort`) all take it as a provider
+ * option instead, shared across every model on that backend.
+ */
+export const THINKING_LEVELS = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "Extra High" },
 ] as const;
-export type GrokThinking = (typeof GROK_THINKING_LEVELS)[number]["id"];
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number]["id"];
+export type GrokThinking = ThinkingLevel;
+export const GROK_THINKING_LEVELS = THINKING_LEVELS;
 
-export function grokModelId(thinking: GrokThinking, fast: boolean): string {
+export const DEFAULT_THINKING: ThinkingLevel = "medium";
+
+/** Backends whose thinking level is a shared provider option, not baked into the model id. */
+export function backendSupportsThinking(backend: TutorModelBackend): boolean {
+  return backend === "openai" || backend === "claude-code" || backend === "openrouter";
+}
+
+export function grokModelId(thinking: ThinkingLevel, fast: boolean): string {
   return `cursor-grok-4.6-${thinking}${fast ? "-fast" : ""}`;
 }
 
-const GROK_MODELS: TutorModelDef[] = GROK_THINKING_LEVELS.flatMap(({ id: thinking }) =>
+const GROK_MODELS: TutorModelDef[] = THINKING_LEVELS.flatMap(({ id: thinking }) =>
   [false, true].map((fast) => ({
     id: grokModelId(thinking, fast),
     label: "Grok 4.6",
@@ -107,9 +122,6 @@ export const TUTOR_MODELS = [
 export type TutorModelId = (typeof TUTOR_MODELS)[number]["id"];
 
 export const DEFAULT_TUTOR_MODEL: TutorModelId = "gpt-5.6-sol";
-
-/** Reasoning effort OpenAI and Claude models run at — the rest bake it into the model id. */
-export const TUTOR_REASONING_EFFORT = "medium";
 
 export function isTutorModel(value: unknown): value is TutorModelId {
   return TUTOR_MODELS.some((m) => m.id === value);
