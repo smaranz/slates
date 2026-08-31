@@ -18,6 +18,45 @@
 
 const VIEWPORT = { width: 1280, height: 800 };
 
+/**
+ * Purely cosmetic: hides Schoology's own header, left materials nav,
+ * breadcrumbs, and footer so the streamed frame reads as an assessment
+ * living inside Slates rather than a whole Schoology page in a box. Runs via
+ * `addInitScript`, so it re-applies after every navigation in the attempt
+ * (landing page → player → submitted page are separate documents) without
+ * touching anything the assessment itself does — no selector here is part of
+ * the player, the timer, or the submission flow.
+ *
+ * Ids only, deliberately. The markup around them is styled with build-hashed
+ * class names ("_2T2dA") that change with every Schoology deploy, so matching
+ * on those would quietly stop working; these ids have stayed put.
+ */
+const HIDE_CHROME_CSS = `
+  #header, #left-nav, #breadcrumbs, #footer, #site-navigation-footer {
+    display: none !important;
+  }
+  #main-content-wrapper, #center-wrapper {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+`;
+
+async function hideSchoologyChrome(page) {
+  await page.addInitScript((css) => {
+    const apply = () => {
+      const style = document.createElement("style");
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", apply, { once: true });
+    } else {
+      apply();
+    }
+  }, HIDE_CHROME_CSS);
+}
+
 /** At most one attempt runs at a time — it shares the scraper's browser. */
 let session = null;
 
@@ -141,6 +180,7 @@ export async function start(ctx, url) {
 
   const page = await ctx.newPage();
   await page.setViewportSize(VIEWPORT);
+  await hideSchoologyChrome(page);
 
   const cdp = await ctx.newCDPSession(page);
   session = {

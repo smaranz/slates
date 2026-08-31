@@ -1,4 +1,6 @@
-import { launch, readConfig, isLoggedIn, openHome } from "./browser.mjs";
+import fs from "node:fs";
+import path from "node:path";
+import { launch, readConfig, isLoggedIn, openHome, HOME } from "./browser.mjs";
 
 /**
  * Scrape Schoology from a real, rendered page.
@@ -39,12 +41,33 @@ function extractList({ sel, completed }) {
     if (!title) continue;
     seen.add(hit[2]);
 
-    // The row that carries the date; "overdue" never contains the bare "due".
-    let row = a.parentElement;
-    for (let i = 0; i < 6 && row; i++, row = row.parentElement) {
+    /*
+     * Climb to the row this link belongs to.
+     *
+     * Two conditions, and the second one matters more than it looks. Stopping
+     * at "this ancestor mentions due" is right for upcoming and overdue rows,
+     * which carry a date — but a Recently Completed row carries none, so the
+     * climb ran the full six steps and landed on the whole list. Every
+     * completed item then read its course and date off the same shared blob:
+     * ten assignments from four classes all came back as Pre-Calculus, all due
+     * today, which is what put them in a heap on one calendar square.
+     *
+     * So: never climb into an ancestor holding more than one item. That bounds
+     * the walk to the row itself no matter what text it happens to contain.
+     */
+    const itemCount = (el) =>
+      [...el.querySelectorAll("a[href]")].filter((link) => {
+        const m = (link.getAttribute("href") || "").match(ITEM);
+        return m && m[1] !== "page";
+      }).length;
+
+    let row = a;
+    for (let i = 0; i < 6; i++) {
+      const parent = row.parentElement;
+      if (!parent || itemCount(parent) > 1) break;
+      row = parent;
       if (/\b(?:over)?due\b/i.test(row.textContent || "")) break;
     }
-    row = row || a.closest("li,div") || a.parentElement;
 
     const cells = [...row.querySelectorAll("*")]
       .filter((e) => !e.querySelector("*"))
@@ -352,8 +375,13 @@ async function readGrades(page, domain) {
  * The To Do panel only knows title/date/course — every detail view looked
  * identical without this. Here we find out what the item actually *is*: a
  * timed attempt, a file dropbox, a text entry, points, and instructions.
+ *
+ * Exported so `review.mjs` reads an assessment's config the same single way.
+ * It is serialised into the page by `page.evaluate`, so it must stay entirely
+ * self-contained — anything it closes over from module scope does not exist on
+ * the other side.
  */
-function extractDetail() {
+export function extractDetail() {
   /*
    * Schoology's assessment player is configured by a JSON object embedded in a
    * script tag, and it is authoritative: the time limit, attempt counts, open
@@ -416,6 +444,27 @@ function extractDetail() {
     const used = Number(init.numAttemptsTaken) || 0;
     const allowed = Number(init.numAttemptsAllowed) || 0;
 
+    /*
+     * Every past attempt — the same list Schoology renders as its "Previous
+     * attempts" table, oldest first. Each record carries the submission id,
+     * which is the only handle that leads to a per-question breakdown later.
+     *
+     * Deliberately no score here: the record's `points_total` is the same
+     * number whether it means "you scored 10" or "this was out of 10", and a
+     * perfect attempt gives no way to tell which. The review fetch adds up the
+     * questions instead, where earned and possible are separate.
+     */
+    const attempts = (Array.isArray(init.submissions) ? init.submissions : []).map((sub, i) => ({
+      n: i + 1,
+      submissionId: String(sub.id),
+      completed: sub.completed === true,
+      // Schoology's own elapsed time for the attempt, in whole minutes.
+      minutes: Number(sub.minutes_elapsed) || 0,
+      modified: [sub.last_modified_date, sub.last_modified_time].filter(Boolean).join(" "),
+      // A teacher can withhold results; without this the review is empty.
+      reviewable: sub.can_student_view === true,
+    }));
+
     return {
       title: init.title ?? "",
       brief: init.instructions ?? "",
@@ -445,6 +494,7 @@ function extractDetail() {
         scenario,
         // Schoology runs the real clock server-side; Slates can only mirror it.
         resumable: /RESUME/i.test(scenario),
+        attempts,
       },
     };
   }
@@ -605,10 +655,71 @@ function lastMessagePage() {
 }
 
 /**
- * Every inbox thread, newest first, across all pages.
+ * Runs in page context on /messages/view/<id>.
+ *
+ * The list row only ever shows Schoology's own truncated preview — there is no
+ * way to get the full text without opening the thread. A thread can hold more
+ * than one post (the original plus replies), each its own `.s_message_box`;
+ * join them in order so a reply chain doesn't just show the first message.
+ */
+function extractThreadBody() {
+  const parts = [...document.querySelectorAll(".s_message_box .message-body")]
+    .map((box) => {
+      const clone = box.cloneNode(true);
+      clone.querySelector(".name")?.remove();
+      clone.querySelector(".s-message-attachments-container")?.remove();
+      return (clone.innerText || clone.textContent || "").trim();
+    })
+    .filter(Boolean);
+  return parts.join("\n\n---\n\n");
+}
+
+/**
+ * Full message bodies are cached to disk by thread id and never refetched.
+ * Threads are treated as immutable once read, same as a completed assignment
+ * — without this, every sync would revisit every thread the inbox has ever
+ * held just to reconfirm text that can't change.
+ */
+const BODY_CACHE_FILE = path.join(HOME, "message-bodies.json");
+
+function loadBodyCache() {
+  try {
+    return JSON.parse(fs.readFileSync(BODY_CACHE_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Drop one thread from the body cache so the next sync reads it again.
+ *
+ * The cache treats a thread as immutable once read, which is true right up
+ * until we reply to it — without this, a reply sent from Slates would never
+ * appear in Slates, because the thread it belongs to is never re-fetched.
+ */
+export function forgetMessageBody(id) {
+  const cache = loadBodyCache();
+  if (!(id in cache)) return;
+  delete cache[id];
+  saveBodyCache(cache);
+}
+
+function saveBodyCache(cache) {
+  try {
+    fs.mkdirSync(HOME, { recursive: true });
+    fs.writeFileSync(BODY_CACHE_FILE, JSON.stringify(cache));
+  } catch {
+    /* cache is an optimisation, not a requirement */
+  }
+}
+
+/**
+ * Every inbox thread, newest first, across all pages, with full body text.
  *
  * Capped at 12 pages (300 messages at 25/page) so a years-deep inbox can't
- * turn a routine sync into dozens of sequential page loads.
+ * turn a routine sync into dozens of sequential list-page loads. Full-body
+ * fetches are the expensive part — one page visit per thread — so those are
+ * cached and only ever run once per message id.
  */
 async function readMessages(page, domain) {
   await page.goto(`https://${domain}/messages`, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -621,7 +732,22 @@ async function readMessages(page, domain) {
     all.push(...(await page.evaluate(extractMessages)));
   }
 
-  return all;
+  const bodies = loadBodyCache();
+  let fetched = 0;
+  for (const m of all) {
+    if (bodies[m.id]) continue;
+    try {
+      await page.goto(`https://${domain}/messages/view/${m.id}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      const full = await page.evaluate(extractThreadBody);
+      if (full) bodies[m.id] = full;
+      fetched++;
+    } catch (e) {
+      console.error(`  message body failed for ${m.id}: ${e.message}`);
+    }
+  }
+  if (fetched) saveBodyCache(bodies);
+
+  return all.map((m) => ({ ...m, body: bodies[m.id] || m.body }));
 }
 
 const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -824,6 +950,8 @@ export async function scrape({ headless = true, reuse = false } = {}) {
         // Schoology's own weighted percentage, which beats recomputing one from
         // categories whose weights don't always sum to 100.
         courseGrades,
+        // The web app derives a grade-over-time trend from the gradebook's own
+        // per-assignment dates instead — Schoology exposes no history to scrape.
         history: {},
         messages,
         syncedAt: Date.now(),

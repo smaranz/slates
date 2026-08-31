@@ -121,6 +121,79 @@ export interface AssessmentInfo {
   /** Schoology's own launch state, e.g. DELIVERY_SOME_ATTEMPTS_LEFT. */
   scenario: string;
   resumable: boolean;
+  /** Attempts already handed in, oldest first. Empty until one is. */
+  attempts?: AssessmentAttempt[];
+}
+
+/** One attempt at an assessment, as Schoology's own attempt table lists it. */
+export interface AssessmentAttempt {
+  /** Attempt number, counting from the first. */
+  n: number;
+  /** Schoology's submission id — the handle a per-question review needs. */
+  submissionId: string;
+  completed: boolean;
+  /** Whole minutes Schoology clocked on the attempt. */
+  minutes: number;
+  /** Schoology's own "last modified" stamp, e.g. "Aug 20, 2026 7:06 pm". */
+  modified: string;
+  /** False when the teacher hasn't released results. */
+  reviewable: boolean;
+}
+
+/**
+ * How one question in an attempt was marked.
+ *
+ * There is no question text: Schoology serves the questions themselves from
+ * Learnosity, which hands them out only to its own player against a signed
+ * session. Only the marks travel.
+ */
+export interface QuestionResult {
+  n: number;
+  earned: number;
+  possible: number;
+  /**
+   * "pending" is a question only a teacher can mark and hasn't yet — distinct
+   * from "missed", which is a real zero. "dropped" is one the teacher voided
+   * for the whole class, so it counts against nobody.
+   */
+  state: "correct" | "partial" | "missed" | "pending" | "dropped";
+  /** Marked by hand, so a zero may only mean "not read yet". */
+  byHand: boolean;
+  /*
+   * The rest is read out of Schoology's rendered review rather than its API, so
+   * it is absent whenever that view couldn't be reached — the marks above stand
+   * on their own without it.
+   */
+  /**
+   * What the question asked. On a quiz built as an answer sheet for a paper
+   * worksheet this is as bare as "Q1", because that is all the teacher typed.
+   */
+  stem?: string;
+  /** "Multiple choice", "Written", … — empty for a kind Slates doesn't name. */
+  kind?: string;
+  /** The choices offered, with the one that was submitted flagged. */
+  options?: { label: string; chosen: boolean }[];
+  /** A typed answer, for questions that weren't a set of choices. */
+  written?: string;
+}
+
+/** One attempt's marks, or why they couldn't be shown. */
+export interface AttemptReview extends AssessmentAttempt {
+  questions: QuestionResult[];
+  /** Points over the questions that counted, so dropped ones don't skew it. */
+  earned?: number;
+  possible?: number;
+  questionsTotal?: number;
+  error?: string;
+}
+
+export interface AssessmentReview {
+  /** False when the item isn't a Schoology-hosted assessment at all. */
+  online: boolean;
+  title: string;
+  pointsPossible?: number | null;
+  timeLimitMin?: number | null;
+  attempts: AttemptReview[];
 }
 
 export interface AssignmentGrade {
@@ -175,6 +248,15 @@ export interface Message {
   body: string;
   time: string;
   unread: boolean;
+}
+
+/** Someone you can write to, exactly as Schoology's directory returned them. */
+export interface Recipient {
+  /** Schoology's own user id. Never invented locally — only ever echoed back. */
+  uid: string;
+  name: string;
+  school: string;
+  photo: string;
 }
 
 export interface HistoryPoint {

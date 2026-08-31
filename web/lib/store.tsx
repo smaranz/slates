@@ -19,6 +19,7 @@ import { nowLabel } from "./format";
 import type {
   Assignment,
   Bucket,
+  Recipient,
   Comment,
   Course,
   CustomScore,
@@ -29,6 +30,7 @@ import type {
 
 export type View =
   | "board"
+  | "classes"
   | "list"
   | "grades"
   | "calendar"
@@ -83,6 +85,30 @@ interface Marks {
    * move a card you placed yourself.
    */
   buckets: Record<string, Bucket>;
+  /**
+   * Work the Sunday sweep took off the board, and when. Nothing is deleted:
+   * these are still in the snapshot, still searchable, still on the calendar —
+   * they've just stopped competing for attention with the week ahead.
+   */
+  archived: Record<string, number>;
+  /** The reset boundary already applied, so a week is never swept twice. */
+  sweptAt: number;
+}
+
+/**
+ * The most recent Sunday 7pm on or before `now`.
+ *
+ * Computed rather than scheduled, so the sweep survives the app being shut
+ * on Sunday evening — whenever it next opens it can see it missed one and
+ * catch up. Local time on purpose: 7pm means 7pm where the student is.
+ */
+export function lastSundayReset(now: Date = new Date()): number {
+  const boundary = new Date(now);
+  boundary.setHours(19, 0, 0, 0);
+  boundary.setDate(boundary.getDate() - boundary.getDay()); // back to Sunday
+  // Sunday before 7pm belongs to the week that started last Sunday.
+  if (boundary.getTime() > now.getTime()) boundary.setDate(boundary.getDate() - 7);
+  return boundary.getTime();
 }
 
 interface Profile {
@@ -109,6 +135,10 @@ const NO_MARKS: Marks = {
   submittedAt: {},
   attempts: {},
   buckets: {},
+  archived: {},
+  // No sweep recorded yet: start from this week's boundary rather than
+  // sweeping a first-run board that hasn't had a week to accumulate anything.
+  sweptAt: lastSundayReset(),
 };
 
 const BUCKETS: Bucket[] = ["tonight", "soon", "week", "done"];
@@ -135,6 +165,8 @@ function readMarks(raw: string | null): Marks | null {
       submittedAt: p.submittedAt ?? {},
       attempts: p.attempts ?? {},
       buckets: readBuckets(p.buckets),
+      archived: typeof p.archived === "object" && p.archived ? p.archived : {},
+      sweptAt: typeof p.sweptAt === "number" ? p.sweptAt : lastSundayReset(),
     };
   } catch {
     return null;
@@ -287,9 +319,6 @@ interface Store {
   setNav: (label: string, view: View) => void;
   setView: (v: View) => void;
 
-  query: string;
-  setQuery: (q: string) => void;
-
   courseId: string | null;
   openCourse: (id: string | null) => void;
 
@@ -298,6 +327,20 @@ interface Store {
 
   statusOf: (a: Assignment) => Status;
   setStatus: (id: string, s: Status) => void;
+
+  /** The column a card belongs in, your own placements included. */
+  bucketOf: (a: Assignment) => Bucket;
+  /** Drop a card into a column and keep it there across syncs. */
+  moveTo: (id: string, to: Bucket) => void;
+
+  /**
+   * Whether a card belongs to the current week's board. Finished and past-due
+   * work is swept off every Sunday at 7pm — still searchable, still on the
+   * calendar, just no longer in the way.
+   */
+  onBoard: (a: Assignment) => boolean;
+  /** When each swept card left the board, keyed by assignment id. */
+  archived: Record<string, number>;
 
   courseById: (id: string) => Course | undefined;
   assignmentById: (id: string) => Assignment | undefined;
@@ -335,6 +378,27 @@ interface Store {
   msgRead: Record<string, boolean>;
   msgOpen: string | null;
   openMessage: (id: string) => void;
+  /** What you've typed back to a teacher, per thread. */
+  replyDrafts: Record<string, string>;
+  setReplyDraft: (id: string, v: string) => void;
+  /** Progress of a reply being typed into Schoology, per thread. */
+  replyState: Record<string, SubmitState>;
+  sendReply: (id: string) => Promise<void>;
+
+  /* composing a brand new conversation */
+  composing: boolean;
+  openCompose: (open: boolean) => void;
+  composeTo: Recipient[];
+  addRecipient: (person: Recipient) => void;
+  removeRecipient: (uid: string) => void;
+  composeSubject: string;
+  setComposeSubject: (v: string) => void;
+  composeBody: string;
+  setComposeBody: (v: string) => void;
+  /** Look a name up in Schoology's directory. */
+  findRecipients: (query: string) => Promise<Recipient[]>;
+  composeState: SubmitState;
+  sendNewMessage: () => Promise<void>;
 
   /* settings — name and photo persist on their own, not with the snapshot */
   studentName: string;
@@ -374,7 +438,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const [view, setView] = useState<View>("board");
   const [nav, setNavLabel] = useState("Assignments");
-  const [query, setQuery] = useState("");
   const [courseId, setCourseId] = useState<string | null>(null);
   const [assignmentId, setAssignmentId] = useState<string | null>(null);
 
@@ -397,6 +460,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const [customScores, setCustomScores] = useState<CustomScore[]>([]);
   const [msgRead, setMsgRead] = useState<Record<string, boolean>>({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [replyState, setReplyState] = useState<Record<string, SubmitState>>({});
+  const [archived, setArchived] = useState<Record<string, number>>({});
+  const [sweptAt, setSweptAt] = useState<number>(() => lastSundayReset());
+  const [composing, setComposing] = useState(false);
+  const [composeTo, setComposeTo] = useState<Recipient[]>([]);
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeState, setComposeState] = useState<SubmitState>({ phase: "idle" });
   const [msgOpen, setMsgOpen] = useState<string | null>(null);
 
   const [studentName, setStudentName] = useState("");
@@ -421,6 +493,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const profileReady = useRef(false);
   const cacheReady = useRef(false);
   const marksReady = useRef(false);
+  // Whatever a debounced write below hasn't flushed to disk yet — a closing
+  // window doesn't wait for the debounce, so these get flushed immediately
+  // on pagehide instead of losing whatever changed in the last 300ms.
+  const pendingMarksWrite = useRef<(() => void) | null>(null);
+  const pendingCacheWrite = useRef<(() => void) | null>(null);
 
   // Restore the last synced state before any network call, so a refresh shows
   // your real board immediately instead of sample data.
@@ -434,6 +511,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const marks = loadMarks();
     setStatusMap(marks.status);
     setBucketMap(marks.buckets);
+    setArchived(marks.archived);
+    setSweptAt(marks.sweptAt);
     setTimeTotals(marks.timeTotals);
     setCustomScores(marks.customScores);
     setSubmittedAt(marks.submittedAt);
@@ -477,18 +556,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       marksReady.current = true;
       return;
     }
-    const t = window.setTimeout(() => {
+    const write = () => {
       try {
         window.localStorage.setItem(
           MARKS_KEY,
-          JSON.stringify({ status, timeTotals, customScores, submittedAt, attempts, buckets })
+          JSON.stringify({
+            status,
+            timeTotals,
+            customScores,
+            submittedAt,
+            attempts,
+            buckets,
+            archived,
+            sweptAt,
+          })
         );
       } catch {
         /* quota or private mode — persistence is a nicety, not required */
       }
-    }, 300);
+      pendingMarksWrite.current = null;
+    };
+    pendingMarksWrite.current = write;
+    const t = window.setTimeout(write, 300);
     return () => window.clearTimeout(t);
-  }, [status, timeTotals, customScores, submittedAt, attempts, buckets]);
+  }, [status, timeTotals, customScores, submittedAt, attempts, buckets, archived, sweptAt]);
 
   // Cache the snapshot after hydration, so the initial demo state can't
   // overwrite a good saved board on first paint.
@@ -498,7 +589,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cacheReady.current = true;
       return;
     }
-    const t = window.setTimeout(() => {
+    const write = () => {
       try {
         window.localStorage.setItem(
           PERSIST_KEY,
@@ -507,9 +598,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } catch {
         /* quota or private mode — persistence is a nicety, not required */
       }
-    }, 300);
+      pendingCacheWrite.current = null;
+    };
+    pendingCacheWrite.current = write;
+    const t = window.setTimeout(write, 300);
     return () => window.clearTimeout(t);
   }, [snapshot, syncStats, studentName, demoMode]);
+
+  // A closing or backgrounded window doesn't wait for the 300ms debounce
+  // above — flush whatever's pending immediately so a mark made seconds
+  // before closing the tab (the exact moment a student is done for the
+  // night) doesn't silently lose the write.
+  useEffect(() => {
+    function flushPending() {
+      pendingMarksWrite.current?.();
+      pendingCacheWrite.current?.();
+    }
+    function onVisibility() {
+      if (document.visibilityState === "hidden") flushPending();
+    }
+    window.addEventListener("pagehide", flushPending);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushPending);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   /* ---- connection ---- */
 
@@ -651,6 +765,110 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setStatus = useCallback((id: string, s: Status) => {
     setStatusMap((prev) => ({ ...prev, [id]: s }));
   }, []);
+
+  /**
+   * Where a card actually sits: your placement first, then whatever the due
+   * date and estimator worked out. Work Schoology already has is the one thing
+   * you can't drag around — that column reports a fact, not a plan.
+   *
+   * A placement holds until you drag the card again or it lands back on the
+   * column its due date would have picked anyway (`moveTo` drops the override
+   * in that case). It does *not* get compared against the live due-date
+   * bucket to decide whether it's still "worth" honoring — `a.bucket` is
+   * recomputed fresh on every call, so it's never behind; a guard like that
+   * would fire the instant you dragged a card anywhere less urgent than where
+   * its due date already had it, undoing the drag before the next render.
+   */
+  const bucketOf = useCallback(
+    (a: Assignment): Bucket => {
+      if (a.bucket === "done") return "done";
+      return buckets[a.id] ?? a.bucket;
+    },
+    [buckets]
+  );
+
+  const moveTo = useCallback(
+    (id: string, to: Bucket) => {
+      const a = snapshot.assignments.find((item) => item.id === id);
+      // Schoology's word on what's turned in isn't ours to overrule.
+      if (!a || a.bucket === "done") return;
+
+      if (to === "done") {
+        setStatusMap((prev) => ({ ...prev, [id]: "done" }));
+        return;
+      }
+      // Dragging back out of Turned in un-ticks it, or it would land in a
+      // column and immediately filter itself back into Turned in.
+      setStatusMap((prev) => (prev[id] === "done" ? { ...prev, [id]: "todo" } : prev));
+      setBucketMap((prev) => {
+        // Back where it was derived to be: drop the override entirely, so the
+        // card resumes following its due date instead of pinning here forever.
+        if (to === a.bucket) {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        }
+        return prev[id] === to ? prev : { ...prev, [id]: to };
+      });
+    },
+    [snapshot.assignments]
+  );
+
+  /* ---- the Sunday sweep ---- */
+
+  /**
+   * Clear the week off the board every Sunday at 7pm.
+   *
+   * Only work that's finished or already past its due date goes. Anything
+   * still ahead of you stays exactly where it is — a project set on Thursday
+   * and due Monday must not vanish on Sunday evening, which is precisely when
+   * you need to see it.
+   *
+   * Nothing is deleted. Swept work stays in the snapshot and stays reachable
+   * through ⌘K and the calendar; it just stops crowding the week ahead.
+   */
+  const sweep = useCallback(() => {
+    const boundary = lastSundayReset();
+    if (sweptAt >= boundary) return;
+
+    const stale = snapshot.assignments.filter((a) => {
+      const finished = a.bucket === "done" || status[a.id] === "done";
+      const pastDue = a.dateOffset !== null && a.dateOffset < 0;
+      return finished || pastDue;
+    });
+
+    if (stale.length) {
+      const at = Date.now();
+      setArchived((prev) => {
+        const next = { ...prev };
+        for (const a of stale) if (!(a.id in next)) next[a.id] = at;
+        return next;
+      });
+    }
+    // Recorded even when nothing needed clearing, so a quiet week doesn't
+    // leave the app re-checking the same boundary forever.
+    setSweptAt(boundary);
+  }, [snapshot.assignments, status, sweptAt]);
+
+  /*
+   * Checked on a timer rather than scheduled for 7pm exactly: a laptop that
+   * was asleep, or an app that wasn't running, would miss a one-shot timer,
+   * and `lastSundayReset` already answers "has the boundary passed?" from
+   * nothing but the clock.
+   */
+  useEffect(() => {
+    if (!snapshot.assignments.length) return;
+    const t = window.setTimeout(sweep, 0);
+    const i = window.setInterval(sweep, 60_000);
+    return () => {
+      window.clearTimeout(t);
+      window.clearInterval(i);
+    };
+  }, [sweep, snapshot.assignments.length]);
+
+  /** Is this card still part of the current week's board? */
+  const onBoard = useCallback((a: Assignment) => !(a.id in archived), [archived]);
 
   /* ---- navigation ---- */
 
@@ -837,15 +1055,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       const q = a.assessment;
       if (q) {
-        // Refusing to open a closed or LockDown assessment isn't Slates' call —
-        // but starting the companion clock for one would be misleading, since
-        // no attempt can actually begin.
+        /*
+         * A LockDown assessment opens — on Schoology's own page, in the real
+         * browser, which is where Respondus hands off to the proctored app.
+         * It used to dead-end in an error here, which helped nobody: the
+         * student still had to go find it themselves.
+         *
+         * What it deliberately does *not* do is open in Slates' streamed
+         * viewer. That viewer exists so ordinary work can be done without
+         * leaving the app; a proctored exam is proctored on purpose, and
+         * putting it behind a screenshare with an AI tutor a keystroke away
+         * would defeat exactly the control the teacher chose. The scraper
+         * refuses that server-side too — this is not a check the UI can lift.
+         */
         if (q.lockdown) {
           mark(id, {
-            phase: "error",
-            message:
-              "This assessment requires Respondus LockDown Browser. It can't run in Slates or a normal browser — open it from LockDown Browser.",
+            phase: "idle",
+            message: "Opening on Schoology — LockDown Browser takes it from there.",
           });
+          window.open(a.url, "_blank", "noopener,noreferrer");
           return;
         }
         if (!q.open) {
@@ -934,6 +1162,161 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setMsgRead((prev) => ({ ...prev, [id]: true }));
   }, []);
 
+  const setReplyDraft = useCallback((id: string, v: string) => {
+    setReplyDrafts((prev) => ({ ...prev, [id]: v }));
+  }, []);
+
+  /**
+   * Send a reply to a teacher, through Schoology's own message form.
+   *
+   * Same contract as handing work in: the scraper drives the real form and
+   * reports each stage, and nothing is claimed to have been sent until
+   * Schoology shows the reply back in the thread.
+   */
+  const sendReply = useCallback(
+    async (id: string) => {
+      const body = (replyDrafts[id] ?? "").trim();
+      if (!body) return;
+
+      const startedAt = Date.now();
+      const markReply = (next: SubmitState) => setReplyState((prev) => ({ ...prev, [id]: next }));
+      markReply({ phase: "submitting", step: "Opening the conversation", startedAt });
+
+      try {
+        const res = await fetch("/api/messages/reply", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId: id, body }),
+        });
+
+        const out = await readSubmitStream(res, (event) => {
+          if (event.type !== "step") return;
+          markReply({
+            phase: event.step === "verify" ? "verifying" : "submitting",
+            step: event.label,
+            startedAt,
+          });
+        });
+        if (!res.ok) throw new Error(out.error ?? "Couldn't send that reply.");
+        if (out.error) throw new Error(out.error);
+
+        if (!out.verified) {
+          markReply({
+            phase: "error",
+            message:
+              out.message ??
+              "Slates lost contact before Schoology confirmed this. Open the conversation to check.",
+          });
+          return;
+        }
+
+        markReply({ phase: "done", message: out.message });
+        setReplyDrafts((prev) => ({ ...prev, [id]: "" }));
+        /*
+         * Show the reply in the thread straight away. The next sync replaces
+         * this with Schoology's own copy — the scraper drops the thread from
+         * its body cache on the way out, so that re-read actually happens.
+         */
+        setSnapshot((prev) => ({
+          ...prev,
+          messages: prev.messages.map((m) =>
+            m.id === id ? { ...m, body: `${m.body}\n\n---\n\n${body}` } : m
+          ),
+        }));
+        void syncScraper(true);
+      } catch (e) {
+        markReply({
+          phase: "error",
+          message: e instanceof Error ? e.message : "Couldn't send that reply.",
+        });
+      }
+    },
+    [replyDrafts, syncScraper]
+  );
+
+  /* ---- a new conversation ---- */
+
+  const openCompose = useCallback((open: boolean) => {
+    setComposing(open);
+    // Leaving compose clears the outcome banner, never the draft — a failed
+    // send should still have your words in it when you come back.
+    if (!open) setComposeState({ phase: "idle" });
+  }, []);
+
+  const addRecipient = useCallback((person: Recipient) => {
+    setComposeTo((prev) => (prev.some((p) => p.uid === person.uid) ? prev : [...prev, person]));
+  }, []);
+
+  const removeRecipient = useCallback((uid: string) => {
+    setComposeTo((prev) => prev.filter((p) => p.uid !== uid));
+  }, []);
+
+  const findRecipients = useCallback(async (query: string): Promise<Recipient[]> => {
+    if (query.trim().length < 2) return [];
+    const res = await fetch(`/api/messages/recipients?q=${encodeURIComponent(query)}`, {
+      cache: "no-store",
+    });
+    const body = (await res.json().catch(() => ({}))) as { people?: Recipient[]; error?: string };
+    if (!res.ok) throw new Error(body.error ?? "Couldn't reach Schoology's directory.");
+    return body.people ?? [];
+  }, []);
+
+  /**
+   * Send a brand new message.
+   *
+   * Recipients are passed back exactly as Schoology's directory returned them
+   * — the scraper re-checks the form is addressed to those people and no one
+   * else before it presses Send.
+   */
+  const sendNewMessage = useCallback(async () => {
+    const subject = composeSubject.trim();
+    const body = composeBody.trim();
+    if (!composeTo.length || !subject || !body) return;
+
+    const startedAt = Date.now();
+    setComposeState({ phase: "submitting", step: "Opening a new message", startedAt });
+    try {
+      const res = await fetch("/api/messages/compose", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recipients: composeTo, subject, body }),
+      });
+
+      const out = await readSubmitStream(res, (event) => {
+        if (event.type !== "step") return;
+        setComposeState({
+          phase: event.step === "verify" ? "verifying" : "submitting",
+          step: event.label,
+          startedAt,
+        });
+      });
+      if (!res.ok) throw new Error(out.error ?? "Couldn't send that message.");
+      if (out.error) throw new Error(out.error);
+
+      if (!out.verified) {
+        setComposeState({
+          phase: "error",
+          message:
+            out.message ??
+            "Slates lost contact before Schoology confirmed this. Check your sent messages.",
+        });
+        return;
+      }
+
+      setComposeState({ phase: "done", message: out.message });
+      setComposeTo([]);
+      setComposeSubject("");
+      setComposeBody("");
+      // The inbox has a thread it didn't have a moment ago.
+      void syncScraper(true);
+    } catch (e) {
+      setComposeState({
+        phase: "error",
+        message: e instanceof Error ? e.message : "Couldn't send that message.",
+      });
+    }
+  }, [composeBody, composeSubject, composeTo, syncScraper]);
+
   /* ---- timers ---- */
 
   /**
@@ -978,14 +1361,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       nav,
       setNav,
       setView,
-      query,
-      setQuery,
       courseId,
       openCourse,
       assignmentId,
       openAssignment,
       statusOf,
       setStatus,
+      bucketOf,
+      moveTo,
+      onBoard,
+      archived,
       courseById,
       assignmentById,
       text,
@@ -1014,6 +1399,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       msgRead,
       msgOpen,
       openMessage,
+      replyDrafts,
+      setReplyDraft,
+      replyState,
+      sendReply,
+      composing,
+      openCompose,
+      composeTo,
+      addRecipient,
+      removeRecipient,
+      composeSubject,
+      setComposeSubject,
+      composeBody,
+      setComposeBody,
+      findRecipients,
+      composeState,
+      sendNewMessage,
       studentName,
       setStudentName,
       avatar,
@@ -1030,12 +1431,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       snapshot, demoMode, connected, connecting, syncError, syncStats, resync,
       syncScraper,
       connect, disconnect,
-      view, nav, setNav, query, courseId, openCourse, assignmentId,
-      openAssignment, statusOf, setStatus, courseById, assignmentById, text,
+      view, nav, setNav, courseId, openCourse, assignmentId,
+      openAssignment, statusOf, setStatus, bucketOf, moveTo, onBoard, archived,
+      courseById, assignmentById, text,
       setText, files, addFiles, removeFile, submittedAt, draftSavedAt,
       submitState, saveDraft, turnIn, unsubmit, openOverlay, attempts, startClock, clearAttempt, localComments,
       commentDraft, setCommentDraft, addComment, customScores, addScore,
-      removeScore, projectionFor, msgRead, msgOpen, openMessage, studentName,
+      removeScore, projectionFor, msgRead, msgOpen, openMessage,
+      replyDrafts, setReplyDraft, replyState, sendReply,
+      composing, openCompose, composeTo, addRecipient, removeRecipient,
+      composeSubject, composeBody, findRecipients, composeState, sendNewMessage,
+      studentName,
       avatar, notifPush, notifDigest, timeTotals, activeTimer, toggleTimer,
     ]
   );

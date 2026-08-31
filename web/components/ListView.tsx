@@ -6,14 +6,10 @@ import { Badge } from "./ui";
 
 export default function ListView() {
   const s = useStore();
-  const q = s.query.trim().toLowerCase();
 
-  const tonight = s.snapshot.assignments.filter((a) => {
-    if (a.bucket !== "tonight" || s.statusOf(a) === "done") return false;
-    if (!q) return true;
-    const c = s.courseById(a.courseId);
-    return a.title.toLowerCase().includes(q) || (c?.short.toLowerCase().includes(q) ?? false);
-  });
+  const tonight = s.snapshot.assignments.filter(
+    (a) => s.bucketOf(a) === "tonight" && s.statusOf(a) !== "done"
+  );
 
   return (
     <div className="scroll centered">

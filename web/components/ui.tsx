@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import type { HistoryPoint, Tone } from "@/lib/types";
 
 export function Badge({
@@ -67,6 +67,7 @@ export const ICON = {
   assignments:
     "M4 2h16v2H4zm0 18h16v2H4zM4 4h2v16H4zm14 0h2v16h-2zM8 7h8v2H8zm0 4h8v2H8zm0 4h5v2H8z",
   tonight: "M20.5 13.2A8.6 8.6 0 1 1 10.8 3.5a6.9 6.9 0 0 0 9.7 9.7z",
+  classes: "M12 2 1 7.5 12 13l11-5.5zm0 2.2 6.6 3.3L12 10.8 5.4 7.5zM3.6 11.1 1 12.4l11 5.5 11-5.5-2.6-1.3L12 15.4zm0 4.5L1 16.9l11 5.5 11-5.5-2.6-1.3L12 19.9z",
   grades: "M4 18h2v4H4zm5-6h2v10H9zm5-6h2v16h-2zm5-4h2v20h-2z",
   calendar: "M7 2h2v3H7V2zm8 0h2v3h-2V2zM3 6h18v15H3V6zm2 4v9h14v-9H5zm2 2h3v3H7v-3z",
   tutor: "M20 2H4v2h16zm0 14H6v2h14zm2-12h-2v12h2zM4 4H2v18h2zm2 14H4v2h2z",
@@ -77,6 +78,7 @@ export const ICON = {
   chevronLeft: "M15 6l-6 6 6 6z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   file: "M6 2h9l5 5v15H6zm8 1.5V8h4.5z",
+  folder: "M2 4h7l2 2h11v14H2zm2 2v2h16v-.01L10.2 8 8.2 6zm0 4v8h16v-8z",
   sync: "M16 4h2v6h-2zm-2-2h2v2h-2zm0 2h2v8h-2zM4 8H2v5h2z",
   sync2: "M4 6h16v2H4zm4 14H6v-6h2zm2 2H8v-2h2zm0-2H8v-8h2zm10-4h2v-5h-2z",
   sync3: "M20 18H4v-2h16z",
@@ -109,7 +111,7 @@ export function Icon({
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      style={{ width: size, height: size, flexShrink: 0, ...style }}
+      style={{ display: "block", width: size, height: size, flexShrink: 0, ...style }}
       aria-hidden
     >
       {paths.map((d, i) => (
@@ -125,7 +127,7 @@ function BrandMark({ d, size, style }: { d: string; size: number; style?: CSSPro
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      style={{ width: size, height: size, flexShrink: 0, ...style }}
+      style={{ display: "block", width: size, height: size, flexShrink: 0, ...style }}
       aria-hidden
     >
       <path fill="currentColor" d={d} />
@@ -213,6 +215,16 @@ export function GeminiLogo({ size = 14, style }: { size?: number; style?: CSSPro
   );
 }
 
+export function MiniMaxLogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {
+  return (
+    <BrandMark
+      size={size}
+      style={style}
+      d="M11.43 3.92a.86.86 0 1 0-1.718 0v14.236a1.999 1.999 0 0 1-3.997 0V9.022a.86.86 0 1 0-1.718 0v3.87a1.999 1.999 0 0 1-3.997 0V11.49a.57.57 0 0 1 1.139 0v1.404a.86.86 0 0 0 1.719 0V9.022a1.999 1.999 0 0 1 3.997 0v9.134a.86.86 0 0 0 1.719 0V3.92a1.998 1.998 0 1 1 3.996 0v11.788a.57.57 0 1 1-1.139 0zm10.572 3.105a2 2 0 0 0-1.999 1.997v7.63a.86.86 0 0 1-1.718 0V3.923a1.999 1.999 0 0 0-3.997 0v16.16a.86.86 0 0 1-1.719 0V18.08a.57.57 0 1 0-1.138 0v2a1.998 1.998 0 0 0 3.996 0V3.92a.86.86 0 0 1 1.719 0v12.73a1.999 1.999 0 0 0 3.996 0V9.023a.86.86 0 1 1 1.72 0v6.686a.57.57 0 0 0 1.138 0V9.022a2 2 0 0 0-1.998-1.997"
+    />
+  );
+}
+
 export function SearchIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
@@ -250,9 +262,11 @@ export function LineChart({
   points,
   color,
 }: {
-  points: HistoryPoint[];
+  points: Array<HistoryPoint & { title?: string; delta?: number }>;
   color: string;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
+
   if (!points.length) return null;
 
   const W = 760;
@@ -270,6 +284,18 @@ export function LineChart({
     .map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`)
     .join(" ");
   const area = `${line} L${x(points.length - 1).toFixed(1)},${H - pad} L${x(0).toFixed(1)},${H - pad} Z`;
+
+  // Past ~10 assignments, per-point date/value text overlaps into noise —
+  // hovering a dot shows the same information without the clutter.
+  const dense = points.length > 10;
+  const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+  const active = hover !== null ? points[hover] : null;
+  const tipW = 210;
+  const tipH = active?.title ? 46 : 28;
+  const tipX = active ? Math.min(Math.max(x(hover!) - tipW / 2, 4), W - tipW - 4) : 0;
+  const aboveFits = active ? y(active.v) - tipH - 16 > 0 : false;
+  const tipY = active ? (aboveFits ? y(active.v) - tipH - 12 : y(active.v) + 12) : 0;
 
   return (
     <svg
@@ -297,41 +323,57 @@ export function LineChart({
         strokeLinecap="round"
       />
       {points.map((p, i) => (
+        <circle key={`c${i}`} cx={x(i)} cy={y(p.v)} r={dense ? 2.5 : 3.5} fill="var(--surface)" stroke={color} strokeWidth={2} />
+      ))}
+      {!dense &&
+        points.map((p, i) => (
+          <text key={`t${i}`} x={x(i)} y={H - 6} textAnchor="middle" fill="var(--muted)" fontSize={11}>
+            {p.d}
+          </text>
+        ))}
+      {!dense &&
+        points.map((p, i) => (
+          <text key={`v${i}`} x={x(i)} y={y(p.v) - 10} textAnchor="middle" fill="var(--text-2)" fontSize={11} fontWeight={600}>
+            {p.v}%
+          </text>
+        ))}
+      {/* Invisible, larger hit targets — the visible dots are too small to hover reliably. */}
+      {points.map((p, i) => (
         <circle
-          key={`c${i}`}
+          key={`h${i}`}
           cx={x(i)}
           cy={y(p.v)}
-          r={3.5}
-          fill="var(--surface)"
-          stroke={color}
-          strokeWidth={2}
+          r={10}
+          fill="transparent"
+          onMouseEnter={() => setHover(i)}
+          onMouseLeave={() => setHover((h) => (h === i ? null : h))}
         />
       ))}
-      {points.map((p, i) => (
-        <text
-          key={`t${i}`}
-          x={x(i)}
-          y={H - 6}
-          textAnchor="middle"
-          fill="var(--muted)"
-          fontSize={11}
-        >
-          {p.d}
-        </text>
-      ))}
-      {points.map((p, i) => (
-        <text
-          key={`v${i}`}
-          x={x(i)}
-          y={y(p.v) - 10}
-          textAnchor="middle"
-          fill="var(--text-2)"
-          fontSize={11}
-          fontWeight={600}
-        >
-          {p.v}%
-        </text>
-      ))}
+      {active && (
+        <g pointerEvents="none">
+          <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={8} fill="var(--surface)" stroke="var(--line)" />
+          {active.title ? (
+            <>
+              <text x={tipX + 10} y={tipY + 18} fontSize={11} fontWeight={600} fill="var(--text)">
+                {truncate(active.title.replace(/\s*\([^)]*\)\s*$/, ""), 30)}
+              </text>
+              <text
+                x={tipX + 10}
+                y={tipY + 34}
+                fontSize={11}
+                fontWeight={600}
+                fill={(active.delta ?? 0) > 0 ? "var(--good)" : (active.delta ?? 0) < 0 ? "var(--bad)" : "var(--muted)"}
+              >
+                {active.v}% {active.delta ? `(${active.delta > 0 ? "+" : ""}${active.delta}%)` : ""}
+              </text>
+            </>
+          ) : (
+            <text x={tipX + 10} y={tipY + 18} fontSize={11} fontWeight={600} fill="var(--text)">
+              {active.d}: {active.v}%
+            </text>
+          )}
+        </g>
+      )}
     </svg>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { fmtClock } from "@/lib/format";
 import { Badge, Icon, ICON } from "./ui";
+import QuestionReview from "./QuestionReview";
 import SchoologyFrame from "./SchoologyFrame";
 import type { Assignment } from "@/lib/types";
 
@@ -26,6 +27,7 @@ export default function AssessmentPanel({ a }: { a: Assignment }) {
   const running = Boolean(startedAt && limitMs);
 
   const [embedded, setEmbedded] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   // Only tick while a countdown is actually on screen.
   const [now, setNow] = useState(() => Date.now());
@@ -37,6 +39,7 @@ export default function AssessmentPanel({ a }: { a: Assignment }) {
 
   if (!q) return null;
 
+  const handedIn = (q.attempts ?? []).filter((t) => t.completed);
   const remaining = running ? Math.max(0, startedAt + limitMs - now) : 0;
   const expired = running && remaining === 0;
 
@@ -44,7 +47,9 @@ export default function AssessmentPanel({ a }: { a: Assignment }) {
   const blocker = q.lockdown
     ? {
         title: "Needs LockDown Browser",
-        body: "Your teacher requires Respondus LockDown Browser for this one. It can't run in Slates or in a normal browser tab — open it from LockDown Browser instead.",
+        body: "Your teacher is proctoring this one with Respondus LockDown Browser, so it can't run inside Slates. Opening it sends you to Schoology in your normal browser, where LockDown Browser takes over.",
+        /* The one thing Slates can usefully do here: get you to the launcher. */
+        open: true,
       }
     : !q.open
       ? {
@@ -147,14 +152,57 @@ export default function AssessmentPanel({ a }: { a: Assignment }) {
         </div>
       )}
 
+      {/*
+        * Attempts you've already handed in. These come straight from the
+        * snapshot — Schoology lists them in the same config the time limit and
+        * attempt count are read from — so the history costs nothing to show.
+        * Only the per-question marks behind it need fetching.
+        */}
+      {handedIn.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="section-label">
+              {handedIn.length === 1 ? "Your attempt" : `Your ${handedIn.length} attempts`}
+            </span>
+            <span style={{ flex: 1, fontSize: 12, color: "var(--muted)" }}>
+              {handedIn.map((t) => `#${t.n} · ${t.modified}`).join("   ")}
+            </span>
+            <button
+              type="button"
+              className="btn btn--quiet"
+              style={{ height: 26, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+              onClick={() => setReviewing((r) => !r)}
+            >
+              {reviewing ? "Hide breakdown" : "Question breakdown"}
+            </button>
+          </div>
+          {reviewing && <QuestionReview url={a.url} />}
+        </div>
+      )}
+
       {blocker ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-            {blocker.title}
-          </span>
-          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-2)" }}>
-            {blocker.body}
-          </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+              {blocker.title}
+            </span>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-2)" }}>
+              {blocker.body}
+            </p>
+          </div>
+          {blocker.open && (
+            <div>
+              <button
+                type="button"
+                className="btn"
+                style={{ height: 36 }}
+                onClick={() => void s.openOverlay(a.id)}
+              >
+                <Icon path={ICON.external} size={14} />
+                Open on Schoology
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -196,6 +244,8 @@ export default function AssessmentPanel({ a }: { a: Assignment }) {
       {embedded && (
         <SchoologyFrame
           url={a.url}
+          startedAt={startedAt}
+          timeLimitMin={q.timeLimitMin}
           onClose={() => setEmbedded(false)}
           onFinished={() => {
             // Schoology took the attempt — stop the companion clock and tick it

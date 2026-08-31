@@ -5,7 +5,11 @@ import Image from "next/image";
 
 import { readAttachment, toTutorMessageParts, type Attachment } from "@/lib/attachments";
 import { useStore } from "@/lib/store";
-import { useTutorModel } from "@/lib/use-tutor-model";
+import { describeTutorAction, parseTutorActions, stripTutorActions } from "@/lib/tutor-actions";
+import { buildTutorContext } from "@/lib/tutor-context";
+import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-models";
+import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
+import AITextLoading from "./AITextLoading";
 import ModelPicker from "./ModelPicker";
 import { Icon, ICON } from "./ui";
 
@@ -14,6 +18,8 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   attachments?: Attachment[];
+  /** Human-readable summaries of any board actions this reply took. */
+  actions?: string[];
 }
 
 const ACCEPTED_FILE_TYPES =
@@ -32,10 +38,13 @@ export default function TutorView() {
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useTutorModel();
+  const [effort, setEffort] = useTutorThinking();
   const [pending, setPending] = useState<Attachment[]>([]);
   const [reading, setReading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const canAttach = tutorModelSupportsAttachments(model);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setReading(true);
@@ -54,22 +63,48 @@ export default function TutorView() {
     setPending((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  const handleModelChange = useCallback(
+    (id: TutorModelId) => {
+      setModel(id);
+      // Dropping to a model that takes no attachments clears anything queued.
+      if (!tutorModelSupportsAttachments(id)) setPending([]);
+    },
+    [setModel]
+  );
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, thinking]);
 
-  /** One line per course, so the tutor can reference real work. */
-  const buildContext = useCallback(() => {
-    return s.snapshot.courses
-      .map((c) => {
-        const open = s.snapshot.assignments.filter(
-          (a) => a.courseId === c.id && s.statusOf(a) !== "done"
-        );
-        const list = open.map((a) => a.title).join("; ") || "nothing due";
-        return `${c.name}: ${c.grade} (${c.letter}), ${open.length} open — ${list}`;
-      })
-      .join("\n");
-  }, [s]);
+  /** Every course, every assignment, every submission and grade — see lib/tutor-context.ts. */
+  const buildContext = useCallback(() => buildTutorContext(s), [s]);
+
+  /** Runs a board action the tutor asked for, returning what changed (or null if it couldn't). */
+  const applyAction = useCallback(
+    (action: ReturnType<typeof parseTutorActions>["actions"][number]) => {
+      const a = s.assignmentById(action.id);
+      if (!a) return null;
+      switch (action.kind) {
+        case "mark_done":
+          s.setStatus(action.id, "done");
+          break;
+        case "mark_active":
+          s.setStatus(action.id, "active");
+          break;
+        case "mark_todo":
+          s.setStatus(action.id, "todo");
+          break;
+        case "move_bucket":
+          s.moveTo(action.id, action.bucket);
+          break;
+        case "toggle_timer":
+          void s.toggleTimer(action.id);
+          break;
+      }
+      return describeTutorAction(action, a.title);
+    },
+    [s]
+  );
 
   const send = useCallback(
     async (raw?: string) => {
@@ -106,6 +141,7 @@ export default function TutorView() {
             context: buildContext(),
             studentName: s.studentName || undefined,
             model,
+            thinking: effort,
           }),
         });
 
@@ -121,12 +157,20 @@ export default function TutorView() {
           const { done, value } = await reader.read();
           if (done) break;
           acc += decoder.decode(value, { stream: true });
+          // Action tags are stripped as they stream in so the student never sees the raw syntax.
+          const shown = stripTutorActions(acc);
           setMessages((prev) =>
-            prev.map((m) => (m.id === replyId ? { ...m, text: acc } : m))
+            prev.map((m) => (m.id === replyId ? { ...m, text: shown } : m))
           );
         }
 
         if (!acc.trim()) throw new Error("Empty response from tutor.");
+
+        const { clean, actions } = parseTutorActions(acc);
+        const applied = actions.map(applyAction).filter((a): a is string => a !== null);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === replyId ? { ...m, text: clean, actions: applied } : m))
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
         // Drop the empty assistant bubble so the thread doesn't show a blank.
@@ -135,7 +179,7 @@ export default function TutorView() {
         setThinking(false);
       }
     },
-    [buildContext, draft, messages, model, pending, s.studentName, thinking]
+    [applyAction, buildContext, draft, effort, messages, model, pending, s.studentName, thinking]
   );
 
   const empty = messages.length === 0;
@@ -156,7 +200,7 @@ export default function TutorView() {
         <div
           style={{
             width: "100%",
-            maxWidth: 760,
+            maxWidth: 1040,
             display: "flex",
             flexDirection: "column",
             gap: 12,
@@ -261,6 +305,25 @@ export default function TutorView() {
                   </div>
                 )}
                 {m.text}
+                {m.actions && m.actions.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: m.text ? 10 : 0 }}>
+                    {m.actions.map((label, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 12,
+                          color: "var(--good)",
+                        }}
+                      >
+                        <Icon path={ICON.check} size={12} />
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -305,7 +368,7 @@ export default function TutorView() {
         <div
           style={{
             width: "100%",
-            maxWidth: 760,
+            maxWidth: 1040,
             display: "flex",
             flexDirection: "column",
             gap: 6,
@@ -318,7 +381,7 @@ export default function TutorView() {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+            if (canAttach && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
           }}
         >
           {pending.length > 0 && (
@@ -340,7 +403,7 @@ export default function TutorView() {
             }}
             onPaste={(e) => {
               const files = Array.from(e.clipboardData.files);
-              if (files.length) addFiles(files);
+              if (canAttach && files.length) addFiles(files);
             }}
             rows={1}
             placeholder="Ask your tutor"
@@ -348,40 +411,49 @@ export default function TutorView() {
             className="bare-field bare-field--chat"
           />
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ACCEPTED_FILE_TYPES}
-              onChange={(e) => {
-                if (e.target.files?.length) addFiles(e.target.files);
-                e.target.value = "";
-              }}
-              style={{ display: "none" }}
+            {canAttach && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={ACCEPTED_FILE_TYPES}
+                  onChange={(e) => {
+                    if (e.target.files?.length) addFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                  style={{ display: "none" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Add photos or files"
+                  disabled={reading}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 30,
+                    height: 30,
+                    flexShrink: 0,
+                    borderRadius: 9999,
+                    border: "1px solid var(--line)",
+                    background: "transparent",
+                    color: "var(--text-2)",
+                    cursor: "pointer",
+                    opacity: reading ? 0.5 : 1,
+                  }}
+                >
+                  <Icon path={ICON.plus} size={15} />
+                </button>
+              </>
+            )}
+            <ModelPicker
+              value={model}
+              onChange={handleModelChange}
+              thinking={effort}
+              onThinkingChange={setEffort}
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Add photos or files"
-              disabled={reading}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 30,
-                height: 30,
-                flexShrink: 0,
-                borderRadius: 9999,
-                border: "1px solid var(--line)",
-                background: "transparent",
-                color: "var(--text-2)",
-                cursor: "pointer",
-                opacity: reading ? 0.5 : 1,
-              }}
-            >
-              <Icon path={ICON.plus} size={15} />
-            </button>
-            <ModelPicker value={model} onChange={setModel} />
             <span style={{ flex: 1 }} />
             <button
               type="button"

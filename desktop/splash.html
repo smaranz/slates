@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slates</title>
+    <!--
+      The window you see while the stack comes up.
+
+      Slates is three processes and a cold Schoology scrape, which from a
+      standing start is the better part of a minute. Until now the app showed
+      nothing at all for that whole stretch — the dock icon bounced and the
+      window only appeared once the portal answered, which reads as a hang.
+
+      Self-contained on purpose: no fonts, images or scripts to fetch, because
+      at this point the local servers this would fetch them from are the very
+      things still starting. main.mjs drives it by calling window.slatesBoot.
+    -->
+    <style>
+      :root {
+        --bg: oklch(0.26 0 0);
+        --surface: oklch(0.301 0 0);
+        --line: oklch(1 0 0 / 0.07);
+        --text: oklch(0.907 0 0);
+        --muted: oklch(0.683 0 0);
+        --faint: oklch(0.48 0 0);
+        --good: oklch(0.82 0.15 145);
+        --bad: oklch(0.78 0.18 25);
+        --font: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        /* The whole surface drags the window — there is no title bar yet. */
+        -webkit-app-region: drag;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      .mark {
+        width: 46px;
+        height: 46px;
+        color: var(--text);
+        animation: breathe 2.4s ease-in-out infinite;
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          opacity: 0.55;
+          transform: translateY(0) rotate(-8deg);
+        }
+        50% {
+          opacity: 1;
+          transform: translateY(-4px) rotate(-8deg);
+        }
+      }
+
+      .title {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .steps {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        width: 290px;
+        padding: 10px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 8px 24px oklch(0 0 0 / 0.3);
+      }
+
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 6px 8px;
+        border-radius: 10px;
+        font-size: 12.5px;
+        color: var(--faint);
+        transition: color 200ms ease, background-color 200ms ease;
+      }
+
+      .step[data-state="active"] {
+        color: var(--text);
+        background: oklch(1 0 0 / 0.04);
+      }
+
+      .step[data-state="done"] {
+        color: var(--muted);
+      }
+
+      .step[data-state="failed"] {
+        color: var(--bad);
+      }
+
+      /* One 14px slot for every state, so nothing shifts as steps advance. */
+      .glyph {
+        display: flex;
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 9999px;
+        background: currentColor;
+        opacity: 0.5;
+      }
+
+      .spinner {
+        width: 13px;
+        height: 13px;
+        animation: spin 0.9s linear infinite;
+      }
+
+      .spinner circle {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-dasharray: 34;
+        stroke-dashoffset: 24;
+        opacity: 0.9;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .tick {
+        width: 13px;
+        height: 13px;
+        color: var(--good);
+      }
+
+      .note {
+        min-height: 16px;
+        font-size: 11.5px;
+        color: var(--faint);
+        text-align: center;
+        max-width: 340px;
+        line-height: 1.45;
+      }
+
+      .bar {
+        position: relative;
+        width: 290px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 9999px;
+        background: oklch(1 0 0 / 0.06);
+      }
+
+      .bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 38%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, transparent, var(--muted), transparent);
+        animation: sweep 1.5s ease-in-out infinite;
+      }
+
+      @keyframes sweep {
+        from {
+          transform: translateX(-110%);
+        }
+        to {
+          transform: translateX(370%);
+        }
+      }
+
+      body[data-done="1"] .bar::after {
+        animation: none;
+        width: 100%;
+        background: var(--good);
+        opacity: 0.55;
+      }
+
+      body[data-failed="1"] .bar::after {
+        animation: none;
+        width: 100%;
+        background: var(--bad);
+        opacity: 0.6;
+      }
+
+      /* Respect the system setting — this thing loops for up to a minute. */
+      @media (prefers-reduced-motion: reduce) {
+        .mark,
+        .spinner,
+        .bar::after {
+          animation-duration: 4s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M17.5 8.5v7.75a5.5 5.5 0 0 1-11 0V7.25a3.75 3.75 0 0 1 7.5 0v8.5a2 2 0 0 1-4 0V8.5"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+
+    <div class="title">Starting Slates</div>
+
+    <div class="steps" id="steps" role="status" aria-live="polite"></div>
+    <div class="bar"></div>
+    <p class="note" id="note">This takes a moment on a cold start.</p>
+
+    <script>
+      (() => {
+        const stepsEl = document.getElementById("steps");
+        const noteEl = document.getElementById("note");
+        const rows = new Map();
+
+        const SPINNER = '<svg class="spinner" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>';
+        const TICK =
+          '<svg class="tick" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        const DOT = '<span class="dot"></span>';
+
+        function glyphFor(state) {
+          if (state === "active") return SPINNER;
+          if (state === "done") return TICK;
+          if (state === "failed")
+            return '<svg class="tick" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+          return DOT;
+        }
+
+        function row(id, label) {
+          let el = rows.get(id);
+          if (!el) {
+            el = document.createElement("div");
+            el.className = "step";
+            el.dataset.state = "waiting";
+            el.innerHTML = `<span class="glyph"></span><span class="label"></span>`;
+            stepsEl.appendChild(el);
+            rows.set(id, el);
+          }
+          if (label) el.querySelector(".label").textContent = label;
+          return el;
+        }
+
+        window.slatesBoot = {
+          /** Add or update one step. `state` is waiting | active | done | failed. */
+          step(id, label, state) {
+            const el = row(id, label);
+            el.dataset.state = state || "active";
+            el.querySelector(".glyph").innerHTML = glyphFor(el.dataset.state);
+          },
+          note(text) {
+            noteEl.textContent = text || "";
+          },
+          done() {
+            document.body.dataset.done = "1";
+            noteEl.textContent = "Ready.";
+          },
+          failed(message) {
+            document.body.dataset.failed = "1";
+            noteEl.textContent = message || "Something didn't start.";
+          },
+        };
+      })();
+    </script>
+  </body>
+</html>

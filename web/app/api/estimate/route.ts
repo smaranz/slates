@@ -9,6 +9,7 @@ interface EstimateResponse {
     minutes: number;
     impact: "high" | "medium" | "low";
     impactNote: string;
+    place: "tonight" | "tomorrow" | "later";
   }>;
 }
 
@@ -19,6 +20,7 @@ interface EstimateRequest {
     brief?: string;
     kind?: string;
     due?: string;
+    dueInDays?: number | null;
     course?: string;
   }>;
 }
@@ -37,8 +39,9 @@ const estimateSchema = jsonSchema<EstimateResponse>({
           minutes: { type: "number", minimum: 5, maximum: 480 },
           impact: { type: "string", enum: ["high", "medium", "low"] },
           impactNote: { type: "string", maxLength: 160 },
+          place: { type: "string", enum: ["tonight", "tomorrow", "later"] },
         },
-        required: ["id", "minutes", "impact", "impactNote"],
+        required: ["id", "minutes", "impact", "impactNote", "place"],
       },
     },
   },
@@ -56,6 +59,9 @@ export async function POST(req: Request) {
       brief: String(item.brief ?? "").slice(0, 4_000),
       kind: String(item.kind ?? "assignment").slice(0, 50),
       due: String(item.due ?? "Unknown").slice(0, 150),
+      // Whole days from today, so the model never has to do date arithmetic
+      // off a prose due string. Negative means overdue.
+      dueInDays: typeof item.dueInDays === "number" ? item.dueInDays : null,
       course: String(item.course ?? "Unknown course").slice(0, 200),
     }));
 
@@ -73,6 +79,20 @@ export async function POST(req: Request) {
       "Minutes should be realistic total focused work time, rounded to the nearest 5.",
       "Impact is urgency/grade significance: high, medium, or low.",
       "Keep impactNote to one short, specific reason.",
+      "",
+      "Also decide `place`: when the student should sit down and do this, which is not the same as when it is due.",
+      "dueInDays is whole days from today — 0 is due today, 1 is due tomorrow, negative is overdue.",
+      "tonight: it needs real work at home before the next school day, or it is overdue.",
+      "tomorrow: nothing has to happen at home tonight, but it is not far off either.",
+      "later: it is several days out, or there is nothing to prepare at all.",
+      "",
+      "Work the class does together during the period is 'tomorrow', even when it is due tomorrow:",
+      "in-class activities, labs, warm-ups, notebook or binder checks, worksheets completed in class,",
+      "presentations given in class, discussions held in class, anything described as 'we will do this in class'",
+      "or already marked complete during class. The student cannot do it at home, so it must not sit in Tonight.",
+      "When that is the reason, say so plainly in impactNote — for example 'Done in class, nothing to do tonight.'",
+      "A test or quiz taken in class is different: studying for it happens at home, so judge it on when to study.",
+      "Reference material with nothing to hand in — syllabi, announcements, posted slides — is 'later'.",
     ].join("\n"),
     prompt: JSON.stringify(assignments),
     output: Output.object({

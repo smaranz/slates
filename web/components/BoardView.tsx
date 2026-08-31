@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState } from "react";
 
 import { IMPACT_LABEL, useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
@@ -15,8 +15,11 @@ const COLUMNS: Array<{
   ordered?: boolean;
   actions?: boolean;
 }> = [
-  { key: "tonight", name: "Tonight", tone: "oklch(0.82 0.14 250)", empty: "Nothing left tonight.", ordered: true, actions: true },
-  { key: "soon", name: "Next up", tone: "oklch(0.76 0.13 75)", empty: "Clear through Wednesday." },
+  // The bucket key stays `tonight` — it's the internal name the estimator and
+  // the stored placements both use, and renaming it would strip every card a
+  // student has already dragged into this column.
+  { key: "tonight", name: "Today", tone: "oklch(0.82 0.14 250)", empty: "Nothing left today.", ordered: true, actions: true },
+  { key: "soon", name: "Tomorrow", tone: "oklch(0.76 0.13 75)", empty: "Nothing waiting for tomorrow." },
   { key: "week", name: "This week", tone: "oklch(0.72 0 0)", empty: "Nothing further out." },
   { key: "done", name: "Turned in", tone: "oklch(0.72 0.13 145)", empty: "Nothing turned in yet." },
 ];
@@ -26,11 +29,17 @@ export function AssignmentCard({
   index,
   ordered,
   showActions,
+  onDragStart,
+  onDragEnd,
+  dragging,
 }: {
   a: Assignment;
   index: number;
   ordered?: boolean;
   showActions?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  dragging?: boolean;
 }) {
   const s = useStore();
   const course = s.courseById(a.courseId);
@@ -41,15 +50,30 @@ export function AssignmentCard({
   const overlay = a.submit === "overlay";
   // Nothing to hand in: "Start" then "Mark done" is two clicks for a checkbox.
   const nothingToSubmit = a.submit === "none";
+  /*
+   * Work Schoology already has can't be replanned, so it doesn't offer a grab
+   * handle it would only refuse to honour. Everything else — including work you
+   * ticked off here — can be dragged back into the plan.
+   */
+  const movable = a.bucket !== "done";
 
   return (
     <div
+      draggable={movable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", a.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      onDragEnd={() => onDragEnd?.()}
       style={{
         borderRadius: 20,
         border: `1px solid ${active ? "oklch(0.907 0 0 / 0.15)" : "var(--line)"}`,
         background: "var(--surface)",
         boxShadow: "var(--shadow-card)",
-        opacity: done ? 0.6 : 1,
+        opacity: dragging ? 0.4 : done ? 0.6 : 1,
+        cursor: movable ? "grab" : "default",
+        transition: "opacity 120ms ease",
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px" }}>
@@ -134,10 +158,13 @@ export function AssignmentCard({
         }}
       >
         <span style={{ fontSize: 12, color: "var(--muted)" }}>
-          {done ? a.due : active ? `Started · ${a.start ?? "now"}` : a.due}
-        </span>
-        <span className="tabular" style={{ fontSize: 12, color: "var(--muted)", letterSpacing: "0.02em" }}>
-          {a.code}
+          {done
+            ? nothingToSubmit
+              ? "Marked done"
+              : "Turned in"
+            : active
+              ? `Started · ${a.start ?? "now"}`
+              : a.due}
         </span>
       </div>
 
@@ -175,22 +202,21 @@ export function AssignmentCard({
 
 export default function BoardView() {
   const s = useStore();
+  /* The card in hand, and the column currently under it. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<Bucket | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = s.query.trim().toLowerCase();
-    if (!q) return s.snapshot.assignments;
-    return s.snapshot.assignments.filter((a) => {
-      const c = s.courseById(a.courseId);
-      return (
-        a.title.toLowerCase().includes(q) ||
-        (c?.short.toLowerCase().includes(q) ?? false)
-      );
-    });
-  }, [s]);
-
-  const activeId = filtered.find(
-    (a) => a.bucket === "tonight" && s.statusOf(a) === "active"
+  const activeId = s.snapshot.assignments.find(
+    (a) => s.bucketOf(a) === "tonight" && s.statusOf(a) === "active"
   )?.id;
+
+  const drop = (to: Bucket) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData("text/plain") || dragging;
+    if (id) s.moveTo(id, to);
+    setDragging(null);
+    setOver(null);
+  };
 
   return (
     <div className="scroll">
@@ -203,25 +229,46 @@ export default function BoardView() {
         }}
       >
         {COLUMNS.map((col) => {
+          // `onBoard` drops what the Sunday sweep retired — finished and
+          // past-due work from previous weeks, still findable everywhere else.
+          const live = s.snapshot.assignments.filter((a) => s.onBoard(a));
           const items =
             col.key === "done"
-              ? filtered.filter((a) => s.statusOf(a) === "done")
-              : filtered.filter((a) => a.bucket === col.key && s.statusOf(a) !== "done");
+              ? live.filter((a) => s.statusOf(a) === "done")
+              : live.filter((a) => s.bucketOf(a) === col.key && s.statusOf(a) !== "done");
           const minutes = items.reduce((acc, a) => acc + a.minutes, 0);
+          const target = over === col.key;
 
           return (
             <div
               key={col.key}
+              onDragOver={(e) => {
+                if (!dragging) return;
+                // Without this the browser refuses the drop outright.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (over !== col.key) setOver(col.key);
+              }}
+              onDragLeave={(e) => {
+                // Moving between a column's own children fires dragleave too;
+                // only clear when the pointer has actually left the column.
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                setOver((prev) => (prev === col.key ? null : prev));
+              }}
+              onDrop={drop(col.key)}
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 12,
                 minWidth: 0,
                 borderRadius: "var(--radius-xl)",
-                border: "1px solid var(--line)",
-                background: "var(--surface-soft)",
+                border: `1px solid ${target ? col.tone : "var(--line)"}`,
+                background: target ? "var(--surface)" : "var(--surface-soft)",
                 padding: 14,
-                boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.05)",
+                boxShadow: target
+                  ? `inset 0 0 0 1px ${col.tone}, var(--shadow-card)`
+                  : "inset 0 1px 0 oklch(1 0 0 / 0.05)",
+                transition: "background 120ms ease, border-color 120ms ease",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 4px" }}>
@@ -255,6 +302,12 @@ export default function BoardView() {
                   index={i}
                   ordered={col.ordered}
                   showActions={col.actions && (a.id === activeId || (!activeId && i === 0))}
+                  dragging={dragging === a.id}
+                  onDragStart={() => setDragging(a.id)}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setOver(null);
+                  }}
                 />
               ))}
 
@@ -262,14 +315,14 @@ export default function BoardView() {
                 <div
                   style={{
                     borderRadius: 20,
-                    border: "1px dashed var(--line-strong)",
+                    border: `1px dashed ${target ? col.tone : "var(--line-strong)"}`,
                     padding: "18px 14px",
                     textAlign: "center",
                     fontSize: 12,
                     color: "var(--muted)",
                   }}
                 >
-                  {col.empty}
+                  {target ? "Drop to move it here." : col.empty}
                 </div>
               )}
             </div>

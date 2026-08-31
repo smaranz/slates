@@ -1,10 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 
 import { useStore, type View } from "@/lib/store";
-import { Avatar, Icon, ICON, SearchIcon } from "./ui";
+import { Avatar, Icon, ICON } from "./ui";
 
 interface NavDef {
   label: string;
@@ -15,7 +15,6 @@ interface NavDef {
 
 export default function Sidebar() {
   const s = useStore();
-  const searchRef = useRef<HTMLInputElement>(null);
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
@@ -27,27 +26,15 @@ export default function Sidebar() {
     }
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const navs = useMemo<NavDef[]>(() => {
-    const open = s.snapshot.assignments.filter((a) => s.statusOf(a) !== "done");
-    const tonight = open.filter((a) => a.bucket === "tonight");
+    const open = s.snapshot.assignments.filter((a) => s.onBoard(a) && s.statusOf(a) !== "done");
     const unread = s.snapshot.messages.filter(
       (m) => m.unread && !s.msgRead[m.id]
     ).length;
 
     return [
       { label: "Assignments", path: ICON.assignments, view: "board", count: open.length },
-      { label: "Tonight", path: ICON.tonight, view: "list", count: tonight.length },
+      { label: "Classes", path: ICON.classes, view: "classes", count: 0 },
       { label: "Grades", path: ICON.grades, view: "grades", count: 0 },
       { label: "Calendar", path: ICON.calendar, view: "calendar", count: 0 },
       { label: "Tutor", path: ICON.tutor, view: "tutor", count: 0 },
@@ -101,46 +88,7 @@ export default function Sidebar() {
         <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>Slates</span>
       </div>
 
-      <div style={{ padding: 8 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            borderRadius: 20,
-            background: "var(--sunken)",
-            border: "1px solid var(--line)",
-            padding: "0 10px",
-            height: 34,
-            boxShadow: "var(--shadow-inset)",
-          }}
-        >
-          <SearchIcon />
-          <input
-            ref={searchRef}
-            className="bare-field"
-            style={{ fontSize: 13 }}
-            value={s.query}
-            onChange={(e) => s.setQuery(e.target.value)}
-            placeholder="Search assignments"
-            aria-label="Search assignments"
-          />
-          <span
-            style={{
-              flexShrink: 0,
-              fontSize: 11,
-              color: "var(--muted)",
-              border: "1px solid var(--line)",
-              borderRadius: 6,
-              padding: "1px 5px",
-            }}
-          >
-            ⌘K
-          </span>
-        </div>
-      </div>
-
-      <nav style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
+      <nav style={{ flex: 1, overflowY: "auto", padding: 8 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {navs.map((n) => {
             const active = n.label === s.nav;

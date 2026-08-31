@@ -30,7 +30,7 @@ export default function Topbar() {
         ) : course ? (
           <button type="button" className="btn btn--quiet" style={{ height: 30 }} onClick={() => s.openCourse(null)}>
             <Icon path={ICON.chevronLeft} size={14} />
-            All grades
+            {s.view === "classes" ? "All classes" : "All grades"}
           </button>
         ) : null}
 

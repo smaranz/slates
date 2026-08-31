@@ -7,10 +7,13 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { scrape, closeShared, getSharedContext } from "./scrape.mjs";
+import { scrape, closeShared, getSharedContext, forgetMessageBody } from "./scrape.mjs";
 import { readConfig, HOME } from "./browser.mjs";
 import * as attempt from "./attempt.mjs";
 import { submitAssignment } from "./submit.mjs";
+import { composeMessage, replyToThread, searchRecipients } from "./message.mjs";
+import { readMaterials, resolveDocument, fetchAttachment, inlineTypeFor } from "./materials.mjs";
+import { readReview } from "./review.mjs";
 
 /**
  * Last good snapshot on disk, so restarting the service still answers
@@ -44,6 +47,10 @@ const CACHE_MS = 60_000;
 
 let inFlight = null;
 let cache = loadCache(); // { at, payload } — survives a restart
+
+/** Per-question results by item URL: { at, review }. In memory only. */
+const reviews = new Map();
+const REVIEW_TTL_MS = 5 * 60_000;
 
 /**
  * One scrape at a time — the browser is shared.
@@ -114,6 +121,37 @@ function send(res, status, body) {
   res.end(json);
 }
 
+/**
+ * Report stages as they happen instead of answering once at the end.
+ *
+ * Driving a real browser takes long enough that a silent wait looks like a
+ * hang, so anything that does it — handing work in, replying to a teacher —
+ * streams its progress when the caller asks with `?stream=1`. The headers go
+ * out on the first event, which is what lets a later failure still travel in
+ * the stream rather than as a status code nobody is waiting for any more.
+ */
+function progressStream(res, streaming) {
+  let started = false;
+  return {
+    emit(payload) {
+      if (!streaming) return;
+      if (!started) {
+        started = true;
+        res.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "access-control-allow-origin": "http://localhost:3000",
+        });
+      }
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    },
+    get started() {
+      return started;
+    },
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
 
@@ -127,27 +165,9 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/submit") {
     if (req.method !== "POST") return send(res, 405, { error: "POST only" });
 
-    /*
-     * Handing something in drives a real browser through Schoology's modal, and
-     * that takes long enough that a silent wait looks like a hang. With
-     * `?stream=1` the stages are reported as they happen, so the portal shows
-     * what is actually going on instead of guessing at a progress bar.
-     */
     const streaming = url.searchParams.get("stream") === "1";
-    let started = false;
-    const emit = (payload) => {
-      if (!streaming) return;
-      if (!started) {
-        started = true;
-        res.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache, no-transform",
-          connection: "keep-alive",
-          "access-control-allow-origin": "http://localhost:3000",
-        });
-      }
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    };
+    const progress = progressStream(res, streaming);
+    const emit = (payload) => progress.emit(payload);
 
     try {
       const body = JSON.parse(await readBody(req, 60 * 1024 * 1024));
@@ -163,10 +183,187 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     } catch (e) {
       console.error("submit failed:", e.message);
-      if (!streaming || !started) return send(res, 500, { error: e.message });
+      if (!progress.started) return send(res, 500, { error: e.message });
       // Headers are already out; the error has to travel in the stream.
       emit({ type: "error", error: e.message });
       return res.end();
+    }
+  }
+
+  /* ---- replying to a teacher, through Schoology's own message form ---- */
+
+  if (url.pathname === "/message/reply") {
+    if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+
+    const streaming = url.searchParams.get("stream") === "1";
+    const progress = progressStream(res, streaming);
+    const emit = (payload) => progress.emit(payload);
+
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { domain } = readConfig();
+      /*
+       * The thread id comes from the inbox we scraped, and the domain from the
+       * signed-in config — never from the caller. A reply is addressed by
+       * Schoology itself, so there is no recipient here to get wrong.
+       */
+      const result = await replyToThread(
+        await getSharedContext(true),
+        { domain, threadId: body.threadId, body: body.body },
+        (s) => emit({ type: "step", ...s })
+      );
+      /*
+       * Thread bodies are cached as immutable once read, which stops being
+       * true the moment we post to one. Forget it, then re-sync, or the reply
+       * would never appear in Slates' own copy of the conversation.
+       */
+      forgetMessageBody(String(body.threadId));
+      void refresh("after-reply");
+      if (!streaming) return send(res, 200, result);
+      emit({ type: "result", result });
+      return res.end();
+    } catch (e) {
+      console.error("reply failed:", e.message);
+      if (!progress.started) return send(res, 500, { error: e.message });
+      emit({ type: "error", error: e.message });
+      return res.end();
+    }
+  }
+
+  /* ---- who you can write to, from Schoology's own directory ---- */
+
+  if (url.pathname === "/message/recipients") {
+    try {
+      const { domain } = readConfig();
+      const people = await searchRecipients(await getSharedContext(true), {
+        domain,
+        query: url.searchParams.get("q") ?? "",
+      });
+      return send(res, 200, { people });
+    } catch (e) {
+      return send(res, 500, { error: e.message });
+    }
+  }
+
+  /* ---- a brand new conversation, through Schoology's own compose form ---- */
+
+  if (url.pathname === "/message/compose") {
+    if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+
+    const streaming = url.searchParams.get("stream") === "1";
+    const progress = progressStream(res, streaming);
+    const emit = (payload) => progress.emit(payload);
+
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { domain } = readConfig();
+      const result = await composeMessage(
+        await getSharedContext(true),
+        {
+          domain,
+          recipients: body.recipients,
+          subject: body.subject,
+          body: body.body,
+        },
+        (s) => emit({ type: "step", ...s })
+      );
+      // A sent message shows up in the inbox thread list.
+      void refresh("after-compose");
+      if (!streaming) return send(res, 200, result);
+      emit({ type: "result", result });
+      return res.end();
+    } catch (e) {
+      console.error("compose failed:", e.message);
+      if (!progress.started) return send(res, 500, { error: e.message });
+      emit({ type: "error", error: e.message });
+      return res.end();
+    }
+  }
+
+  /* ---- per-question results for an assessment already handed in ---- */
+
+  if (url.pathname === "/assessment/review") {
+    const target = url.searchParams.get("url") ?? "";
+    if (!/^https:\/\/[\w.-]+\.schoology\.com\//.test(target)) {
+      return send(res, 400, { error: "Only Schoology URLs can be reviewed." });
+    }
+    /*
+     * Same rule as the background crawl: never drive the shared browser while
+     * an attempt is open. Reviewing is read-only, but it still navigates the
+     * session Schoology is holding a submission lock on.
+     */
+    if (attempt.isActive()) {
+      return send(res, 409, { error: "Finish or close the attempt you have open first." });
+    }
+    // Results only change when a teacher regrades, so a short window is enough
+    // to keep opening and closing a panel from re-driving the browser each time.
+    const hit = reviews.get(target);
+    if (hit && Date.now() - hit.at < REVIEW_TTL_MS) {
+      return send(res, 200, { ...hit.review, cached: true });
+    }
+    try {
+      const review = await readReview(await getSharedContext(true), target);
+      reviews.set(target, { at: Date.now(), review });
+      return send(res, 200, review);
+    } catch (e) {
+      console.error("review failed:", e.message);
+      return send(res, 500, { error: e.message });
+    }
+  }
+
+  /* ---- a course's own folders, files and pages ---- */
+
+  if (url.pathname === "/course/materials") {
+    try {
+      const { domain } = readConfig();
+      const out = await readMaterials(await getSharedContext(true), {
+        domain,
+        courseId: url.searchParams.get("course") ?? "",
+        folderId: url.searchParams.get("folder") || null,
+      });
+      return send(res, 200, out);
+    } catch (e) {
+      return send(res, 500, { error: e.message });
+    }
+  }
+
+  /* ---- the file behind a document, so a PDF can open in the app ---- */
+
+  if (url.pathname === "/course/document") {
+    try {
+      const { domain } = readConfig();
+      const out = await resolveDocument(await getSharedContext(true), {
+        domain,
+        path: url.searchParams.get("path") ?? "",
+      });
+      return send(res, 200, { ...out, inlineType: inlineTypeFor(out.ext) });
+    } catch (e) {
+      return send(res, 500, { error: e.message });
+    }
+  }
+
+  if (url.pathname === "/course/file") {
+    try {
+      const { domain } = readConfig();
+      /*
+       * Streamed through the scraper because the bytes need the Schoology
+       * session, which lives here and nowhere else. The path is checked
+       * against the attachment shape inside fetchAttachment — this endpoint
+       * is not a general-purpose proxy for anything the caller names.
+       */
+      const file = await fetchAttachment(await getSharedContext(true), {
+        domain,
+        path: url.searchParams.get("path") ?? "",
+      });
+      res.writeHead(200, {
+        "content-type": file.contentType,
+        "content-length": file.body.length,
+        "cache-control": "private, max-age=300",
+        "access-control-allow-origin": "http://localhost:3000",
+      });
+      return res.end(file.body);
+    } catch (e) {
+      return send(res, 500, { error: e.message });
     }
   }
 

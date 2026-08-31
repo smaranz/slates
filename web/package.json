@@ -16,6 +16,7 @@
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "ai": "^7.0.84",
     "ai-sdk-provider-claude-code": "^4.1.1",
+    "motion": "^13.1.1",
     "next": "16.3.3",
     "pdfjs-dist": "^6.3.289",
     "react": "19.2.8",

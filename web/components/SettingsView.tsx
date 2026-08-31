@@ -1,13 +1,56 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { readAvatarFile } from "@/lib/avatar";
 import { useStore } from "@/lib/store";
-import { Avatar, Toggle } from "./ui";
+import type { TutorModelBackend } from "@/lib/tutor-models";
+import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
+import ModelPicker from "./ModelPicker";
+import {
+  AnthropicLogo,
+  Avatar,
+  CursorLogo,
+  DeepSeekLogo,
+  Dot,
+  GeminiLogo,
+  MiniMaxLogo,
+  OpenAILogo,
+  QwenLogo,
+  Spinner,
+  Toggle,
+  ZaiLogo,
+} from "./ui";
+
+interface ProviderInfo {
+  backend: TutorModelBackend;
+  label: string;
+  powers: string;
+  configured: boolean;
+  detail: string;
+}
+
+type TestState = { status: "idle" | "testing" | "ok" | "error"; error?: string };
+
+const PROVIDER_ICON: Record<TutorModelBackend, ReactNode> = {
+  openai: <OpenAILogo size={16} />,
+  "claude-code": <AnthropicLogo size={16} />,
+  "cursor-agent": <CursorLogo size={16} />,
+  openrouter: (
+    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+      <DeepSeekLogo size={13} />
+      <ZaiLogo size={13} />
+      <QwenLogo size={13} />
+      <GeminiLogo size={13} />
+      <MiniMaxLogo size={13} />
+    </span>
+  ),
+};
 
 export default function SettingsView() {
   const s = useStore();
+  const [tutorModel, setTutorModel] = useTutorModel();
+  const [tutorThinking, setTutorThinking] = useTutorThinking();
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -33,9 +76,72 @@ export default function SettingsView() {
     void checkScraper();
   }, [checkScraper]);
 
+  /*
+   * "Connected" has two layers, and conflating them was the whole reason
+   * providers looked more solid than they were. `configured` is a free,
+   * instant check (an env var is set, or the CLI resolves on PATH) done on
+   * every visit. It can't catch an expired CLI login or a revoked key — only
+   * a real round trip can — so that only runs when the student asks for it
+   * with Test, not on every page load.
+   */
+  const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
+  const [tests, setTests] = useState<Partial<Record<TutorModelBackend, TestState>>>({});
+
+  const checkProviders = useCallback(async () => {
+    setProviders(null);
+    setProvidersError(null);
+    try {
+      const res = await fetch("/api/providers", { cache: "no-store" });
+      const data = await res.json();
+      setProviders(data.providers ?? []);
+    } catch {
+      setProviders([]);
+      setProvidersError("Couldn't reach the portal's own server to check providers.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkProviders();
+  }, [checkProviders]);
+
+  const runTest = useCallback(async (backend: TutorModelBackend) => {
+    setTests((t) => ({ ...t, [backend]: { status: "testing" } }));
+    try {
+      const res = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backend }),
+      });
+      const data = await res.json();
+      setTests((t) => ({
+        ...t,
+        [backend]: data.ok ? { status: "ok" } : { status: "error", error: data.error || "Test failed." },
+      }));
+    } catch (e) {
+      setTests((t) => ({
+        ...t,
+        [backend]: { status: "error", error: e instanceof Error ? e.message : "Test failed." },
+      }));
+    }
+  }, []);
+
+  const testAll = useCallback(() => {
+    for (const p of providers ?? []) void runTest(p.backend);
+  }, [providers, runTest]);
+
+  // A provider that's never been tested is shown as configured-but-unverified,
+  // not as connected — the header count only promotes it once a real call
+  // through that exact backend has actually succeeded.
+  const connectedCount = useMemo(
+    () => (providers ?? []).filter((p) => tests[p.backend]?.status === "ok").length,
+    [providers, tests]
+  );
+
   return (
     <div className="scroll centered" style={{ paddingBottom: 32 }}>
-      <div className="col" style={{ maxWidth: 640, gap: 16 }}>
+      <div className="col" style={{ maxWidth: 1100, gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div className="card" style={{ padding: "20px 22px" }}>
           <span className="card-title">Profile</span>
           <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14 }}>
@@ -102,6 +208,31 @@ export default function SettingsView() {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="card" style={{ padding: "20px 22px" }}>
+          <span className="card-title">Notifications</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text)" }}>Push reminders</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                  Nightly nudge for what&apos;s due.
+                </div>
+              </div>
+              <Toggle on={s.notifPush} onClick={s.togglePush} label="Push reminders" />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text)" }}>Weekly digest</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                  Grade summary every Sunday.
+                </div>
+              </div>
+              <Toggle on={s.notifDigest} onClick={s.toggleDigest} label="Weekly digest" />
+            </div>
+          </div>
+        </div>
         </div>
 
         {/* The only sync path: a dedicated logged-in browser, driven locally. */}
@@ -187,26 +318,145 @@ npm run serve      # leave this running`}
         </div>
 
         <div className="card" style={{ padding: "20px 22px" }}>
-          <span className="card-title">Notifications</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: "var(--text)" }}>Push reminders</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                  Nightly nudge for what&apos;s due.
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="card-title">AI Tutor providers</span>
+            <span style={{ flex: 1 }} />
+            {providers && providers.length > 0 && (
+              <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                {connectedCount}/{providers.length} verified
+              </span>
+            )}
+            <button
+              type="button"
+              className={`btn btn--quiet ${providers === null ? "btn--busy" : ""}`}
+              style={{ height: 28 }}
+              onClick={() => void checkProviders()}
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ height: 28 }}
+              onClick={testAll}
+              disabled={!providers?.length}
+            >
+              Test all
+            </button>
+          </div>
+
+          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+            Each Tutor model routes through one of four backends. A key or CLI login being
+            present doesn&apos;t prove it still works — Test makes one real, tiny request
+            through that backend to check.
+          </p>
+
+          {providersError && (
+            <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
+              {providersError}
+            </p>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 14 }}>
+            {(providers ?? []).map((p) => {
+              const test = tests[p.backend] ?? { status: "idle" as const };
+              const color =
+                test.status === "ok"
+                  ? "var(--good)"
+                  : test.status === "error" || !p.configured
+                    ? "var(--bad)"
+                    : "var(--muted)";
+              const statusText =
+                test.status === "ok"
+                  ? "Connected"
+                  : test.status === "error"
+                    ? "Failed"
+                    : test.status === "testing"
+                      ? "Testing…"
+                      : p.configured
+                        ? "Not tested"
+                        : "Not configured";
+
+              return (
+                <div
+                  key={p.backend}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 0",
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>{PROVIDER_ICON[p.backend]}</span>
+                  <span style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{p.label}</span>
+                    <span className="truncate" style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                      {p.powers}
+                    </span>
+                    {test.status === "error" && (
+                      <span style={{ fontSize: 11.5, color: "var(--bad)" }}>{test.error}</span>
+                    )}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, fontSize: 12, color, fontWeight: 600 }}>
+                    {test.status === "testing" ? <Spinner size={12} /> : <Dot color={color} radius={9999} />}
+                    {statusText}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--quiet"
+                    style={{ height: 26, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+                    onClick={() => void runTest(p.backend)}
+                    disabled={test.status === "testing"}
+                  >
+                    Test
+                  </button>
                 </div>
-              </div>
-              <Toggle on={s.notifPush} onClick={s.togglePush} label="Push reminders" />
+              );
+            })}
+
+            {providers === null && (
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>Checking…</p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div className="card" style={{ padding: "20px 22px" }}>
+            <span className="card-title">Tutor defaults</span>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+              The model and thinking level the Tutor opens with. Changing it here or in the
+              composer updates the same saved preference either way.
+            </p>
+            <div style={{ marginTop: 14 }}>
+              <ModelPicker
+                value={tutorModel}
+                onChange={setTutorModel}
+                thinking={tutorThinking}
+                onThinkingChange={setTutorThinking}
+              />
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: "var(--text)" }}>Weekly digest</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                  Grade summary every Sunday.
-                </div>
-              </div>
-              <Toggle on={s.notifDigest} onClick={s.toggleDigest} label="Weekly digest" />
-            </div>
+          </div>
+
+          <div className="card" style={{ padding: "20px 22px" }}>
+            <span className="card-title">Data</span>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+              Disconnecting clears the synced board from this device — courses, assignments,
+              and grades — and drops back to sample data. Nothing changes on Schoology
+              itself; Sync now brings it all back.
+            </p>
+            <button
+              type="button"
+              className="btn btn--quiet"
+              style={{ height: 30, marginTop: 14, color: "var(--bad)" }}
+              onClick={() => {
+                if (window.confirm("Disconnect Schoology and clear the synced board from this device?")) {
+                  s.disconnect();
+                }
+              }}
+            >
+              Disconnect Schoology
+            </button>
           </div>
         </div>
       </div>

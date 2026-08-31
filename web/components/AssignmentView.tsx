@@ -4,8 +4,19 @@ import { useEffect, useRef, useState } from "react";
 
 import { IMPACT_LABEL, useStore, type SubmitState } from "@/lib/store";
 import { fmtBytes, fmtClock, fmtMinutes } from "@/lib/format";
+import type { AssessmentReview } from "@/lib/types";
 import { Badge, ClockIcon, Icon, ICON, Spinner } from "./ui";
 import AssessmentPanel from "./AssessmentPanel";
+import QuestionReview from "./QuestionReview";
+
+/**
+ * Whether an item is really an online assessment barely ever changes once
+ * answered, so the answer is kept here — module-scoped, keyed by URL — rather
+ * than in component state. Without it, navigating back to an item already
+ * looked at in this session would repeat the multi-second real-page check and
+ * flash the submission box again while it ran.
+ */
+const reviewCache = new Map<string, AssessmentReview>();
 
 /**
  * What's happening right now, while Schoology's dropbox is being driven.
@@ -51,6 +62,67 @@ export default function AssignmentView() {
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
+  /*
+   * Some graded items aren't tagged `kind === "assessment"` at all — a
+   * teacher-built "worksheet" can still be an online, Learnosity-backed quiz
+   * under the hood, and Slates has no cheap way to tell in advance. Checking
+   * is silent and automatic: nobody wants to read "Slates doesn't know yet",
+   * so this fetches in the background and only ever renders the answer —
+   * the breakdown if it's really online, the ordinary submission box if it
+   * isn't. A check that fails degrades to that same submission box rather
+   * than announcing the failure; the worst case is a write-response field
+   * next to a paper grade, which is exactly what showed before this existed.
+   *
+   * `undefined` means "still checking" and is its own render state — never
+   * showing the submission box before the check is settled is the whole
+   * point, otherwise a real quiz flashes a fake response field for a moment
+   * on every first visit.
+   */
+  const [review, setReview] = useState<AssessmentReview | undefined>(() =>
+    a ? reviewCache.get(a.url) : undefined
+  );
+  // Reset for a new item during render rather than in an effect — an effect
+  // would paint the previous item's breakdown for one frame before clearing it.
+  const [reviewForId, setReviewForId] = useState(id);
+  if (reviewForId !== id) {
+    setReviewForId(id);
+    setReview(a ? reviewCache.get(a.url) : undefined);
+  }
+
+  // Exactly the population that would otherwise fall into the generic
+  // submission branch below — a real grade with nothing already explaining it.
+  // Computed with optional chaining (not after the `!a` check) because the
+  // effect that reads it is a hook and has to run on every render regardless.
+  const maybeOnline = Boolean(a?.grade) && !a?.assessment && a?.submit !== "overlay" && a?.submit !== "none";
+  const assignmentUrl = a?.url;
+
+  useEffect(() => {
+    if (!maybeOnline || !assignmentUrl || reviewCache.has(assignmentUrl)) return;
+    let live = true;
+    (async () => {
+      // Not cached on failure, so a later visit gets to try the real check
+      // again — but this visit still needs an answer now, and "assume it's
+      // an ordinary submission" is the same safe default the whole feature
+      // falls back to everywhere else.
+      let result: AssessmentReview = { online: false, title: "", attempts: [] };
+      try {
+        const res = await fetch(`/api/assessment/review?url=${encodeURIComponent(assignmentUrl)}`, {
+          cache: "no-store",
+        });
+        if (res.ok) {
+          result = await res.json();
+          reviewCache.set(assignmentUrl, result);
+        }
+      } catch {
+        /* falls through to the offline default below */
+      }
+      if (live) setReview(result);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [maybeOnline, assignmentUrl]);
+
   if (!a) return null;
 
   const course = s.courseById(a.courseId);
@@ -80,6 +152,7 @@ export default function AssignmentView() {
   // A locally-ticked item was never handed in anywhere; saying otherwise would
   // misreport what Schoology actually has.
   const nothingToSubmit = a.submit === "none";
+
   const meta = s.submittedAt[id]
     ? `Turned in · ${s.submittedAt[id]}`
     : submitted
@@ -92,7 +165,7 @@ export default function AssignmentView() {
 
   return (
     <div className="scroll centered" style={{ paddingBottom: 32 }}>
-      <div className="col" style={{ maxWidth: 640, gap: 16 }}>
+      <div className="col" style={{ maxWidth: 1300, gap: 20 }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
           {course && <Badge tone={course.tone}>{course.short}</Badge>}
           <Badge tone={IMPACT_LABEL[a.impact].tone}>{IMPACT_LABEL[a.impact].label}</Badge>
@@ -108,75 +181,80 @@ export default function AssignmentView() {
           {overlay && <Badge tone="speed">{schoologyLabel}</Badge>}
         </div>
 
-        <div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3 }}>
+        {/* The cards below use the full width; prose reads better capped narrower. */}
+        <div style={{ maxWidth: "70ch" }}>
+          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3 }}>
             {a.title}
           </h2>
           <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)" }}>
-            {a.due} · {fmtMinutes(a.minutes)} · {a.code}
+            {submitted ? "Turned in" : a.due} · {fmtMinutes(a.minutes)} · {a.code}
           </p>
         </div>
 
-        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: "var(--text-2)" }}>{a.brief}</p>
+        {a.brief && (
+          <p style={{ margin: 0, maxWidth: "70ch", fontSize: 14, lineHeight: 1.5, color: "var(--text-2)" }}>
+            {a.brief}
+          </p>
+        )}
 
-        {/* Time tracking — the thing only the extension can measure. */}
+        {/* Time tracking and the grade sit in one card, not two — both are
+            metadata about the assignment, not separate topics. */}
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
             borderRadius: "var(--radius-sm)",
             border: "1px solid var(--line)",
             background: "var(--sunken)",
             boxShadow: "var(--shadow-sunken)",
-            padding: "10px 14px",
           }}
         >
-          <ClockIcon size={14} />
-          <span className="tabular" style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>
-            {fmtClock(tracked)}
-          </span>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {timing ? "tracking now" : tracked ? "tracked so far" : "no time tracked yet"}
-          </span>
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            className={`btn ${timing ? "btn--quiet" : "btn--primary"}`}
-            onClick={() => s.toggleTimer(id)}
-          >
-            {timing ? "Stop" : "Start timer"}
-          </button>
-        </div>
-
-        {a.grade && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid oklch(0.55 0.13 145 / 0.3)",
-              background: "oklch(0.72 0.13 145 / 0.1)",
-              padding: "14px 16px",
-            }}
-          >
-            <span
-              className="tabular"
-              style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--good)" }}
-            >
-              {Math.round((a.grade.earned / a.grade.possible) * 100)}%
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px" }}>
+            <ClockIcon size={14} />
+            <span className="tabular" style={{ fontSize: 17, fontWeight: 600, color: "var(--text)" }}>
+              {fmtClock(tracked)}
             </span>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
-                Graded · {a.grade.earned}/{a.grade.possible}
-              </p>
-              <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-2)", lineHeight: 1.4 }}>
-                {a.grade.feedback}
-              </p>
-            </div>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {timing ? "tracking now" : tracked ? "tracked so far" : "no time tracked yet"}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              type="button"
+              className={`btn ${timing ? "btn--quiet" : "btn--primary"}`}
+              style={{ height: 36 }}
+              onClick={() => s.toggleTimer(id)}
+            >
+              {timing ? "Stop" : "Start timer"}
+            </button>
           </div>
-        )}
+
+          {a.grade && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "16px 20px",
+                borderTop: "1px solid var(--line)",
+              }}
+            >
+              <span
+                className="tabular"
+                style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--good)" }}
+              >
+                {Math.round((a.grade.earned / a.grade.possible) * 100)}%
+              </span>
+              <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+                  Graded · {a.grade.earned}/{a.grade.possible}
+                </span>
+                {a.grade.feedback && (
+                  <span style={{ marginTop: 2, fontSize: 12, color: "var(--muted)", lineHeight: 1.4 }}>
+                    {a.grade.feedback}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="divider" />
 
@@ -189,7 +267,7 @@ export default function AssignmentView() {
               borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line)",
               background: "var(--sunken)",
-              padding: "18px 16px",
+              padding: "24px 26px",
               display: "flex",
               flexDirection: "column",
               gap: 10,
@@ -204,7 +282,7 @@ export default function AssignmentView() {
               <button
                 type="button"
                 className={submitted ? "btn" : "btn btn--primary"}
-                style={{ height: 36 }}
+                style={{ height: 40 }}
                 onClick={() => s.setStatus(id, submitted ? "todo" : "done")}
               >
                 {submitted ? "Move back to to-do" : "Mark done"}
@@ -214,7 +292,7 @@ export default function AssignmentView() {
                 href={a.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ height: 36, textDecoration: "none" }}
+                style={{ height: 40, textDecoration: "none" }}
               >
                 <Icon path={ICON.external} size={14} />
                 View on Schoology
@@ -237,7 +315,7 @@ export default function AssignmentView() {
               borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line)",
               background: "var(--sunken)",
-              padding: "18px 16px",
+              padding: "24px 26px",
               display: "flex",
               flexDirection: "column",
               gap: 10,
@@ -263,12 +341,49 @@ export default function AssignmentView() {
             <button
               type="button"
               className="btn btn--primary"
-              style={{ alignSelf: "flex-start", height: 36 }}
+              style={{ alignSelf: "flex-start", height: 40 }}
               onClick={() => s.openOverlay(id)}
             >
               <Icon path={ICON.external} size={14} />
               Open in Schoology
             </button>
+          </div>
+        ) : maybeOnline && review?.online ? (
+          /* Confirmed online: there's nothing to write or attach, so the
+             breakdown replaces the submission box instead of sitting above it. */
+          <div
+            style={{
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line)",
+              background: "var(--sunken)",
+              padding: "24px 26px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <span className="section-label">Question breakdown</span>
+            <QuestionReview url={a.url} preloaded={{ review, error: null }} />
+          </div>
+        ) : maybeOnline && review === undefined ? (
+          /* Still checking — shown instead of the submission box, not before
+             it, so a real online quiz never flashes a fake response field.
+             The same sweeping bar `SubmitProgress` uses below: there's no
+             percentage to report here either, just motion that keeps saying
+             "still working" instead of sitting there looking frozen. */
+          <div
+            style={{
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line)",
+              background: "var(--sunken)",
+              padding: "24px 26px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <span style={{ fontSize: 13, color: "var(--text-2)" }}>Checking…</span>
+            <div className="progress" />
           </div>
         ) : (
           <>
@@ -331,7 +446,7 @@ export default function AssignmentView() {
                   borderRadius: "var(--radius-sm)",
                   border: `1.5px dashed ${dragging ? "var(--ring)" : "var(--line-strong)"}`,
                   background: dragging ? "oklch(0.4 0.08 250 / 0.12)" : "oklch(0.269 0 0 / 0.4)",
-                  padding: "26px 16px",
+                  padding: "36px 20px",
                   textAlign: "center",
                   font: "inherit",
                   cursor: submitted ? "default" : "pointer",
@@ -341,7 +456,7 @@ export default function AssignmentView() {
                 }}
               >
                 <span style={{ color: "var(--faint)" }}>
-                  <Icon path={[ICON.upload, ICON.uploadTray]} size={22} />
+                  <Icon path={[ICON.upload, ICON.uploadTray]} size={28} />
                 </span>
                 <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>
                   Drop files, or click to browse
@@ -365,7 +480,7 @@ export default function AssignmentView() {
                         borderRadius: 12,
                         border: "1px solid var(--line)",
                         background: "var(--sunken)",
-                        padding: "8px 10px",
+                        padding: "10px 13px",
                       }}
                     >
                       <span style={{ color: "var(--faint)" }}>
@@ -421,7 +536,7 @@ export default function AssignmentView() {
                   borderRadius: 12,
                   border: "1px solid oklch(0.6 0.18 25 / 0.3)",
                   background: "oklch(0.6 0.18 25 / 0.12)",
-                  padding: "10px 12px",
+                  padding: "13px 15px",
                   fontSize: 12,
                   lineHeight: 1.5,
                   color: "var(--bad)",
@@ -438,7 +553,7 @@ export default function AssignmentView() {
                   <button
                     type="button"
                     className={`btn btn--quiet ${busy ? "btn--busy" : ""}`}
-                    style={{ flex: 1, height: 36 }}
+                    style={{ flex: 1, height: 40 }}
                     disabled={busy}
                     onClick={() => void s.saveDraft(id)}
                   >
@@ -447,7 +562,7 @@ export default function AssignmentView() {
                   <button
                     type="button"
                     className={`btn btn--primary ${busy ? "btn--busy" : ""}`}
-                    style={{ flex: 1, height: 36 }}
+                    style={{ flex: 1, height: 40 }}
                     disabled={busy}
                     onClick={() => {
                       // This goes to the teacher. Worth one deliberate click.
@@ -497,7 +612,7 @@ export default function AssignmentView() {
                 <button
                   type="button"
                   className="btn btn--quiet"
-                  style={{ height: 36, alignSelf: "flex-start" }}
+                  style={{ height: 40, alignSelf: "flex-start" }}
                   onClick={() => void s.unsubmit(id)}
                 >
                   Submit again
@@ -519,7 +634,7 @@ export default function AssignmentView() {
           {comments.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {comments.map((c, i) => (
-                <div key={i} style={{ borderRadius: 14, background: "var(--sunken)", padding: "10px 12px" }}>
+                <div key={i} style={{ borderRadius: 14, background: "var(--sunken)", padding: "13px 15px" }}>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
                     <span
                       style={{
@@ -559,7 +674,7 @@ export default function AssignmentView() {
             <button
               type="button"
               className="btn btn--quiet"
-              style={{ height: 32, flexShrink: 0 }}
+              style={{ height: 36, flexShrink: 0 }}
               disabled={!(s.commentDraft[id] ?? "").trim()}
               onClick={() => s.addComment(id)}
             >

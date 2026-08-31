@@ -209,6 +209,153 @@ function standingFor(
   return fromCategories(cats) ?? NOT_GRADED;
 }
 
+/** One graded assignment's effect on the running course grade. */
+export interface GradePoint {
+  /** Short x-axis label — the assignment's due date. */
+  d: string;
+  /** Course percentage once this item is folded in. */
+  v: number;
+  /** Assignment name, for the point's hover title. */
+  title: string;
+  /** Change from the previous point, so a dip is a negative number. */
+  delta: number;
+  /** The item that first put a percentage on the board — there's no prior grade for its delta to mean anything against. */
+  first?: boolean;
+  /** Matches `GradeItem.id`, so a "Recent scores" row can look up its own delta. */
+  id?: string;
+}
+
+/**
+ * Schoology's date column reads "8/18/26 8:30am" — parsed by hand rather than
+ * `Date.parse`, whose two-digit-year handling isn't reliable across engines.
+ */
+function parseGradeDate(s: string): Date | null {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})\s*(am|pm))?/i.exec(s.trim());
+  if (!m) return null;
+  const [, mo, da, yr, hh, mm, ap] = m;
+  const year = yr.length === 2 ? 2000 + Number(yr) : Number(yr);
+  let hour = hh ? Number(hh) % 12 : 0;
+  if (ap?.toLowerCase() === "pm") hour += 12;
+  return new Date(year, Number(mo) - 1, Number(da), hour, mm ? Number(mm) : 0);
+}
+
+/**
+ * "Grade over time" that's actually about the assignments that moved it.
+ *
+ * Schoology reports no history, but every graded item already carries a date
+ * and a score — replaying them in order shows exactly which assignment
+ * caused a jump or a dip.
+ *
+ * The tricky part is *how* to fold each item in. A course's category list
+ * shows weights (15%, 20%, ...), but plenty of Schoology courses display
+ * those purely for organisation while actually grading on total points —
+ * this can't be told apart by looking at the categories alone, and guessing
+ * wrong is wildly wrong (a weighted replay put one course's mid-term grade at
+ * 79% on a day its real, Schoology-reported grade was 97%). Since the
+ * course's own current percentage is already known, both models are tried
+ * against the FULL gradebook and whichever one actually reproduces that
+ * number is the one used for every point in the replay.
+ */
+export function gradeTimeline(cats: GradeCategory[], reportedPct?: number | null): GradePoint[] {
+  const items = cats
+    .flatMap((cat, catIndex) =>
+      cat.items.map((it) => ({
+        catIndex,
+        weight: cat.weight,
+        id: it.id,
+        name: it.name,
+        earned: it.earned,
+        possible: it.possible,
+        date: it.date,
+      }))
+    )
+    .filter(
+      (it): it is typeof it & { earned: number; possible: number; when: Date } =>
+        it.earned != null && it.possible != null && it.possible > 0
+    )
+    .map((it) => ({ ...it, when: parseGradeDate(it.date) }))
+    .filter((it): it is typeof it & { when: Date } => it.when !== null)
+    .sort((a, b) => a.when.getTime() - b.when.getTime());
+
+  if (!items.length) return [];
+
+  /** Category-weighted, renormalised over whatever's graded — `fromCategories`, replayed. */
+  function weightedPct(earnedByCat: Map<number, number>, possibleByCat: Map<number, number>): number | null {
+    let weightedSum = 0;
+    let totalWeight = 0;
+    for (const [catIndex, possible] of possibleByCat) {
+      const cat = items.find((it) => it.catIndex === catIndex);
+      const weight = cat?.weight ?? 0;
+      if (weight > 0 && possible > 0) {
+        weightedSum += weight * ((earnedByCat.get(catIndex)! / possible) * 100);
+        totalWeight += weight;
+      }
+    }
+    return totalWeight > 0 ? weightedSum / totalWeight : null;
+  }
+
+  /** Straight total points, ignoring category weights entirely. */
+  function pointsPct(totalEarned: number, totalPossible: number): number | null {
+    return totalPossible > 0 ? (totalEarned / totalPossible) * 100 : null;
+  }
+
+  // One pass over every item to find each model's final answer, so it can be
+  // checked against the number Schoology actually reports for the course.
+  const finalEarnedByCat = new Map<number, number>();
+  const finalPossibleByCat = new Map<number, number>();
+  let finalEarned = 0;
+  let finalPossible = 0;
+  for (const it of items) {
+    finalEarnedByCat.set(it.catIndex, (finalEarnedByCat.get(it.catIndex) ?? 0) + it.earned);
+    finalPossibleByCat.set(it.catIndex, (finalPossibleByCat.get(it.catIndex) ?? 0) + it.possible);
+    finalEarned += it.earned;
+    finalPossible += it.possible;
+  }
+  const finalWeighted = weightedPct(finalEarnedByCat, finalPossibleByCat);
+  const finalPoints = pointsPct(finalEarned, finalPossible);
+
+  /*
+   * No reported grade to calibrate against (this course's headline number was
+   * itself computed by `fromCategories`) — stay consistent with that and use
+   * the weighted model. Otherwise use whichever model actually lands on the
+   * real number.
+   */
+  const useWeighted =
+    reportedPct == null
+      ? finalWeighted !== null
+      : finalWeighted !== null && (finalPoints === null || Math.abs(finalWeighted - reportedPct) <= Math.abs(finalPoints - reportedPct));
+
+  const earnedByCat = new Map<number, number>();
+  const possibleByCat = new Map<number, number>();
+  let runningEarned = 0;
+  let runningPossible = 0;
+
+  const points: GradePoint[] = [];
+  let prev: number | null = null;
+
+  for (const it of items) {
+    earnedByCat.set(it.catIndex, (earnedByCat.get(it.catIndex) ?? 0) + it.earned);
+    possibleByCat.set(it.catIndex, (possibleByCat.get(it.catIndex) ?? 0) + it.possible);
+    runningEarned += it.earned;
+    runningPossible += it.possible;
+
+    const pct = useWeighted ? weightedPct(earnedByCat, possibleByCat) : pointsPct(runningEarned, runningPossible);
+    if (pct === null) continue;
+
+    points.push({
+      d: it.when.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      v: Math.round(pct * 10) / 10,
+      title: `${it.name} (${it.earned}/${it.possible})`,
+      delta: prev === null ? 0 : Math.round((pct - prev) * 10) / 10,
+      first: prev === null,
+      id: it.id,
+    });
+    prev = pct;
+  }
+
+  return points;
+}
+
 function letterFor(p: number): string {
   if (p >= 93) return "A";
   if (p >= 90) return "A-";

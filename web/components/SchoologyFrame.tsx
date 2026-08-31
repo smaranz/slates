@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fmtClock } from "@/lib/format";
+
 /**
  * Schoology, live, inside Slates.
  *
@@ -17,9 +19,13 @@ interface Props {
   onClose: () => void;
   /** Called once Schoology shows the attempt as handed in. */
   onFinished?: () => void;
+  /** When the countdown in `AssessmentPanel` started, so the same clock keeps running inside the viewer. */
+  startedAt?: number | null;
+  /** Schoology's own time limit for this attempt, if it has one. */
+  timeLimitMin?: number | null;
 }
 
-export default function SchoologyFrame({ url, onClose, onFinished }: Props) {
+export default function SchoologyFrame({ url, onClose, onFinished, startedAt, timeLimitMin }: Props) {
   const [frame, setFrame] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(true);
@@ -85,6 +91,24 @@ export default function SchoologyFrame({ url, onClose, onFinished }: Props) {
    * merely looks like the end of a quiz.
    */
   const [finished, setFinished] = useState(false);
+
+  /*
+   * The same countdown `AssessmentPanel` shows before the attempt opens —
+   * mirrored here too, because the viewer covers that panel full-screen the
+   * moment it's up. Still Slates' own clock counting down from when it was
+   * opened, not a read of Schoology's; the disclaimer travels with it.
+   */
+  const timedRun = Boolean(startedAt && timeLimitMin);
+  const limitMs = (timeLimitMin ?? 0) * 60_000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!timedRun) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [timedRun]);
+  const remaining = timedRun ? Math.max(0, startedAt! + limitMs - now) : 0;
+  const expired = timedRun && remaining === 0;
+
   useEffect(() => {
     if (starting || finished) return;
     const t = window.setInterval(async () => {
@@ -121,6 +145,9 @@ export default function SchoologyFrame({ url, onClose, onFinished }: Props) {
 
   return (
     <div
+      /* Every keystroke belongs to the streamed page while this is up — the
+         command palette checks for this and stays shut. */
+      data-schoology-viewer=""
       style={{
         position: "fixed",
         inset: 0,
@@ -139,6 +166,23 @@ export default function SchoologyFrame({ url, onClose, onFinished }: Props) {
         <span style={{ flex: 1, fontSize: 12, color: "var(--muted)" }}>
           A real browser session, streamed. Your work saves to Schoology exactly as usual.
         </span>
+        {timedRun && (
+          <span
+            className="tabular"
+            title="Slates' own count from when you opened it — Schoology's clock is the real one."
+            style={{
+              fontSize: 15,
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              color: expired ? "var(--bad)" : "var(--text)",
+              padding: "4px 10px",
+              borderRadius: 9999,
+              border: `1px solid ${expired ? "var(--bad)" : "var(--line)"}`,
+            }}
+          >
+            {fmtClock(remaining)}
+          </span>
+        )}
         {finished && (
           <span
             style={{

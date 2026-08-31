@@ -14,6 +14,8 @@ import TutorView from "@/components/TutorView";
 import MessagesView from "@/components/MessagesView";
 import SettingsView from "@/components/SettingsView";
 import AssignmentView from "@/components/AssignmentView";
+import ClassesView from "@/components/ClassesView";
+import CommandPalette from "@/components/CommandPalette";
 
 export default function Page() {
   const s = useStore();
@@ -25,6 +27,10 @@ export default function Page() {
     if (s.assignmentId) return <AssignmentView />;
 
     switch (s.view) {
+      case "classes":
+        // Same course selection as Grades, a different question about it:
+        // everything the class has set, rather than how it's scored.
+        return nothingSynced ? <EmptyState /> : <ClassesView />;
       case "grades":
         return s.courseId ? <CourseView /> : <GradesView />;
       case "calendar":
@@ -50,6 +56,7 @@ export default function Page() {
         <Topbar />
         {body()}
       </div>
+      <CommandPalette />
     </div>
   );
 }

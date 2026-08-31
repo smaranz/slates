@@ -1,19 +1,22 @@
-import { Agent } from "@cursor/sdk";
+import { Agent } from "@/lib/cursor-sdk";
 import { openai } from "@ai-sdk/openai";
 import { openrouter } from "@openrouter/ai-sdk-provider";
 import { claudeCode } from "ai-sdk-provider-claude-code";
 import { streamText, type ModelMessage } from "ai";
 
 import {
+  DEFAULT_THINKING,
   DEFAULT_TUTOR_MODEL,
+  isThinkingLevel,
   isTutorModel,
-  TUTOR_REASONING_EFFORT,
   tutorModelBackend,
   tutorModelComposer,
   tutorModelGrok,
+  type ThinkingLevel,
   type TutorModelId,
 } from "@/lib/tutor-models";
 import type { TutorMessagePart } from "@/lib/attachments";
+import { TUTOR_ACTION_INSTRUCTIONS } from "@/lib/tutor-actions";
 
 // Streaming keeps the connection alive for long answers instead of
 // hitting a request timeout. The CLI-backed models (Claude Code, Cursor)
@@ -30,6 +33,8 @@ interface TutorRequest {
   studentName?: string;
   /** Whichever model the student picked in the composer. */
   model?: string;
+  /** Shared thinking level for OpenAI/Claude/OpenRouter — Grok bakes its own into the model id. */
+  thinking?: string;
 }
 
 /** Converts the composer's wire format into AI SDK message content. */
@@ -157,7 +162,8 @@ function streamFromCursorAgentSDK(
 }
 
 export async function POST(req: Request) {
-  const { messages, context, studentName, model }: TutorRequest = await req.json();
+  const { messages, context, studentName, model, thinking }: TutorRequest = await req.json();
+  const thinkingLevel: ThinkingLevel = isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response("messages required", { status: 400 });
@@ -166,7 +172,9 @@ export async function POST(req: Request) {
   const system = [
     "You are Slates Tutor, a concise high-school study coach.",
     studentName ? `The student's name is ${studentName}.` : "",
-    context ? `Their current courses and open work:\n${context}` : "",
+    context
+      ? `Everything on their board — every course, assignment (done and not), grade, submission, and comment:\n${context}`
+      : "",
     "",
     "Reply in 2-4 short sentences. Be specific: reference their actual courses",
     "and assignments when relevant, and end with one concrete next step.",
@@ -176,6 +184,8 @@ export async function POST(req: Request) {
     "",
     "The student may attach images or the extracted text of a document —",
     "read them closely before answering.",
+    "",
+    TUTOR_ACTION_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");
@@ -210,7 +220,7 @@ export async function POST(req: Request) {
           system,
           messages: modelMessages,
           providerOptions: {
-            "claude-code": { effort: TUTOR_REASONING_EFFORT },
+            "claude-code": { effort: thinkingLevel },
           },
         })
       : backend === "openrouter"
@@ -219,6 +229,9 @@ export async function POST(req: Request) {
             model: openrouter(modelId),
             system,
             messages: modelMessages,
+            providerOptions: {
+              openrouter: { reasoning: { effort: thinkingLevel } },
+            },
           })
         : streamText({
             // Direct to OpenAI — reads OPENAI_API_KEY from the environment.
@@ -226,7 +239,7 @@ export async function POST(req: Request) {
             system,
             messages: modelMessages,
             providerOptions: {
-              openai: { reasoningEffort: TUTOR_REASONING_EFFORT },
+              openai: { reasoningEffort: thinkingLevel },
             },
           });
 

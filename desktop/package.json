@@ -23,6 +23,7 @@
     },
     "files": [
       "main.mjs",
+      "splash.html",
       "package.json"
     ],
     "extraResources": [
@@ -45,6 +46,14 @@
       {
         "from": "../web/public",
         "to": "web/public"
+      },
+      {
+        "from": "../web/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+        "to": "web/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+      },
+      {
+        "from": "../web/node_modules/@cursor/sdk-darwin-arm64",
+        "to": "web/node_modules/@cursor/sdk-darwin-arm64"
       }
     ],
     "mac": {
