@@ -8,6 +8,12 @@ const nextConfig: NextConfig = {
    * and doesn't depend on npm existing on the machine that runs it.
    */
   output: "standalone",
+  /*
+   * @cursor/sdk ships its own pre-bundled webpack chunks (numbered files plus
+   * sidecar .LICENSE.txt banners). Bundling that through Turbopack too fails
+   * on the .LICENSE.txt files; requiring it natively via Node sidesteps it.
+   */
+  serverExternalPackages: ["@cursor/sdk"],
 };
 
 export default nextConfig;
