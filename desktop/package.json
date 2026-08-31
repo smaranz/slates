@@ -1,0 +1,63 @@
+{
+  "name": "slates-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "SLATES_ATTACH=1 electron .",
+    "build:web": "npm --prefix ../web run build",
+    "dist": "npm run build:web && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.slates.app",
+    "productName": "Slates",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.mjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../scraper",
+        "to": "scraper",
+        "filter": [
+          "**/*",
+          "!**/.DS_Store"
+        ]
+      },
+      {
+        "from": "../web/.next/standalone",
+        "to": "web"
+      },
+      {
+        "from": "../web/.next/static",
+        "to": "web/.next/static"
+      },
+      {
+        "from": "../web/public",
+        "to": "web/public"
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    }
+  }
+}

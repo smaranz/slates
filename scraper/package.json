@@ -1,0 +1,14 @@
+{
+  "name": "slates-scraper",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "login": "node login.mjs",
+    "serve": "node serve.mjs",
+    "once": "node once.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

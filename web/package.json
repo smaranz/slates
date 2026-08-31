@@ -1,0 +1,33 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "eslint",
+    "cursor:login": "node scripts/cursor-login.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.51",
+    "@ai-sdk/react": "^4.0.87",
+    "@cursor/sdk": "^1.0.30",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
+    "ai": "^7.0.84",
+    "ai-sdk-provider-claude-code": "^4.1.1",
+    "next": "16.3.3",
+    "pdfjs-dist": "^6.3.289",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.3",
+    "typescript": "^5"
+  }
+}

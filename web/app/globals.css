@@ -1,0 +1,595 @@
+/* Slates — design tokens ported from "Slates Dashboard.dc.html" */
+
+:root {
+  /* surfaces */
+  --bg: oklch(0.26 0 0);
+  --surface: oklch(0.301 0 0);
+  --surface-soft: oklch(0.301 0 0 / 0.55);
+  --surface-faint: oklch(0.301 0 0 / 0.4);
+  --sunken: oklch(0.269 0 0);
+  --raised: oklch(0.36 0 0);
+  --hover: oklch(0.34 0 0);
+
+  /* text */
+  --text: oklch(0.907 0 0);
+  --text-2: oklch(0.798 0 0);
+  --muted: oklch(0.683 0 0);
+  --faint: oklch(0.62 0 0);
+  --dim: oklch(0.48 0 0);
+
+  /* lines + elevation */
+  --line: oklch(1 0 0 / 0.07);
+  --line-strong: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.72 0.14 250);
+
+  --shadow-card: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 1px 2px oklch(0 0 0 / 0.18);
+  --shadow-inset: inset 0 1px 2px oklch(0 0 0 / 0.28), inset 0 -1px 0 oklch(1 0 0 / 0.03);
+  --shadow-sunken: inset 0 1px 2px oklch(0 0 0 / 0.28);
+  --shadow-raised: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.2),
+    0 2px 4px oklch(0 0 0 / 0.25);
+  --shadow-pop: 0 24px 60px oklch(0 0 0 / 0.45);
+  --shadow-menu: 0 12px 28px oklch(0 0 0 / 0.35);
+
+  /* semantic accents */
+  --good: oklch(0.82 0.15 145);
+  --warn: oklch(0.82 0.14 80);
+  --bad: oklch(0.78 0.18 25);
+  --info: oklch(0.82 0.14 250);
+
+  --radius-xl: 28px;
+  --radius-lg: 24px;
+  --radius-md: 20px;
+  --radius-sm: 16px;
+  --radius-xs: 12px;
+
+  --font: "Slates Ellipsis", ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN",
+    -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/*
+ * SF Rounded (and Maru Gothic) draw U+2026 on the midline. Pull that one
+ * glyph from a text face so "…" and text-overflow sit on the baseline.
+ */
+@font-face {
+  font-family: "Slates Ellipsis";
+  src: local("SF Pro Text"), local("SF Pro"), local(".SF NS Text"),
+    local("Helvetica Neue"), local("Arial");
+  unicode-range: U+2026;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  /* Rounded faces ligate "..." into a midline ellipsis. Keep the three dots. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+a:hover {
+  color: oklch(0.98 0 0);
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+/*
+ * ::placeholder does not reliably honor unicode-range composite fonts, so the
+ * rounded midline "…" still wins there. Use a text face for placeholder only —
+ * typed text stays rounded.
+ */
+::placeholder {
+  color: var(--muted);
+  font-family: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.42 0 0) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: oklch(0.42 0 0);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0 0);
+}
+
+@keyframes slates-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes slates-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.spin {
+  animation: slates-spin 1s linear infinite;
+}
+
+/*
+ * Handing work in drives a real browser through Schoology's dropbox, which
+ * takes several seconds. There is no percentage to report — a sweep that keeps
+ * moving says "still working" without inventing progress that doesn't exist.
+ */
+@keyframes slates-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress {
+  position: relative;
+  height: 3px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, var(--text-2), transparent);
+  animation: slates-sweep 1.15s ease-in-out infinite;
+}
+
+/* A step that has already finished stays legible but recedes. */
+.step-done {
+  color: var(--muted);
+}
+
+.step-now {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress::after {
+    animation-duration: 3s;
+  }
+  .spin {
+    animation-duration: 2.5s;
+  }
+}
+
+/* ---------- badges ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.badge--secondary {
+  background: var(--sunken);
+  color: var(--text-2);
+  border-color: var(--line);
+  box-shadow: var(--shadow-inset);
+}
+.badge--outline {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+}
+.badge--warning {
+  background: oklch(0.45 0.12 70 / 0.3);
+  color: var(--warn);
+  border-color: oklch(0.55 0.18 55 / 0.3);
+}
+.badge--success {
+  background: oklch(0.4 0.1 145 / 0.3);
+  color: var(--good);
+  border-color: oklch(0.5 0.15 145 / 0.3);
+}
+.badge--danger {
+  background: oklch(0.6 0.18 25 / 0.2);
+  color: var(--bad);
+  border-color: oklch(0.6 0.18 25 / 0.3);
+}
+.badge--speed {
+  background: oklch(0.4 0.1 250 / 0.3);
+  color: var(--info);
+  border-color: oklch(0.5 0.15 250 / 0.3);
+}
+.badge--premium {
+  background: oklch(0.4 0.1 300 / 0.3);
+  color: oklch(0.82 0.14 300);
+  border-color: oklch(0.5 0.15 300 / 0.3);
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  border-radius: 9999px;
+  cursor: pointer;
+  user-select: none;
+  border: 0;
+  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.btn--primary {
+  background-image: linear-gradient(180deg, oklch(0.42 0 0) 0%, oklch(0.37 0 0) 100%);
+  color: var(--text);
+  text-shadow: 0 1px 1px oklch(0 0 0 / 0.4);
+  box-shadow: var(--shadow-raised);
+}
+.btn--primary:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, oklch(0.46 0 0) 0%, oklch(0.4 0 0) 100%);
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.btn--quiet:hover:not(:disabled) {
+  color: var(--text);
+  background: oklch(1 0 0 / 0.03);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Dimmed enough to read as unavailable, bright enough that the spinner in it
+   is still visible — a frozen-looking button is what made this feel hung. */
+.btn--busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.icon-btn:hover {
+  color: var(--text);
+}
+
+.pfp-btn {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.pfp-btn .pfp-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: oklch(0 0 0 / 0.45);
+  color: oklch(0.96 0 0);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pfp-btn:hover .pfp-overlay,
+.pfp-btn:focus-visible .pfp-overlay {
+  opacity: 1;
+}
+
+/* card footer action strip */
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 0;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+}
+.strip:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+/* ---------- surfaces ---------- */
+
+.card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.card--xl {
+  border-radius: var(--radius-xl);
+}
+
+.card--pad {
+  padding: 18px 20px;
+}
+
+.input {
+  width: 100%;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.input:focus {
+  border-color: oklch(1 0 0 / 0.16);
+}
+
+.input--lg {
+  height: 38px;
+  border-radius: var(--radius-xs);
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+/* Fake placeholder so the dots can use a text face. ::placeholder ligates. */
+.ph-field {
+  position: relative;
+}
+.ph-field__hint {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  /* One text face for the whole hint so "here" and "..." share a baseline. */
+  font-family: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+.ph-field--compact .ph-field__hint {
+  left: 10px;
+  top: 8px;
+}
+.ph-field:has(textarea:not(:placeholder-shown)) .ph-field__hint,
+.ph-field:has(input:not(:placeholder-shown)) .ph-field__hint {
+  visibility: hidden;
+}
+.ph-field__dots {
+  font: inherit;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  outline: none;
+}
+
+/* Borderless field that sits inside its own styled shell (search box, chat
+   composer). Kept as a class rather than an inline style object: shorthand
+   properties in React's `style` prop expand to longhands in the DOM, which
+   trips the hydration diff on form elements. */
+.bare-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.bare-field--chat {
+  resize: none;
+  padding: 8px;
+  font-size: 15px;
+  line-height: 1.4;
+  max-height: 140px;
+}
+
+.field-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---------- layout ---------- */
+
+.shell {
+  display: flex;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.main {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 24px 24px;
+}
+
+.centered {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.col {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* meter bars used in grade categories */
+.meter {
+  min-width: 60px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  overflow: hidden;
+  display: block;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The brand row owns its padding here rather than inline, so the desktop
+ * override below can actually win — an inline `padding` shorthand outranks any
+ * stylesheet `padding-top`.
+ */
+.app-brand {
+  padding: 12px 16px;
+}
+
+/*
+ * Desktop shell only. The window is frameless with inset traffic lights, so
+ * the brand row has to clear them — otherwise the red/yellow/green sit on top
+ * of the paperclip. The strip doubles as the window's drag handle, which a
+ * frameless window would otherwise lack entirely.
+ */
+:root[data-desktop="1"] .app-brand {
+  padding-top: 40px;
+  -webkit-app-region: drag;
+}
+
+/* Nothing in the row is interactive, but keep text selection sane. */
+:root[data-desktop="1"] .app-brand * {
+  user-select: none;
+}

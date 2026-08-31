@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Slates",
+  "version": "0.1.0",
+  "description": "Authenticated bridge between the Slates portal and Schoology.",
+  "permissions": ["storage", "tabs", "idle", "alarms", "scripting"],
+  "host_permissions": ["https://*.schoology.com/*"],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Slates"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.schoology.com/*"],
+      "js": ["content/proxy.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost/*",
+      "http://127.0.0.1/*",
+      "https://*.vercel.app/*"
+    ]
+  }
+}
