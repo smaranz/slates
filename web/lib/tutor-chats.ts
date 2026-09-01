@@ -3,6 +3,9 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import type { Attachment } from "./attachments";
+import type { TutorDocument } from "./tutor-documents";
+import type { TutorGraph } from "./tutor-graph";
+import type { Quiz } from "./tutor-quiz";
 
 /**
  * Every tutor conversation, kept across reloads.
@@ -32,6 +35,18 @@ export interface TutorChatMessage {
   attachments?: Attachment[];
   /** Human-readable summaries of any board actions this reply took. */
   actions?: string[];
+  /** A practice set the tutor built for this reply, if it built one. */
+  quiz?: Quiz;
+  /** A study guide, outline, or other document the tutor wrote for this reply. */
+  document?: TutorDocument;
+  /** A graph the tutor plotted directly in chat (not inside a document or quiz). */
+  graph?: TutorGraph;
+  /**
+   * A teaching video the tutor kicked off. Only the id is kept — the script,
+   * narration and MP4 live under ~/.slates/lessons, orders of magnitude too
+   * large for localStorage, and the player looks the lesson up by id.
+   */
+  lesson?: { id: string; topic: string };
 }
 
 export interface TutorChat {

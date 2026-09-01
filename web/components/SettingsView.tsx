@@ -12,6 +12,7 @@ import {
   Avatar,
   CursorLogo,
   DeepSeekLogo,
+  ElevenLabsLogo,
   Dot,
   GeminiLogo,
   MiniMaxLogo,
@@ -23,7 +24,8 @@ import {
 } from "./ui";
 
 interface ProviderInfo {
-  backend: TutorModelBackend;
+  /** Tutor backends plus ElevenLabs, which powers narration rather than chat. */
+  backend: TutorModelBackend | "elevenlabs";
   label: string;
   powers: string;
   configured: boolean;
@@ -32,8 +34,9 @@ interface ProviderInfo {
 
 type TestState = { status: "idle" | "testing" | "ok" | "error"; error?: string };
 
-const PROVIDER_ICON: Record<TutorModelBackend, ReactNode> = {
+const PROVIDER_ICON: Record<ProviderInfo["backend"], ReactNode> = {
   openai: <OpenAILogo size={16} />,
+  elevenlabs: <ElevenLabsLogo size={15} />,
   "claude-code": <AnthropicLogo size={16} />,
   "cursor-agent": <CursorLogo size={16} />,
   openrouter: (
@@ -86,7 +89,7 @@ export default function SettingsView() {
    */
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [providersError, setProvidersError] = useState<string | null>(null);
-  const [tests, setTests] = useState<Partial<Record<TutorModelBackend, TestState>>>({});
+  const [tests, setTests] = useState<Partial<Record<ProviderInfo["backend"], TestState>>>({});
 
   const checkProviders = useCallback(async () => {
     setProviders(null);
@@ -105,7 +108,7 @@ export default function SettingsView() {
     void checkProviders();
   }, [checkProviders]);
 
-  const runTest = useCallback(async (backend: TutorModelBackend) => {
+  const runTest = useCallback(async (backend: ProviderInfo["backend"]) => {
     setTests((t) => ({ ...t, [backend]: { status: "testing" } }));
     try {
       const res = await fetch("/api/providers", {

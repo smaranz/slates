@@ -17,8 +17,16 @@ export const maxDuration = 60;
 
 const execFileP = promisify(execFile);
 
+/**
+ * Narration is not a tutor backend — nothing in the model picker drives it —
+ * but it is another key the student either has or hasn't set, and this is the
+ * one screen where they look that up. It rides the same list rather than
+ * growing a second, near-identical section.
+ */
+export type ProviderId = TutorModelBackend | "elevenlabs";
+
 interface ProviderStatus {
-  backend: TutorModelBackend;
+  backend: ProviderId;
   label: string;
   powers: string;
   /** Cheap baseline: an env var is set, or the CLI resolves on PATH. Not proof it works. */
@@ -78,6 +86,13 @@ export async function GET() {
       configured: !!process.env.OPENROUTER_API_KEY,
       detail: "Reads OPENROUTER_API_KEY from the environment.",
     },
+    {
+      backend: "elevenlabs",
+      label: "ElevenLabs",
+      powers: "Narration for teaching videos",
+      configured: !!process.env.ELEVENLABS_API_KEY,
+      detail: "Reads ELEVENLABS_API_KEY from the environment.",
+    },
   ];
 
   return Response.json({ providers });
@@ -90,7 +105,7 @@ export async function GET() {
  * demand from a Test button rather than automatically on every page load.
  */
 export async function POST(req: Request) {
-  const { backend } = (await req.json().catch(() => ({}))) as { backend?: TutorModelBackend };
+  const { backend } = (await req.json().catch(() => ({}))) as { backend?: ProviderId };
 
   try {
     if (backend === "openai") {
@@ -112,6 +127,20 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) throw new Error(res.status === 401 ? "OpenRouter rejected the key." : `OpenRouter returned ${res.status}.`);
+      return Response.json({ ok: true });
+    }
+
+    if (backend === "elevenlabs") {
+      const key = process.env.ELEVENLABS_API_KEY;
+      if (!key) throw new Error("ELEVENLABS_API_KEY is not set.");
+      // Listing voices is the cheapest call that still proves the key works.
+      const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+        headers: { "xi-api-key": key },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        throw new Error(res.status === 401 ? "ElevenLabs rejected the key." : `ElevenLabs returned ${res.status}.`);
+      }
       return Response.json({ ok: true });
     }
 

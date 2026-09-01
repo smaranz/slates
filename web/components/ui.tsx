@@ -91,11 +91,15 @@ export const ICON = {
   clockHands: "M11 7h2v6h-2zm2 6h4v2h-4z",
   external: "M10 4h10v10h-2V7.4l-8.3 8.3-1.4-1.4L16.6 6H10z M4 8h4v2H5v9h9v-3h2v5H4z",
   chevronDown: "M6 9h12l-6 6z",
+  /** A filled square — stop, as every player draws it. */
+  stop: "M6.5 6h11a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5z",
   /** A panel with a list rail down its left side. */
   sidebar: "M3 4h18v16H3V4zm2 2v12h4V6H5zm6 0v12h8V6h-8z",
   trash: "M9 3h6v2h5v2H4V5h5V3zM6 8h12l-1 13H7L6 8zm2.2 2 .7 9h6.2l.7-9H8.2z",
   check: "M9.6 16.2 5.4 12l-1.4 1.4 5.6 5.6 12-12-1.4-1.4z",
   close: "M12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5z",
+  download: "M12 3v10.17l3.59-3.58L17 11l-5 5-5-5 1.41-1.41L11 13.17V3zM5 19h14v2H5z",
+  copy: "M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m0 16H8V7h11z",
 } as const;
 
 export function Icon({
@@ -216,6 +220,11 @@ export function GeminiLogo({ size = 14, style }: { size?: number; style?: CSSPro
       d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
     />
   );
+}
+
+/** ElevenLabs' mark: two bars, the pause glyph they build the brand on. */
+export function ElevenLabsLogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {
+  return <BrandMark size={size} style={style} d="M6 3h4v18H6zm8 0h4v18h-4z" />;
 }
 
 export function MiniMaxLogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {

@@ -13,10 +13,18 @@ import {
   type TutorChatMessage,
 } from "@/lib/tutor-chats";
 import { buildTutorContext } from "@/lib/tutor-context";
+import { parseTutorDocument, stripTutorDocument } from "@/lib/tutor-documents";
+import { parseTutorGraph, stripTutorGraph } from "@/lib/tutor-graph";
 import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-models";
+import { parseTutorQuiz, stripTutorQuiz, type QuizFRQuestion } from "@/lib/tutor-quiz";
 import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
 import AITextLoading from "./AITextLoading";
+import DocumentCard from "./DocumentCard";
+import GraphCard from "./GraphCard";
 import ModelPicker from "./ModelPicker";
+import LessonCard from "./LessonCard";
+import QuizCard from "./QuizCard";
+import TutorMarkdown from "./TutorMarkdown";
 import { Icon, ICON } from "./ui";
 
 const ACCEPTED_FILE_TYPES =
@@ -42,6 +50,14 @@ export default function TutorView() {
    * thread as busy or let a stopped-looking chat swallow the typing dots.
    */
   const [busyChatId, setBusyChatId] = useState<string | null>(null);
+  /**
+   * The chat whose video is still being built. Asking for a video occupies the
+   * tutor for the whole build rather than firing it off and carrying on — it's
+   * the answer to what was asked, not a background errand.
+   */
+  const [lessonChatId, setLessonChatId] = useState<string | null>(null);
+  /** The lesson being built, so Stop can call it off server-side. */
+  const lessonRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useTutorModel();
   const [effort, setEffort] = useTutorThinking();
@@ -50,8 +66,12 @@ export default function TutorView() {
   const [railOpen, toggleRail] = useTutorRail();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Aborts the reply currently streaming, so the composer can stop it. */
+  const abortRef = useRef<AbortController | null>(null);
 
-  const thinking = busyChatId !== null && busyChatId === chats.activeId;
+  // Either kind of work occupies the composer, and both are stoppable.
+  const occupied = busyChatId ?? lessonChatId;
+  const thinking = occupied !== null && occupied === chats.activeId;
 
   const canAttach = tutorModelSupportsAttachments(model);
 
@@ -91,6 +111,9 @@ export default function TutorView() {
   /** Runs a board action the tutor asked for, returning what changed (or null if it couldn't). */
   const applyAction = useCallback(
     (action: ReturnType<typeof parseTutorActions>["actions"][number]) => {
+      // A video isn't a board edit and resolves to no assignment. It's kicked
+      // off separately below, once the reply it belongs to is on screen.
+      if (action.kind === "make_video") return null;
       const a = s.assignmentById(action.id);
       if (!a) return null;
       switch (action.kind) {
@@ -113,6 +136,51 @@ export default function TutorView() {
       return describeTutorAction(action, a.title);
     },
     [s]
+  );
+
+  /**
+   * Cut the current reply short.
+   *
+   * Whatever has already streamed stays on screen — it's usually the useful
+   * part, and that's why you stopped it. Nothing the half-finished reply asked
+   * for is acted on: board actions and quizzes are parsed only from a reply
+   * that finished, so a tag caught mid-sentence can't fire.
+   */
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    // A render is six Chrome workers; stopping has to reach the server, not
+    // just stop the page from watching.
+    const lesson = lessonRef.current;
+    if (lesson) {
+      void fetch(`/api/lesson?id=${encodeURIComponent(lesson)}`, { method: "DELETE" }).catch(() => {});
+    }
+  }, []);
+
+  /**
+   * Hand a requested video to the pipeline and pin it to the reply that asked
+   * for it. Only the id is stored on the message — the render takes minutes
+   * and reports its own progress, so the card below picks it up from there.
+   */
+  const beginLesson = useCallback(
+    async (chatId: string, messageId: string, topic: string, images: boolean) => {
+      try {
+        const res = await fetch("/api/lesson", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic, images, context: buildContext() }),
+        });
+        const body = (await res.json()) as { id?: string; error?: string };
+        if (!res.ok || !body.id) throw new Error(body.error ?? "Couldn't start that video.");
+        lessonRef.current = body.id;
+        setLessonChatId(chatId);
+        chats.updateMessages(chatId, (prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, lesson: { id: body.id!, topic } } : m))
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't start that video.");
+      }
+    },
+    [buildContext, chats]
   );
 
   const send = useCallback(
@@ -138,6 +206,8 @@ export default function TutorView() {
         },
       ];
       const replyId = `a${Date.now()}`;
+      const controller = new AbortController();
+      abortRef.current = controller;
       chats.updateMessages(chatId, () => [...next, { id: replyId, role: "assistant", text: "" }]);
       setDraft("");
       setPending([]);
@@ -159,6 +229,7 @@ export default function TutorView() {
             model,
             thinking: effort,
           }),
+          signal: controller.signal,
         });
 
         if (!res.ok || !res.body) {
@@ -173,8 +244,8 @@ export default function TutorView() {
           const { done, value } = await reader.read();
           if (done) break;
           acc += decoder.decode(value, { stream: true });
-          // Action tags are stripped as they stream in so the student never sees the raw syntax.
-          const shown = stripTutorActions(acc);
+          // Action, quiz, document, and graph tags are stripped as they stream in so the student never sees the raw syntax.
+          const shown = stripTutorGraph(stripTutorDocument(stripTutorQuiz(stripTutorActions(acc))));
           chats.updateMessages(chatId, (prev) =>
             prev.map((m) => (m.id === replyId ? { ...m, text: shown } : m))
           );
@@ -182,20 +253,84 @@ export default function TutorView() {
 
         if (!acc.trim()) throw new Error("Empty response from tutor.");
 
-        const { clean, actions } = parseTutorActions(acc);
+        const { clean: withoutQuiz, quiz } = parseTutorQuiz(acc);
+        const { clean: withoutDoc, document: doc } = parseTutorDocument(withoutQuiz);
+        const { clean: withoutGraph, graph } = parseTutorGraph(withoutDoc);
+        const { clean, actions } = parseTutorActions(withoutGraph);
         const applied = actions.map(applyAction).filter((a): a is string => a !== null);
         chats.updateMessages(chatId, (prev) =>
-          prev.map((m) => (m.id === replyId ? { ...m, text: clean, actions: applied } : m))
+          prev.map((m) =>
+            m.id === replyId
+              ? {
+                  ...m,
+                  text: clean,
+                  actions: applied,
+                  quiz: quiz ?? undefined,
+                  document: doc ?? undefined,
+                  graph: graph ?? undefined,
+                }
+              : m
+          )
         );
+
+        // Started after the reply lands rather than awaited inside it: a video
+        // takes minutes, and the student should be reading the answer already.
+        const video = actions.find((a) => a.kind === "make_video");
+        if (video) void beginLesson(chatId, replyId, video.topic, video.images);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Something went wrong.");
-        // Drop the empty assistant bubble so the thread doesn't show a blank.
+        // Stopping is something the student did on purpose, not a failure.
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
+          setError(e instanceof Error ? e.message : "Something went wrong.");
+        }
+        // Keep whatever arrived; drop the bubble only if nothing did.
         chats.updateMessages(chatId, (prev) => prev.filter((m) => m.id !== replyId || m.text));
       } finally {
+        abortRef.current = null;
         setBusyChatId(null);
       }
     },
-    [applyAction, buildContext, chats, draft, effort, messages, model, pending, s.studentName, thinking]
+    [applyAction, beginLesson, buildContext, chats, draft, effort, messages, model, pending, s.studentName, thinking]
+  );
+
+  /** Locks in a multiple-choice pick — persisted on the message, like everything else in the thread. */
+  const answerQuizChoice = useCallback(
+    (messageId: string, questionIndex: number, choice: number) => {
+      if (!chats.activeId) return;
+      chats.updateMessages(chats.activeId, (prev) =>
+        prev.map((m) => {
+          if (m.id !== messageId || !m.quiz) return m;
+          const questions = m.quiz.questions.map((q, i) =>
+            i === questionIndex && q.type === "mcq" ? { ...q, selected: choice } : q
+          );
+          return { ...m, quiz: { ...m.quiz, questions } };
+        })
+      );
+    },
+    [chats]
+  );
+
+  const revealQuizSample = useCallback(
+    (messageId: string, questionIndex: number) => {
+      if (!chats.activeId) return;
+      chats.updateMessages(chats.activeId, (prev) =>
+        prev.map((m) => {
+          if (m.id !== messageId || !m.quiz) return m;
+          const questions = m.quiz.questions.map((q, i) =>
+            i === questionIndex && q.type === "frq" ? { ...q, revealed: true } : q
+          );
+          return { ...m, quiz: { ...m.quiz, questions } };
+        })
+      );
+    },
+    [chats]
+  );
+
+  /** Sending an FRQ answer for feedback is just another chat turn — the tutor already has full context. */
+  const requestQuizFeedback = useCallback(
+    (question: QuizFRQuestion, answer: string) => {
+      void send(`Grade my answer to this practice question:\n\n"${question.prompt}"\n\nMy answer: ${answer}`);
+    },
+    [send]
   );
 
   const empty = messages.length === 0;
@@ -293,76 +428,122 @@ export default function TutorView() {
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.map((m) => {
+            /*
+             * The assistant's message is created empty and filled as the reply
+             * streams in, so for the first moment there is nothing to draw.
+             * Rendering the bubble anyway left a stray rounded box hanging
+             * above the typing indicator, which already says the same thing.
+             */
+            const hasBubble = !!m.text || !!m.attachments?.length || !!m.actions?.length;
+            if (!hasBubble && !m.quiz && !m.lesson && !m.document && !m.graph) return null;
+
+            return (
             <div
               key={m.id}
               style={{ display: "flex", width: "100%", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}
             >
               <div
-                style={
-                  m.role === "user"
-                    ? {
-                        maxWidth: "75%",
-                        borderRadius: 24,
-                        background: "var(--raised)",
-                        padding: "10px 16px",
-                        fontSize: 15,
-                        lineHeight: 1.5,
-                        color: "var(--text)",
-                        boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.2)",
-                        whiteSpace: "pre-wrap",
-                      }
-                    : {
-                        maxWidth: "min(75%, 42rem)",
-                        borderRadius: 24,
-                        border: "1px solid var(--line)",
-                        background: "var(--surface)",
-                        padding: "10px 16px",
-                        fontSize: 15,
-                        lineHeight: 1.55,
-                        color: "var(--text)",
-                        boxShadow: "var(--shadow-card)",
-                        whiteSpace: "pre-wrap",
-                      }
-                }
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  maxWidth: m.role === "user" ? "75%" : "min(92%, 640px)",
+                  alignItems: m.role === "user" ? "flex-end" : "flex-start",
+                }}
               >
-                {m.attachments && m.attachments.length > 0 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 6,
-                      marginBottom: m.text ? 8 : 0,
+                {hasBubble && (
+                <div
+                  style={
+                    m.role === "user"
+                      ? {
+                          borderRadius: 24,
+                          background: "var(--raised)",
+                          padding: "10px 16px",
+                          fontSize: 15,
+                          lineHeight: 1.5,
+                          color: "var(--text)",
+                          boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.2)",
+                          whiteSpace: "pre-wrap",
+                        }
+                      : {
+                          borderRadius: 24,
+                          border: "1px solid var(--line)",
+                          background: "var(--surface)",
+                          padding: "10px 16px",
+                          fontSize: 15,
+                          lineHeight: 1.55,
+                          color: "var(--text)",
+                          boxShadow: "var(--shadow-card)",
+                          whiteSpace: "pre-wrap",
+                        }
+                  }
+                >
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                        marginBottom: m.text ? 8 : 0,
+                      }}
+                    >
+                      {m.attachments.map((a) => (
+                        <AttachmentChip key={a.id} attachment={a} />
+                      ))}
+                    </div>
+                  )}
+                  {m.role === "assistant" ? <TutorMarkdown text={m.text} /> : m.text}
+                  {m.actions && m.actions.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: m.text ? 10 : 0 }}>
+                      {m.actions.map((label, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 12,
+                            color: "var(--good)",
+                          }}
+                        >
+                          <Icon path={ICON.check} size={12} />
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {m.quiz && (
+                  <QuizCard
+                    quiz={m.quiz}
+                    busy={thinking}
+                    onSelect={(questionIndex, choice) => answerQuizChoice(m.id, questionIndex, choice)}
+                    onReveal={(questionIndex) => revealQuizSample(m.id, questionIndex)}
+                    onRequestFeedback={requestQuizFeedback}
+                  />
+                )}
+
+                {m.lesson && (
+                  <LessonCard
+                    id={m.lesson.id}
+                    topic={m.lesson.topic}
+                    onSettled={() => {
+                      if (lessonRef.current === m.lesson!.id) lessonRef.current = null;
+                      setLessonChatId((c) => (c === chats.activeId ? null : c));
                     }}
-                  >
-                    {m.attachments.map((a) => (
-                      <AttachmentChip key={a.id} attachment={a} />
-                    ))}
-                  </div>
+                  />
                 )}
-                {m.text}
-                {m.actions && m.actions.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: m.text ? 10 : 0 }}>
-                    {m.actions.map((label, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontSize: 12,
-                          color: "var(--good)",
-                        }}
-                      >
-                        <Icon path={ICON.check} size={12} />
-                        {label}
-                      </div>
-                    ))}
-                  </div>
-                )}
+
+                {m.document && <DocumentCard document={m.document} />}
+
+                {m.graph && <GraphCard graph={m.graph} />}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {thinking && messages[messages.length - 1]?.text === "" && (
             <div style={{ display: "flex", justifyContent: "flex-start" }}>
@@ -479,11 +660,15 @@ export default function TutorView() {
               onThinkingChange={setEffort}
             />
             <span style={{ flex: 1 }} />
+            {/* One button in two states. While a reply streams it stops it —
+                a send button greyed out for the whole answer leaves no way to
+                take back a question you'd rather rephrase. */}
             <button
               type="button"
-              onClick={() => send()}
-              aria-label="Send"
-              disabled={(!draft.trim() && pending.length === 0) || thinking}
+              onClick={() => (thinking ? stop() : send())}
+              aria-label={thinking ? "Stop" : "Send"}
+              title={thinking ? "Stop generating" : "Send"}
+              disabled={!thinking && !draft.trim() && pending.length === 0}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -498,11 +683,11 @@ export default function TutorView() {
                   "linear-gradient(180deg, oklch(0.42 0 0) 0%, oklch(0.37 0 0) 100%)",
                 color: "var(--text)",
                 boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.2)",
-                opacity: (!draft.trim() && pending.length === 0) || thinking ? 0.4 : 1,
-                pointerEvents: (!draft.trim() && pending.length === 0) || thinking ? "none" : "auto",
+                opacity: !thinking && !draft.trim() && pending.length === 0 ? 0.4 : 1,
+                pointerEvents: !thinking && !draft.trim() && pending.length === 0 ? "none" : "auto",
               }}
             >
-              <Icon path={[ICON.send, ICON.send2]} size={18} />
+              <Icon path={thinking ? ICON.stop : [ICON.send, ICON.send2]} size={thinking ? 13 : 18} />
             </button>
           </div>
         </div>

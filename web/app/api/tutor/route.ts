@@ -17,6 +17,9 @@ import {
 } from "@/lib/tutor-models";
 import type { TutorMessagePart } from "@/lib/attachments";
 import { TUTOR_ACTION_INSTRUCTIONS } from "@/lib/tutor-actions";
+import { TUTOR_DOCUMENT_INSTRUCTIONS } from "@/lib/tutor-documents";
+import { TUTOR_GRAPH_INSTRUCTIONS } from "@/lib/tutor-graph";
+import { TUTOR_QUIZ_INSTRUCTIONS } from "@/lib/tutor-quiz";
 
 // Streaming keeps the connection alive for long answers instead of
 // hitting a request timeout. The CLI-backed models (Claude Code, Cursor)
@@ -176,9 +179,12 @@ export async function POST(req: Request) {
       ? `Everything on their board — every course, assignment (done and not), grade, submission, and comment:\n${context}`
       : "",
     "",
-    "Reply in 2-4 short sentences. Be specific: reference their actual courses",
-    "and assignments when relevant, and end with one concrete next step.",
-    "No markdown headers. No bullet list longer than 3 items.",
+    "For an ordinary chat reply, answer in 2-4 short sentences. Be specific:",
+    "reference their actual courses and assignments when relevant, and end",
+    "with one concrete next step. No markdown headers and no bullet list",
+    "longer than 3 items in a chat reply — that limit doesn't apply inside a",
+    "document, quiz, or graph block (see below), which should be as complete",
+    "and well-formatted as the task actually calls for.",
     "If they ask you to do an assignment for them, help them work through it",
     "instead — explain the concept, then ask what they'd try next.",
     "",
@@ -186,6 +192,12 @@ export async function POST(req: Request) {
     "read them closely before answering.",
     "",
     TUTOR_ACTION_INSTRUCTIONS,
+    "",
+    TUTOR_DOCUMENT_INSTRUCTIONS,
+    "",
+    TUTOR_QUIZ_INSTRUCTIONS,
+    "",
+    TUTOR_GRAPH_INSTRUCTIONS,
   ]
     .filter(Boolean)
     .join("\n");

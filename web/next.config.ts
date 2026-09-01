@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
    * on the .LICENSE.txt files; requiring it natively via Node sidesteps it.
    */
   serverExternalPackages: ["@cursor/sdk"],
+  // The floating dev-mode badge (route info, build activity) — off, not just
+  // repositioned, so it never shows up over the composer or a card corner.
+  devIndicators: false,
 };
 
 export default nextConfig;
