@@ -91,6 +91,9 @@ export const ICON = {
   clockHands: "M11 7h2v6h-2zm2 6h4v2h-4z",
   external: "M10 4h10v10h-2V7.4l-8.3 8.3-1.4-1.4L16.6 6H10z M4 8h4v2H5v9h9v-3h2v5H4z",
   chevronDown: "M6 9h12l-6 6z",
+  /** A panel with a list rail down its left side. */
+  sidebar: "M3 4h18v16H3V4zm2 2v12h4V6H5zm6 0v12h8V6h-8z",
+  trash: "M9 3h6v2h5v2H4V5h5V3zM6 8h12l-1 13H7L6 8zm2.2 2 .7 9h6.2l.7-9H8.2z",
   check: "M9.6 16.2 5.4 12l-1.4 1.4 5.6 5.6 12-12-1.4-1.4z",
   close: "M12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5z",
 } as const;

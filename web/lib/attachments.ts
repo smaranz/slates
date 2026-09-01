@@ -7,6 +7,12 @@ export type Attachment =
       mediaType: string;
       /** data: URL, used for both the preview thumbnail and the request body. */
       dataUrl: string;
+      /**
+       * Set once the conversation has been through storage, which keeps the
+       * name and drops the bytes — see `forStorage` in lib/tutor-chats.ts.
+       * `dataUrl` is empty when this is true.
+       */
+      dropped?: boolean;
     }
   | {
       id: string;
@@ -37,6 +43,18 @@ export function toTutorMessageParts(
 
   for (const a of attachments) {
     if (a.kind === "image") {
+      /*
+       * An image from a reloaded conversation has a name and no bytes. Say so:
+       * the model can still follow a thread that refers back to "the graph I
+       * sent", which it can't do if the picture silently disappears.
+       */
+      if (!a.dataUrl) {
+        parts.push({
+          type: "text",
+          text: `[Image "${a.name}" was attached earlier in this conversation and is no longer available.]`,
+        });
+        continue;
+      }
       const comma = a.dataUrl.indexOf(",");
       parts.push({
         type: "image",

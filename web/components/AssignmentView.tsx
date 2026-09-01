@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { IMPACT_LABEL, useStore, type SubmitState } from "@/lib/store";
 import { fmtBytes, fmtClock, fmtMinutes } from "@/lib/format";
-import type { AssessmentReview } from "@/lib/types";
+import type { AssessmentReview, ItemAttachment } from "@/lib/types";
 import { Badge, ClockIcon, Icon, ICON, Spinner } from "./ui";
 import AssessmentPanel from "./AssessmentPanel";
 import QuestionReview from "./QuestionReview";
@@ -50,6 +50,103 @@ function SubmitProgress({ state }: { state: SubmitState }) {
         Slates is working through Schoology&apos;s own submission box in the background. Moving to
         another view won&apos;t interrupt it.
       </p>
+    </div>
+  );
+}
+
+/** File types Chromium draws itself. Anything else is handed to the browser. */
+const DRAWABLE = /\.(pdf|png|jpe?g|gif|webp|svg|txt)$/i;
+
+/**
+ * Handouts and links posted with the item.
+ *
+ * Often this *is* the assignment — "Quizlet: 1.1 Vocabulario" has no write-up
+ * at all, just a link to the set you're meant to study — so it sits directly
+ * under the description rather than behind an "open in Schoology" trip.
+ *
+ * A file Chromium can draw opens in place: its bytes come back through the
+ * scraper, which is the only thing holding a Schoology session. A link leaves
+ * for the real site, and goes to the destination itself rather than through
+ * Schoology's redirect, which would need that session too.
+ */
+function Attachments({ items, domain }: { items: ItemAttachment[]; domain: string }) {
+  const [open, setOpen] = useState<string | null>(null);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <span className="section-label">
+        {items.length === 1 ? "Attached" : `Attached · ${items.length}`}
+      </span>
+
+      {items.map((at) => {
+        const drawable = at.kind === "file" && DRAWABLE.test(at.url);
+        const showing = open === at.url;
+        const away = at.target || new URL(at.url, `https://${domain}`).href;
+        // The filename only earns a line when it isn't just the title again.
+        const sub = [at.filename !== at.title ? at.filename : "", at.size]
+          .filter(Boolean)
+          .join(" · ");
+
+        return (
+          <div key={at.url} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <button
+              type="button"
+              className="palette-row"
+              onClick={() =>
+                drawable
+                  ? setOpen(showing ? null : at.url)
+                  : window.open(away, "_blank", "noopener,noreferrer")
+              }
+              style={{
+                border: "1px solid var(--line)",
+                background: "var(--surface)",
+                padding: "11px 13px",
+                alignItems: "flex-start",
+              }}
+            >
+              <span style={{ display: "flex", width: 18, justifyContent: "center", marginTop: 1, flexShrink: 0 }}>
+                <Icon
+                  path={at.kind === "file" ? ICON.file : ICON.external}
+                  size={14}
+                  style={{ color: "var(--text-2)" }}
+                />
+              </span>
+
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span className="truncate" style={{ display: "block", fontSize: 13.5, color: "var(--text)" }}>
+                  {at.title}
+                </span>
+                {sub && (
+                  <span
+                    className="truncate"
+                    style={{ display: "block", marginTop: 3, fontSize: 12, color: "var(--muted)" }}
+                  >
+                    {sub}
+                  </span>
+                )}
+              </span>
+
+              <span style={{ flexShrink: 0, fontSize: 11.5, color: "var(--faint)" }}>
+                {drawable ? (showing ? "Hide" : "Open") : at.kind === "file" ? "Download" : "Open ↗"}
+              </span>
+            </button>
+
+            {showing && (
+              <iframe
+                src={`/api/materials/file?path=${encodeURIComponent(at.url)}`}
+                title={at.title}
+                style={{
+                  height: 620,
+                  width: "100%",
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--surface)",
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -187,14 +284,36 @@ export default function AssignmentView() {
             {a.title}
           </h2>
           <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)" }}>
-            {submitted ? "Turned in" : a.due} · {fmtMinutes(a.minutes)} · {a.code}
+            {[
+              submitted ? "Turned in" : a.due,
+              fmtMinutes(a.minutes),
+              a.code,
+              a.postedAt && `Posted ${a.postedAt}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
 
-        {a.brief && (
-          <p style={{ margin: 0, maxWidth: "70ch", fontSize: 14, lineHeight: 1.5, color: "var(--text-2)" }}>
-            {a.brief}
-          </p>
+        {/* What the teacher actually wrote, structure and all. Markup when the
+            scraper kept it; otherwise the plain text, whose line breaks are
+            the only structure left to preserve. */}
+        {a.briefHtml ? (
+          <div
+            className="prose"
+            style={{ maxWidth: "70ch" }}
+            dangerouslySetInnerHTML={{ __html: a.briefHtml }}
+          />
+        ) : (
+          a.brief && (
+            <div className="prose prose--plain" style={{ maxWidth: "70ch" }}>
+              {a.brief}
+            </div>
+          )
+        )}
+
+        {(a.attachments?.length ?? 0) > 0 && (
+          <Attachments items={a.attachments!} domain={s.snapshot.domain} />
         )}
 
         {/* Time tracking and the grade sit in one card, not two — both are

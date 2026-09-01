@@ -208,6 +208,28 @@ export interface Comment {
   time: string;
 }
 
+/**
+ * Something the teacher stapled to an item — a handout, or the link that *is*
+ * the assignment. Plenty of work carries no write-up at all and only this.
+ */
+export interface ItemAttachment {
+  /**
+   *  - "file": an upload. Its bytes come through the scraper's session.
+   *  - "link": an outside site — a Quizlet set, a Desmos activity.
+   *  - "page": something else Schoology hosts and owns.
+   */
+  kind: "file" | "link" | "page";
+  title: string;
+  /** Href exactly as Schoology wrote it; relative for its own pages. */
+  url: string;
+  /** Where a link really goes, unwrapped from Schoology's /link redirect. */
+  target?: string;
+  /** The name an upload was filed under, when it differs from the title. */
+  filename?: string;
+  /** Schoology's own size label for an upload, e.g. "18 KB". */
+  size?: string;
+}
+
 export interface Assignment {
   /** Schoology numeric id — the stable primary key across renames + reschedules */
   id: string;
@@ -217,7 +239,18 @@ export interface Assignment {
   /** Verified controls found in this assignment's real Schoology submit form. */
   submissionTypes?: SubmissionType[];
   title: string;
+  /** The teacher's write-up as plain text. Empty when they wrote nothing. */
   brief: string;
+  /**
+   * The same write-up with its structure intact — paragraphs, lists, links —
+   * stripped of Schoology's styling by the scraper. Empty when there is no
+   * write-up, or when it was too large to be worth carrying as markup.
+   */
+  briefHtml?: string;
+  /** Handouts and links posted alongside it. */
+  attachments?: ItemAttachment[];
+  /** When the teacher posted it, worded as Schoology words it. */
+  postedAt?: string;
   due: string;
   /** days from today; negative = past */
   dateOffset: number | null;

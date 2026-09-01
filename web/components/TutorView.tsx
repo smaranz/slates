@@ -6,21 +6,18 @@ import Image from "next/image";
 import { readAttachment, toTutorMessageParts, type Attachment } from "@/lib/attachments";
 import { useStore } from "@/lib/store";
 import { describeTutorAction, parseTutorActions, stripTutorActions } from "@/lib/tutor-actions";
+import {
+  useTutorChats,
+  useTutorRail,
+  type TutorChat,
+  type TutorChatMessage,
+} from "@/lib/tutor-chats";
 import { buildTutorContext } from "@/lib/tutor-context";
 import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-models";
 import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
 import AITextLoading from "./AITextLoading";
 import ModelPicker from "./ModelPicker";
 import { Icon, ICON } from "./ui";
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  attachments?: Attachment[];
-  /** Human-readable summaries of any board actions this reply took. */
-  actions?: string[];
-}
 
 const ACCEPTED_FILE_TYPES =
   "image/*,.pdf,.txt,.md,.markdown,.csv,.json,.log,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.cs,.html,.css,.xml,.yml,.yaml";
@@ -31,18 +28,30 @@ const SUGGESTIONS = [
   "How do I raise my Calc grade?",
 ];
 
+/** Shared so "no chat open" doesn't hand every render a brand-new array. */
+const NO_MESSAGES: TutorChatMessage[] = [];
+
 export default function TutorView() {
   const s = useStore();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const chats = useTutorChats();
+  const messages = chats.active?.messages ?? NO_MESSAGES;
   const [draft, setDraft] = useState("");
-  const [thinking, setThinking] = useState(false);
+  /**
+   * The chat a reply is streaming into, not a boolean: a reply takes seconds,
+   * and switching conversations while one arrives must not show the other
+   * thread as busy or let a stopped-looking chat swallow the typing dots.
+   */
+  const [busyChatId, setBusyChatId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useTutorModel();
   const [effort, setEffort] = useTutorThinking();
   const [pending, setPending] = useState<Attachment[]>([]);
   const [reading, setReading] = useState(false);
+  const [railOpen, toggleRail] = useTutorRail();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const thinking = busyChatId !== null && busyChatId === chats.activeId;
 
   const canAttach = tutorModelSupportsAttachments(model);
 
@@ -112,7 +121,14 @@ export default function TutorView() {
       const attachments = pending;
       if ((!text && attachments.length === 0) || thinking) return;
 
-      const next: ChatMessage[] = [
+      /*
+       * Everything below writes to this id rather than "the active chat".
+       * Opening another conversation mid-reply is an obvious thing to do while
+       * waiting, and the rest of the answer belongs where it was asked.
+       */
+      const chatId = chats.activeId || chats.startChat();
+
+      const next: TutorChatMessage[] = [
         ...messages,
         {
           id: `u${Date.now()}`,
@@ -122,10 +138,10 @@ export default function TutorView() {
         },
       ];
       const replyId = `a${Date.now()}`;
-      setMessages([...next, { id: replyId, role: "assistant", text: "" }]);
+      chats.updateMessages(chatId, () => [...next, { id: replyId, role: "assistant", text: "" }]);
       setDraft("");
       setPending([]);
-      setThinking(true);
+      setBusyChatId(chatId);
       setError(null);
 
       try {
@@ -159,7 +175,7 @@ export default function TutorView() {
           acc += decoder.decode(value, { stream: true });
           // Action tags are stripped as they stream in so the student never sees the raw syntax.
           const shown = stripTutorActions(acc);
-          setMessages((prev) =>
+          chats.updateMessages(chatId, (prev) =>
             prev.map((m) => (m.id === replyId ? { ...m, text: shown } : m))
           );
         }
@@ -168,24 +184,44 @@ export default function TutorView() {
 
         const { clean, actions } = parseTutorActions(acc);
         const applied = actions.map(applyAction).filter((a): a is string => a !== null);
-        setMessages((prev) =>
+        chats.updateMessages(chatId, (prev) =>
           prev.map((m) => (m.id === replyId ? { ...m, text: clean, actions: applied } : m))
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
         // Drop the empty assistant bubble so the thread doesn't show a blank.
-        setMessages((prev) => prev.filter((m) => m.id !== replyId || m.text));
+        chats.updateMessages(chatId, (prev) => prev.filter((m) => m.id !== replyId || m.text));
       } finally {
-        setThinking(false);
+        setBusyChatId(null);
       }
     },
-    [applyAction, buildContext, draft, effort, messages, model, pending, s.studentName, thinking]
+    [applyAction, buildContext, chats, draft, effort, messages, model, pending, s.studentName, thinking]
   );
 
   const empty = messages.length === 0;
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+      <ChatRail
+        chats={chats.chats}
+        activeId={chats.activeId}
+        busyChatId={busyChatId}
+        open={railOpen}
+        onToggle={toggleRail}
+        onNew={() => {
+          chats.startChat();
+          setError(null);
+          setPending([]);
+        }}
+        onOpen={(id) => {
+          chats.openChat(id);
+          setError(null);
+        }}
+        onDelete={chats.deleteChat}
+        onRename={chats.renameChat}
+      />
+
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div
         ref={scrollRef}
         style={{
@@ -204,7 +240,7 @@ export default function TutorView() {
             display: "flex",
             flexDirection: "column",
             gap: 12,
-            justifyContent: "flex-end",
+            justifyContent: "flex-start",
             minHeight: "100%",
           }}
         >
@@ -334,7 +370,6 @@ export default function TutorView() {
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
                   height: 36,
                   borderRadius: 9999,
                   border: "1px solid var(--line)",
@@ -342,18 +377,7 @@ export default function TutorView() {
                   padding: "0 16px",
                 }}
               >
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 9999,
-                      background: "var(--muted)",
-                      animation: `slates-typing 1.4s ease-in-out ${i * 0.2}s infinite`,
-                    }}
-                  />
-                ))}
+                <AITextLoading />
               </div>
             </div>
           )}
@@ -483,6 +507,221 @@ export default function TutorView() {
           </div>
         </div>
       </div>
+      </div>
+    </div>
+  );
+}
+
+/** "Today", "Yesterday", then the date — enough to find a conversation again. */
+function whenLabel(at: number): string {
+  const then = new Date(at);
+  const today = new Date();
+  const days = Math.round(
+    (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() -
+      new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) /
+      86_400_000
+  );
+  if (days <= 0) return then.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return then.toLocaleDateString(undefined, { weekday: "long" });
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * Every conversation, and the way into a new one.
+ *
+ * Collapses to a narrow strip rather than disappearing: the tutor is mostly
+ * used full-width on a laptop, but a way back to what you asked yesterday
+ * shouldn't be behind a control you have to remember exists.
+ */
+function ChatRail({
+  chats,
+  activeId,
+  busyChatId,
+  open,
+  onToggle,
+  onNew,
+  onOpen,
+  onDelete,
+  onRename,
+}: {
+  chats: TutorChat[];
+  activeId: string;
+  busyChatId: string | null;
+  open: boolean;
+  onToggle: () => void;
+  onNew: () => void;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+}) {
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+
+  const commitRename = () => {
+    if (editing) onRename(editing, nameDraft);
+    setEditing(null);
+  };
+
+  const iconButton = (label: string, path: string, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="icon-btn"
+      style={{ width: 30, height: 30 }}
+    >
+      <Icon path={path} size={15} />
+    </button>
+  );
+
+  if (!open) {
+    return (
+      <div
+        style={{
+          width: 52,
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 6,
+          padding: "2px 0 20px",
+          borderRight: "1px solid var(--line)",
+        }}
+      >
+        {iconButton("Show conversations", ICON.sidebar, onToggle)}
+        {iconButton("New chat", ICON.plus, onNew)}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: 248,
+        flexShrink: 0,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        borderRight: "1px solid var(--line)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px 8px 10px" }}>
+        <span className="section-label" style={{ flex: 1 }}>
+          Chats
+        </span>
+        {iconButton("New chat", ICON.plus, onNew)}
+        {iconButton("Hide conversations", ICON.sidebar, onToggle)}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", padding: "0 8px 20px" }}>
+        {chats.length === 0 && (
+          <p style={{ margin: "4px 6px", fontSize: 12, lineHeight: 1.5, color: "var(--muted)" }}>
+            Nothing yet. Whatever you ask below is kept here.
+          </p>
+        )}
+
+        {chats.map((chat) => {
+          const active = chat.id === activeId;
+          return (
+            <div
+              key={chat.id}
+              onMouseEnter={() => setHovered(chat.id)}
+              onMouseLeave={() => setHovered((id) => (id === chat.id ? null : id))}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                borderRadius: "var(--radius-xs)",
+                background: active ? "var(--raised)" : "transparent",
+                paddingRight: 2,
+              }}
+            >
+              {editing === chat.id ? (
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setEditing(null);
+                  }}
+                  aria-label="Rename chat"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: 0,
+                    borderRadius: "var(--radius-xs)",
+                    background: "var(--sunken)",
+                    padding: "8px 10px",
+                    font: "inherit",
+                    fontSize: 13,
+                    color: "var(--text)",
+                    outline: "1px solid var(--ring)",
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpen(chat.id)}
+                  onDoubleClick={() => {
+                    setEditing(chat.id);
+                    setNameDraft(chat.title || "New chat");
+                  }}
+                  title={chat.title || "New chat"}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 2,
+                    border: 0,
+                    background: "transparent",
+                    padding: "7px 8px 7px 10px",
+                    font: "inherit",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span
+                    className="truncate"
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      fontSize: 13,
+                      color: active ? "var(--text)" : "var(--text-2)",
+                    }}
+                  >
+                    {chat.title || "New chat"}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--faint)" }}>
+                    {busyChatId === chat.id ? "replying…" : whenLabel(chat.updatedAt)}
+                  </span>
+                </button>
+              )}
+
+              {/* Only on the row you're pointing at — a delete button on every
+                  row turns a list of conversations into a list of hazards. */}
+              {editing !== chat.id && (hovered === chat.id || active) && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(chat.id)}
+                  aria-label={`Delete ${chat.title || "chat"}`}
+                  title="Delete"
+                  className="icon-btn"
+                  style={{ width: 26, height: 26, flexShrink: 0 }}
+                >
+                  <Icon path={ICON.trash} size={13} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -494,6 +733,13 @@ function AttachmentChip({
   attachment: Attachment;
   onRemove?: () => void;
 }) {
+  /*
+   * A reloaded conversation keeps the picture's name and not its bytes, so
+   * there is no thumbnail left to draw. It shows as a named chip instead of a
+   * broken image — the message that referred to it still makes sense.
+   */
+  const thumbnail = attachment.kind === "image" && !!attachment.dataUrl;
+
   return (
     <div
       style={{
@@ -502,15 +748,15 @@ function AttachmentChip({
         alignItems: "center",
         gap: 6,
         maxWidth: 180,
-        borderRadius: attachment.kind === "image" ? 10 : 9999,
+        borderRadius: thumbnail ? 10 : 9999,
         border: "1px solid var(--line)",
         background: "var(--surface)",
         overflow: "hidden",
-        ...(attachment.kind === "image" ? { width: 44, height: 44 } : { padding: "5px 10px 5px 8px" }),
+        ...(thumbnail ? { width: 44, height: 44 } : { padding: "5px 10px 5px 8px" }),
       }}
-      title={attachment.name}
+      title={attachment.kind === "image" && !thumbnail ? `${attachment.name} — no longer loaded` : attachment.name}
     >
-      {attachment.kind === "image" ? (
+      {thumbnail && attachment.kind === "image" ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={attachment.dataUrl}
@@ -540,9 +786,9 @@ function AttachmentChip({
           aria-label={`Remove ${attachment.name}`}
           style={{
             position: "absolute",
-            top: attachment.kind === "image" ? 2 : "50%",
-            right: attachment.kind === "image" ? 2 : 4,
-            transform: attachment.kind === "image" ? undefined : "translateY(-50%)",
+            top: thumbnail ? 2 : "50%",
+            right: thumbnail ? 2 : 4,
+            transform: thumbnail ? undefined : "translateY(-50%)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

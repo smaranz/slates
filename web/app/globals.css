@@ -672,6 +672,134 @@ button {
 }
 
 /*
+ * A teacher's write-up, rendered as they wrote it.
+ *
+ * The scraper keeps the structure — paragraphs, lists, links, emphasis — and
+ * throws away every class, style and font Schoology carried, so what lands
+ * here is bare markup that has to be given a voice. It gets this app's, not
+ * the 16px Google Sans a teacher pasted out of a Google Doc.
+ *
+ * Rules are scoped under .prose rather than set on the elements themselves,
+ * because these are the only places in Slates where raw HTML is rendered.
+ */
+.prose {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.prose div,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose table {
+  margin: 0 0 10px;
+}
+
+/* Pasted rich text nests div-per-line; only the outermost needs the gap. */
+.prose div div,
+.prose li p {
+  margin-bottom: 0;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 22px;
+}
+
+.prose li {
+  margin: 0 0 4px;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prose strong,
+.prose b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prose a {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+}
+
+/*
+ * A teacher who pastes a handout into Schoology's editor can land it in a
+ * <pre>, which is a statement about line breaks, not about code. Keeping the
+ * breaks is right; drawing prose in a monospace code block is not — only a
+ * <code> inside one gets that treatment.
+ */
+.prose pre {
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.prose pre code {
+  display: block;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-xs);
+  background: var(--sunken);
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+.prose table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.prose th,
+.prose td {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+/* Plain text keeps the line breaks the teacher typed. */
+.prose--plain {
+  white-space: pre-wrap;
+}
+
+/*
  * The brand row owns its padding here rather than inline, so the desktop
  * override below can actually win — an inline `padding` shorthand outranks any
  * stylesheet `padding-top`.

@@ -383,6 +383,206 @@ async function readGrades(page, domain) {
  */
 export function extractDetail() {
   /*
+   * ---- the teacher's write-up ----
+   *
+   * Schoology stores instructions as rich text: paragraphs, lists, links, and
+   * — whenever a teacher pastes out of Google Docs — a wall of layout divs
+   * carrying inline styles and Google's own class names. Slates keeps the
+   * structure and throws the styling away, so the write-up inherits the app's
+   * typography instead of importing 16px Google Sans into a dark theme.
+   *
+   * Anything outside the whitelist is unwrapped rather than deleted: a
+   * paragraph wrapped in six styled divs must survive having those divs
+   * removed. Only genuinely dangerous or interactive elements are dropped
+   * whole, along with every attribute except the href/src that make a link a
+   * link and an image an image.
+   */
+  const KEEP = new Set([
+    "P", "BR", "DIV", "SPAN", "STRONG", "B", "EM", "I", "U", "S", "SUP", "SUB",
+    "UL", "OL", "LI", "A", "IMG", "HR", "BLOCKQUOTE", "PRE", "CODE",
+    "H1", "H2", "H3", "H4", "H5", "H6",
+    "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD",
+  ]);
+  const DROP = "script,style,iframe,object,embed,link,meta,noscript,form,input,button,select,textarea";
+
+  const cleanHtml = (root) => {
+    if (!root) return "";
+    const node = root.cloneNode(true);
+    node.querySelectorAll(DROP).forEach((el) => el.remove());
+
+    // Static list: unwrapping reparents children, which would confuse a live one.
+    for (const el of [...node.querySelectorAll("*")]) {
+      if (!KEEP.has(el.tagName)) {
+        el.replaceWith(...el.childNodes);
+        continue;
+      }
+      const href = el.tagName === "A" ? el.getAttribute("href") : null;
+      const src = el.tagName === "IMG" ? el.getAttribute("src") : null;
+      const alt = el.tagName === "IMG" ? el.getAttribute("alt") : null;
+
+      /*
+       * Emphasis is the one thing worth rescuing out of a style attribute
+       * before it goes. Text pasted from a Google Doc carries its bold as
+       * `style="font-weight:bold"` on a plain span, not as <strong> — so
+       * stripping styles wholesale quietly un-bolded the words a teacher went
+       * out of their way to emphasise.
+       */
+      const style = el.getAttribute("style") || "";
+      const bold = /font-weight\s*:\s*(?:bold(?:er)?|[6-9]00)/i.test(style);
+      const italic = /font-style\s*:\s*italic/i.test(style);
+
+      for (const attr of [...el.attributes]) el.removeAttribute(attr.name);
+
+      if (bold || italic) {
+        const outer = document.createElement(bold ? "strong" : "em");
+        outer.append(...el.childNodes);
+        if (bold && italic) {
+          const inner = document.createElement("em");
+          inner.append(...outer.childNodes);
+          outer.append(inner);
+        }
+        el.append(outer);
+      }
+
+      // Only ordinary destinations survive — no javascript:, no data:.
+      if (el.tagName === "A") {
+        if (href && /^(https?:|mailto:|\/)/i.test(href)) el.setAttribute("href", href);
+        else el.replaceWith(...el.childNodes);
+      }
+      if (el.tagName === "IMG") {
+        if (src && /^(https?:|\/)/i.test(src)) {
+          el.setAttribute("src", src);
+          if (alt) el.setAttribute("alt", alt);
+        } else el.remove();
+      }
+    }
+    return node.innerHTML.replace(/\s+/g, " ").trim();
+  };
+
+  /*
+   * The same write-up as plain text, for everything that can't render markup —
+   * the board's one-line summary, the time estimate, the tutor's context.
+   * Derived from the cleaned markup rather than `innerText` because the
+   * assessment player hands its instructions over as an HTML string that was
+   * never in the page to begin with.
+   */
+  const htmlToText = (html) => {
+    const decoded = html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|tr|h[1-6]|blockquote|pre)>/gi, "\n")
+      .replace(/<[^>]*>/g, "");
+    const box = document.createElement("textarea");
+    box.innerHTML = decoded;
+    // Rich-text editors pad with non-breaking spaces, which carry no meaning
+    // here and slip past every whitespace pattern below.
+    return box.value
+      .replace(/ /g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  };
+
+  /*
+   * A description can be a whole handout. Text is capped where it stops being
+   * a summary; the markup is dropped entirely past a much looser cap rather
+   * than truncated, since cutting HTML mid-element leaves it unrenderable.
+   */
+  const describe = (root) => {
+    const html = cleanHtml(root);
+    const text = htmlToText(html);
+    return {
+      brief: text.length > 4000 ? `${text.slice(0, 4000)}…` : text,
+      briefHtml: html.length > 40_000 ? "" : html,
+    };
+  };
+
+  /*
+   * ---- what's stapled to it ----
+   *
+   * Files and links the teacher attached, which are often the assignment
+   * itself: "Quizlet: 1.1 Vocabulario" has no description at all, just a link
+   * to the set you're meant to study. Read from the attachment block below the
+   * write-up, never from the comment thread, which has attachments of its own.
+   *
+   * Classified by href rather than by class name, because the href is what
+   * decides how Slates can open it: an /attachment/ path streams through the
+   * scraper's session, everything else opens where Schoology sends it.
+   */
+  const attachments = [];
+
+  const addAttachment = (row, link) => {
+    const href = link?.getAttribute("href") || "";
+    if (!href || attachments.some((x) => x.url === href)) return;
+
+    /*
+     * An uploaded file's anchor holds the display name, a tooltip repeating
+     * the name it was uploaded under, and a screen-reader copy of that
+     * tooltip — all as text. Read whole, one attachment came back titled
+     * "Mi caja de personalidad.docxMi_caja_de_personalidad.docx".
+     */
+    const clone = link.cloneNode(true);
+    clone.querySelectorAll(".infotip-content, .visually-hidden").forEach((el) => el.remove());
+    const title = (link.getAttribute("title") || clone.textContent || "").replace(/\s+/g, " ").trim();
+    if (!title) return;
+
+    /*
+     * Schoology routes outbound links through /link?…&path=<encoded>, which
+     * needs its session to follow. The real destination is right there in the
+     * query string, so Slates opens that instead of the redirect.
+     */
+    let target = "";
+    if (/^\/link\?/.test(href)) {
+      try {
+        target = new URL(href, location.origin).searchParams.get("path") || "";
+      } catch {
+        target = "";
+      }
+    }
+
+    attachments.push({
+      kind: /\/attachment\/\d+\/source\//i.test(href)
+        ? "file"
+        : /^\/link\?/.test(href) || /^https?:/i.test(href)
+          ? "link"
+          : "page",
+      title,
+      url: href,
+      target,
+      // What it was uploaded as, which a teacher's display name often hides.
+      filename: link.querySelector(".infotip[aria-label]")?.getAttribute("aria-label") || "",
+      size: (row.querySelector(".attachments-file-size")?.textContent || "").replace(/\s+/g, " ").trim(),
+    });
+  };
+
+  for (const host of document.querySelectorAll(".attachments")) {
+    if (host.closest(".comment-container")) continue;
+
+    const rows = [...host.querySelectorAll(".attachments-file, .attachments-link")];
+    for (const row of rows) {
+      /*
+       * The first anchor is the attachment. A file row carries a second one —
+       * "VIEW" — pointing at Schoology's own /docviewer for the same upload,
+       * which is another way to open one attachment, not a second attachment.
+       */
+      addAttachment(
+        row,
+        [...row.querySelectorAll("a[href]")].find(
+          (a) => !/\/attachment\/\d+\/docviewer/i.test(a.getAttribute("href") || "")
+        )
+      );
+    }
+    // A shape neither of those classes covers still has links worth keeping.
+    if (!rows.length) for (const a of host.querySelectorAll("a[href]")) addAttachment(host, a);
+  }
+
+  // "Posted Thu Aug 27, 2026 at 11:10 am" — the span holds the date alone.
+  const postedAt = (document.querySelector(".posted-time span, .posted-time")?.textContent || "")
+    .replace(/^\s*Posted\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  /*
    * Schoology's assessment player is configured by a JSON object embedded in a
    * script tag, and it is authoritative: the time limit, attempt counts, open
    * window, and LockDown Browser requirement all live there. Reading it beats
@@ -465,9 +665,19 @@ export function extractDetail() {
       reviewable: sub.can_student_view === true,
     }));
 
+    /*
+     * `instructions` is a markup string that was never rendered into this
+     * page, so it is parsed into a detached node before being cleaned the
+     * same way an assignment's write-up is.
+     */
+    const holder = document.createElement("div");
+    holder.innerHTML = init.instructions ?? "";
+
     return {
       title: init.title ?? "",
-      brief: init.instructions ?? "",
+      ...describe(holder),
+      attachments,
+      postedAt,
       category: "",
       openUntil: "",
       points: init.gradebookPointsTotal ?? null,
@@ -558,20 +768,17 @@ export function extractDetail() {
   const openUntil = text.match(/Open until ([A-Za-z0-9,: ]+?(?:am|pm))/i)?.[1] ?? "";
   const category = text.match(/Category:\s*([A-Za-z0-9 &'-]+?)(?:Period:|Grading|$)/i)?.[1]?.trim() ?? "";
 
-  // Instructions live in the body area; fall back to nothing rather than
-  // scooping up page chrome.
-  let brief = "";
-  for (const sel of [
-    ".assignment-description",
-    ".info-body",
-    ".s-page-content .body",
-    "[class*='item-body']",
-    "[class*='description']",
-  ]) {
-    const t = pick(sel);
-    if (t && t.length > brief.length) brief = t;
-  }
-  if (brief.length > 1200) brief = brief.slice(0, 1200) + "…";
+  /*
+   * The write-up itself. Schoology files it under `.info-body` inside the
+   * item's `.info-text`, and nowhere else — the looser selectors this used to
+   * sweep (`[class*='description']`, `[class*='item-body']`) matched page
+   * chrome on some layouts and nothing at all on others. An empty `.info-body`
+   * is a real answer: plenty of items are a title and an attachment.
+   */
+  const body =
+    document.querySelector(".info-container .info-text .info-body") ||
+    document.querySelector("#main-inner .info-text .info-body") ||
+    document.querySelector(".info-body");
 
   const submissionTypes = [];
   if (hasStartAttempt) submissionTypes.push("attempt");
@@ -588,7 +795,9 @@ export function extractDetail() {
 
   return {
     title: pick("h1"),
-    brief,
+    ...describe(body),
+    attachments,
+    postedAt,
     category,
     openUntil,
     points: possible,
@@ -604,21 +813,73 @@ export function extractDetail() {
   };
 }
 
-/** Visit each item's own page to fill in what the To Do panel can't tell us. */
+/**
+ * Details for finished work, kept on disk by item id.
+ *
+ * Detail is a page visit each, and the finished pile only grows — re-reading
+ * it every five minutes to reconfirm a description that can't change is the
+ * reason it used to be skipped outright, which left every completed item with
+ * no description at all. A completed item is read once and then remembered,
+ * so the cost is paid a single time per assignment for the whole year.
+ */
+const DETAIL_CACHE_FILE = path.join(HOME, "item-details.json");
+
+function loadDetailCache() {
+  try {
+    return JSON.parse(fs.readFileSync(DETAIL_CACHE_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveDetailCache(cache) {
+  try {
+    fs.mkdirSync(HOME, { recursive: true });
+    fs.writeFileSync(DETAIL_CACHE_FILE, JSON.stringify(cache));
+  } catch {
+    /* cache is an optimisation, not a requirement */
+  }
+}
+
+/**
+ * Visit each item's own page to fill in what the To Do panel can't tell us.
+ *
+ * Open work is re-read every sync — a teacher can still edit it, and its
+ * attempt and submission state is live. Completed work is served from the
+ * cache once it's in there, and every read is written back so that an item
+ * finished tonight needs no visit tomorrow.
+ */
 async function readDetails(page, items, domain) {
+  const cache = loadDetailCache();
   const out = new Map();
+  let visited = 0;
 
   for (const item of items) {
+    if (item.completed && cache[item.id]) {
+      out.set(item.id, cache[item.id]);
+      continue;
+    }
     const url = item.url?.startsWith("http") ? item.url : `https://${domain}${item.url}`;
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await page.waitForTimeout(1200); // grade/attempt widgets render late
-      out.set(item.id, await page.evaluate(extractDetail));
+      const detail = await page.evaluate(extractDetail);
+      out.set(item.id, detail);
+      cache[item.id] = detail;
+      visited++;
     } catch (e) {
       console.error(`  detail failed for ${item.id}: ${e.message}`);
     }
   }
-  return out;
+
+  /*
+   * Only ids the To Do panel still lists are kept. Schoology drops an item off
+   * Recently Completed eventually, and once it has, nothing in Slates can show
+   * that item either — holding its detail forever would grow a file that is
+   * never read again.
+   */
+  if (visited) saveDetailCache(Object.fromEntries(items.map((i) => [i.id, cache[i.id]]).filter(([, d]) => d)));
+  return { details: out, visited };
 }
 
 /**
@@ -882,19 +1143,23 @@ export async function scrape({ headless = true, reuse = false } = {}) {
     // the thing is actually submitted. Without this every detail view is
     // identical, because the To Do panel only carries title/date/course.
     /*
-     * Only open pages for work that's still outstanding. Detail scraping is a
-     * page visit each, and expanding Recently Completed roughly triples the
-     * item count — but a finished assignment needs none of it. Its score comes
-     * from the gradebook, and how to submit it no longer matters.
+     * Finished work is read too, but only once ever — its description is the
+     * whole record of what the thing actually was, and dropping it left a
+     * completed assignment as a bare title. `readDetails` caches those, so
+     * expanding Recently Completed costs one visit per item and nothing after.
      */
-    const details = await readDetails(page, assignments.filter((a) => !a.completed), domain);
+    const { details, visited } = await readDetails(page, assignments, domain);
     stats.detailed = details.size;
+    stats.visited = visited;
 
     for (const a of assignments) {
       const d = details.get(a.id);
       if (!d) continue;
 
       a.brief = d.brief || "";
+      a.briefHtml = d.briefHtml || "";
+      a.attachments = d.attachments ?? [];
+      a.postedAt = d.postedAt || "";
       a.kind = d.kind ?? a.kind;
       a.submit = d.submit ?? a.submit;
       a.submissionTypes = d.submissionTypes;

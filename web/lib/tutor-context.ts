@@ -5,7 +5,9 @@ type Store = ReturnType<typeof useStore>;
 
 /** Truncates a long description without cutting mid-word. */
 function clip(text: string, max: number): string {
-  const trimmed = text.trim();
+  // One fact per line is the whole shape of this context, so a write-up's own
+  // paragraph breaks have to be flattened rather than shipped through.
+  const trimmed = text.replace(/\s+/g, " ").trim();
   if (trimmed.length <= max) return trimmed;
   return `${trimmed.slice(0, trimmed.lastIndexOf(" ", max)).trimEnd()}…`;
 }
@@ -52,6 +54,11 @@ export function buildTutorContext(s: Store): string {
       `[${a.id}] ${a.title} — ${course?.short ?? a.courseId} — ${a.kind} — status:${status} bucket:${bucket} — due:${a.due} — impact:${a.impact}`
     );
     if (a.brief) lines.push(`    what it is: ${clip(a.brief, 240)}`);
+    // Work with no write-up is often nothing but its attachment — a Quizlet
+    // set, a worksheet — so naming it is the only description there is.
+    for (const at of a.attachments ?? []) {
+      lines.push(`    attached ${at.kind}: ${at.title}${at.target ? ` (${at.target})` : ""}`);
+    }
     if (a.impactNote) lines.push(`    why it matters: ${a.impactNote}`);
 
     const submittedAt = s.submittedAt[a.id] ?? a.submittedAt;
