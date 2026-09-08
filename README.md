@@ -44,6 +44,27 @@ No more twenty tabs. No more "I thought I turned that in."
 
 In a hurry? The [48-second demo](https://github.com/smaranz/slates/blob/main/.github/readme/slates-demo.mp4) goes straight to the board.
 
+## Download
+
+| | |
+| --- | --- |
+| **macOS** (Apple Silicon) | [Download the `.dmg`](https://github.com/smaranz/slates/releases/latest) |
+| **Windows** (x64) | [Download the installer](https://github.com/smaranz/slates/releases/latest) |
+
+Both are unsigned, because notarising a Mac app and signing a Windows one cost
+$99/year and $200-odd/year respectively and this is a student project. That has
+a visible consequence the first time you open it:
+
+- **macOS** — right-click the app and choose Open. Double-clicking reports that
+  Slates "is damaged and can't be opened", which is Gatekeeper's phrasing for
+  "not notarised" and not a statement about the download.
+- **Windows** — SmartScreen will interrupt. More info → Run anyway.
+
+Neither shows anything until you give it a Schoology API key; Settings says
+where to generate one. Prefer to run from source? [Skip to Run it](#run-it).
+
+<br>
+
 ## Everything on one board
 
 <table>
