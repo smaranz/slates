@@ -78,7 +78,9 @@ jobs:
           # Unsigned. Without this electron-builder tries to discover a signing
           # identity and fails the build on a runner that has none.
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Deliberately no GH_TOKEN here. Given one, electron-builder decides
+          # it is also the thing publishing the release, and then fails asking
+          # for repository metadata. Attaching the files is the next step's job.
 
       - uses: actions/upload-artifact@v4
         with:

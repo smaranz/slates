@@ -8,12 +8,16 @@
     "start": "electron .",
     "dev": "SLATES_ATTACH=1 electron .",
     "build:web": "npm --prefix ../web run build",
-    "dist": "npm run build:web && electron-builder --config electron-builder.config.cjs",
-    "dist:mac": "npm run build:web && electron-builder --mac --config electron-builder.config.cjs",
-    "dist:win": "npm run build:web && electron-builder --win --config electron-builder.config.cjs"
+    "dist": "npm run build:web && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:mac": "npm run build:web && electron-builder --mac --config electron-builder.config.cjs --publish never",
+    "dist:win": "npm run build:web && electron-builder --win --config electron-builder.config.cjs --publish never"
   },
   "devDependencies": {
     "electron": "^34.2.0",
     "electron-builder": "^25.1.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smaranz/slates.git"
   }
 }
