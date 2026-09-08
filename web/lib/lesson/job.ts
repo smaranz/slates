@@ -1,5 +1,6 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -213,7 +214,8 @@ async function runLesson(id: string, request: LessonRequest): Promise<void> {
 
   /* ---- 4. the composition ---- */
   checkCancelled(id);
-  await update({ stage: "composing", title: script.title, scenes, note: "Laying out the slides" });
+  await update({ stage: "composing", title: script.title, scenes, note: "Drawing the board" });
+  await installPen(dir);
   await fs.writeFile(path.join(dir, "index.html"), composeLesson(script, timings));
 
   /* ---- 5. render ---- */
@@ -236,6 +238,32 @@ async function runLesson(id: string, request: LessonRequest): Promise<void> {
     note: "Ready",
     finishedAt: Date.now(),
   });
+}
+
+/**
+ * The pen font, copied in beside the composition.
+ *
+ * The renderer serves the lesson directory and nothing else, so a font sitting
+ * in node_modules is not reachable from the composition's CSS — it has to be a
+ * real file in the project. Copying it per lesson costs 31 KB and buys a
+ * self-contained directory: it still renders months from now, with no network
+ * and without this app being installed at all.
+ *
+ * A font that will not copy is not worth failing a render over. The board's
+ * font stack falls through to the system's handwriting faces, so it still
+ * reads as handwriting — just not in the same hand as the strokes around it.
+ */
+async function installPen(dir: string): Promise<void> {
+  try {
+    // Resolved against the portal's own package rather than `import.meta.url`,
+    // which does not survive every bundler this file passes through.
+    const resolve = createRequire(path.join(process.cwd(), "package.json")).resolve;
+    const source = path.join(path.dirname(resolve("drawably/font.css")), "DrawablyPen.ttf");
+    await fs.mkdir(path.join(dir, "fonts"), { recursive: true });
+    await fs.copyFile(source, path.join(dir, "fonts", "DrawablyPen.ttf"));
+  } catch (error) {
+    console.warn("[lesson] the pen font didn't copy; the board falls back to a system hand.", error);
+  }
 }
 
 /**

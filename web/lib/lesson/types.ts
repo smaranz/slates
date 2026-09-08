@@ -2,10 +2,11 @@
  * A narrated teaching video, from the topic a student asked about to the MP4
  * that comes out the other end.
  *
- * The shape is deliberately small. A lesson is a title card followed by a
- * handful of scenes, each one a heading, a few short lines on screen, and the
- * sentence or two spoken over them. That is enough to explain a homework
- * concept and little enough that a language model reliably fills it in.
+ * The shape is deliberately small. A lesson opens with its title written at
+ * the top of a board and then works down it a scene at a time: each one a
+ * heading, a few short lines jotted underneath, and the sentence or two spoken
+ * over them as they are written. That is enough to explain a homework concept
+ * and little enough that a language model reliably fills it in.
  */
 
 /**
@@ -27,6 +28,18 @@ export interface LessonScene {
   heading: string;
   /** Short supporting lines. Never the narration verbatim — that's spoken. */
   bullets: string[];
+  /**
+   * A short run of text, copied out of this scene's heading or one of its
+   * bullets, that gets a hand-drawn ring round it.
+   *
+   * This is the board's only piece of emphasis, and it exists because it is
+   * what a teacher actually does: they write the working out, and then they go
+   * back and circle the one part you are meant to leave with. It lands late in
+   * the scene, on the beat where the narration says why it matters. Absent
+   * when nothing in the scene deserves it — a ring on every scene is a ring on
+   * nothing.
+   */
+  emphasis?: string;
   /** What the voice says over this scene. Drives the scene's length. */
   narration: string;
   /**

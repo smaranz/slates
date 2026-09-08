@@ -11,7 +11,7 @@ const execFileP = promisify(execFile);
  * Every clip's length is measured off the file that comes back rather than
  * estimated from the text. Scene timing is built on these numbers — a scene is
  * as long as the sentence spoken over it — so an estimate that drifts by half a
- * second per scene would have the voice running into the next slide by the end.
+ * second per scene would have the voice running into the next scene by the end.
  */
 
 /** George — ElevenLabs' own documented default voice. Override per install. */

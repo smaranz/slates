@@ -69,13 +69,13 @@ export default function CalendarView() {
   const selTasks = selected ? dated.filter((d) => d.date.toDateString() === selected) : [];
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "0 24px 24px", display: "flex", justifyContent: "center" }}>
+    <div className="calendar-view" style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "0 24px 24px", display: "flex", justifyContent: "center" }}>
       <div style={{ width: "100%", maxWidth: 1100, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+        <div className="calendar-heading" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text)" }}>{monthLabel}</span>
             <span style={{ fontSize: 22, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--faint)" }}>{yearLabel}</span>
-            <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>
+            <span className="calendar-count" style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>
               {monthCount === 1 ? "1 assignment this month" : `${monthCount} assignments this month`}
             </span>
           </div>
@@ -101,6 +101,7 @@ export default function CalendarView() {
         </div>
 
         <div
+          className="calendar-slate"
           style={{
             flex: 1,
             minHeight: 0,
@@ -113,7 +114,7 @@ export default function CalendarView() {
             padding: 14,
           }}
         >
-          <div style={{ flexShrink: 0, display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, padding: "0 0 10px" }}>
+          <div className="calendar-weekdays" style={{ flexShrink: 0, display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, padding: "0 0 10px" }}>
             {WEEKDAYS.map((d, i) => (
               <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "var(--faint)" }}>
                 {d}
@@ -121,13 +122,14 @@ export default function CalendarView() {
             ))}
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateRows: "repeat(6, minmax(0, 1fr))", gap: 6 }}>
+          <div className="calendar-weeks" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateRows: "repeat(6, minmax(0, 1fr))", gap: 6 }}>
             {weeks.map((days, wi) => (
-              <div key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, minHeight: 0 }}>
+              <div className="calendar-week" key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, minHeight: 0 }}>
                 {days.map((cell) => {
                   const isSel = cell.key === selected;
                   return (
                     <button
+                      className="calendar-cell"
                       key={cell.key}
                       type="button"
                       onClick={() => setSelected(cell.key)}
@@ -176,7 +178,7 @@ export default function CalendarView() {
                       </span>
 
                       {cell.items.length > 0 && (
-                        <span style={{ display: "flex", flexDirection: "column", gap: 3, width: "100%", minWidth: 0 }}>
+                        <span className="calendar-events" style={{ display: "flex", flexDirection: "column", gap: 3, width: "100%", minWidth: 0 }}>
                           {cell.items.slice(0, 2).map(({ a }) => {
                             const c = s.courseById(a.courseId);
                             return (

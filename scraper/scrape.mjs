@@ -738,7 +738,43 @@ export function extractDetail() {
     [...document.querySelectorAll("a,button,input")].some((el) =>
       /submit assignment|resubmit assignment/i.test(el.textContent || el.value || "")
     );
-  const isDrive = /google drive|one ?drive|drive assignment/i.test(text);
+  /*
+   * A real Drive-linked assignment is an embedded external tool, not a phrase
+   * in the teacher's write-up.
+   *
+   * This used to test the whole page's text, which meant an ordinary dropbox
+   * assignment saying "submit the drawing by providing me the link from your
+   * Google Drive folder" was read as a Google Drive Assignment and pushed out
+   * to Schoology — even though Schoology was offering a text dropbox Slates
+   * could post through. An attached Google Slides handout tripped it too.
+   *
+   * The structural signals are an app iframe or a launch control. Both are
+   * looked for outside the description and the attachments, because anything
+   * in there is the teacher's content rather than the submission machinery.
+   */
+  const isDrive = (() => {
+    const root = document.querySelector("#main-inner") || document.body;
+    const content = [...root.querySelectorAll(".info-body, .attachments")];
+    const isContent = (el) => content.some((c) => c.contains(el));
+
+    const framed = [...root.querySelectorAll("iframe")].some((f) =>
+      /drive\.google\.com|docs\.google\.com|onedrive|sharepoint|external_tool/i.test(
+        f.getAttribute("src") || ""
+      )
+    );
+    if (framed) return true;
+
+    return [...root.querySelectorAll("a,button,div")].some((el) => {
+      if (isContent(el)) return false;
+      if (/g(oogle-)?drive-assignment|drive_assignment/i.test(el.className || "")) return true;
+      const label = (el.textContent || "").replace(/\s+/g, " ").trim();
+      // A control, not a paragraph: real launch buttons are a few words long.
+      return (
+        label.length < 60 &&
+        /\b(make a copy|open in google drive|open in drive|launch assignment|create with google)\b/i.test(label)
+      );
+    });
+  })();
 
   /*
    * The grade, which Schoology writes as one of:
@@ -805,10 +841,22 @@ export function extractDetail() {
     attemptsUsed: attempts ? Number(attempts[1]) : null,
     attemptsAllowed: attempts ? Number(attempts[2]) : null,
     submissionTypes,
-    // Anything needing Schoology's own flow opens there instead of pretending
-    // Slates can submit it. "none" means there is nothing to submit anywhere —
-    // paper, in-class, or a reminder — so the only thing left is to tick it off.
-    submit: nothingToSubmit ? "none" : hasStartAttempt || isDrive ? "overlay" : "native",
+    /*
+     * Anything needing Schoology's own flow opens there instead of pretending
+     * Slates can submit it. "none" means there is nothing to submit anywhere —
+     * paper, in-class, or a reminder — so the only thing left is to tick it off.
+     *
+     * A dropbox outranks a Drive link. If Schoology is offering a real submit
+     * control, Slates can post through it, and the fact that the work also
+     * lives in Drive doesn't change that — the student is handing in a link or
+     * a file either way. Only a Drive assignment with no dropbox of its own
+     * has to open in Schoology, because there the tool owns the whole flow.
+     */
+    submit: nothingToSubmit
+      ? "none"
+      : hasStartAttempt || (isDrive && !hasDropbox && !fileInputs)
+        ? "overlay"
+        : "native",
     kind: hasStartAttempt ? "assessment" : "assignment",
   };
 }
@@ -855,8 +903,37 @@ async function readDetails(page, items, domain) {
   let visited = 0;
 
   for (const item of items) {
-    if (item.completed && cache[item.id]) {
-      out.set(item.id, cache[item.id]);
+    /*
+     * A cached detail is only reusable if it was read while the item was
+     * already in the state it is in now.
+     *
+     * "Completed and cached" could not tell a copy read *after* the work was
+     * finished from one read weeks earlier while it was still open, and served
+     * the second as if it were the first. For an assessment that is exactly
+     * backwards: the attempt list, the score, and the per-question review all
+     * come into existence at the moment the student finishes it, so the entry
+     * frozen before the attempt is the one guaranteed to be missing everything
+     * worth showing — and the student sees "open on Schoology" on a quiz they
+     * just took.
+     *
+     * So a completed item is re-read once, on the first sync after it was
+     * finished, and only then cached for good. Entries written by an older
+     * build carry no flag, which reads as false and repairs them the same way.
+     */
+    const cached = cache[item.id];
+    /*
+     * An assessment with attempts still on the clock is never final either.
+     * A second sitting changes the score and adds a row to the review, and
+     * nothing in the To Do panel announces that it happened — so freezing one
+     * that can still be retaken would strand the student on their first
+     * attempt's marks. There are only ever a handful of these, so re-reading
+     * them costs one page visit each.
+     */
+    const retakeable = (cached?.assessment?.attemptsLeft ?? 0) > 0;
+    if (item.completed && cached?.readWhenCompleted && !retakeable) {
+      const { readWhenCompleted: _flag, ...detail } = cached;
+      void _flag;
+      out.set(item.id, detail);
       continue;
     }
     const url = item.url?.startsWith("http") ? item.url : `https://${domain}${item.url}`;
@@ -865,7 +942,7 @@ async function readDetails(page, items, domain) {
       await page.waitForTimeout(1200); // grade/attempt widgets render late
       const detail = await page.evaluate(extractDetail);
       out.set(item.id, detail);
-      cache[item.id] = detail;
+      cache[item.id] = { ...detail, readWhenCompleted: item.completed === true };
       visited++;
     } catch (e) {
       console.error(`  detail failed for ${item.id}: ${e.message}`);

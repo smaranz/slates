@@ -46,6 +46,30 @@ const POLL_MS = Number(process.env.SLATES_POLL_MS || 5 * 60_000);
 const CACHE_MS = 60_000;
 
 let inFlight = null;
+
+/**
+ * How the last sync attempt actually went.
+ *
+ * `/health` used to answer from config alone, so it reported `ok: true` with a
+ * `loggedInAt` from days earlier while every scrape was failing on an expired
+ * session — the app looked healthy and quietly served a stale board. Health is
+ * about what happened, not what was configured.
+ */
+let lastSync = { at: null, ok: null, error: null };
+
+/**
+ * Until when this service must keep its hands off the browser profile.
+ *
+ * Chrome allows exactly one process per user-data-dir, and this service holds
+ * `~/.slates/chrome-profile` open for its whole life. That made `npm run
+ * login` — the fix the service itself recommends when the session expires —
+ * impossible to run without first knowing to kill the service. Now the login
+ * script asks for the profile and the service stands aside.
+ */
+let pausedUntil = 0;
+
+/** Long enough to get through an SSO redirect and a 2FA prompt without rushing. */
+const PAUSE_MS = 15 * 60_000;
 let cache = loadCache(); // { at, payload } — survives a restart
 
 /** Per-question results by item URL: { at, review }. In memory only. */
@@ -78,17 +102,23 @@ async function refresh(reason) {
     console.log(`[${new Date().toLocaleTimeString()}] ${reason} skipped — attempt in progress`);
     return;
   }
+  if (Date.now() < pausedUntil) {
+    console.log(`[${new Date().toLocaleTimeString()}] ${reason} skipped — signing in`);
+    return;
+  }
   try {
     const payload = await runScrape();
     const prev = cache?.payload?.snapshot?.assignments?.length ?? null;
     cache = { at: Date.now(), payload };
     saveCache(cache); // survive a restart
+    lastSync = { at: Date.now(), ok: true, error: null };
     const now = payload.snapshot.assignments.length;
     const delta = prev === null || prev === now ? "" : `  (was ${prev})`;
     console.log(
       `[${new Date().toLocaleTimeString()}] ${reason}: ${now} items / ${payload.stats.courses} courses${delta}`
     );
   } catch (e) {
+    lastSync = { at: Date.now(), ok: false, error: e.message };
     console.error(`[${new Date().toLocaleTimeString()}] ${reason} failed: ${e.message}`);
   }
 }
@@ -155,9 +185,43 @@ function progressStream(res, streaming) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
 
+  /*
+   * Hand the browser profile over so an interactive login can use it, and
+   * keep out of the way until it says it's finished (or the pause lapses).
+   */
+  if (url.pathname === "/browser/release") {
+    pausedUntil = Date.now() + PAUSE_MS;
+    await closeShared().catch(() => {});
+    console.log(`[${new Date().toLocaleTimeString()}] released the browser profile for sign-in`);
+    return send(res, 200, { released: true, until: pausedUntil });
+  }
+
+  if (url.pathname === "/browser/resume") {
+    pausedUntil = 0;
+    console.log(`[${new Date().toLocaleTimeString()}] resuming — signed in`);
+    // Pick the new session up straight away rather than waiting out the poll.
+    void refresh("after sign-in");
+    return send(res, 200, { resumed: true });
+  }
+
   if (url.pathname === "/health") {
     const { domain, loggedInAt } = readConfig();
-    return send(res, 200, { ok: true, domain: domain ?? null, loggedInAt: loggedInAt ?? null });
+    /*
+     * `ok` means "the last sync worked", not "a config file exists". Before a
+     * first attempt has finished there is nothing to report, so it stays null
+     * rather than claiming success the service hasn't earned yet.
+     */
+    return send(res, 200, {
+      ok: lastSync.ok,
+      domain: domain ?? null,
+      loggedInAt: loggedInAt ?? null,
+      lastSyncAt: lastSync.at,
+      // Surfaced verbatim: "Signed out of Schoology — run: npm run login" is
+      // the whole fix, and burying it behind a generic failure helps nobody.
+      error: lastSync.error,
+      /** Whether anything is being served at all, stale or not. */
+      hasBoard: !!cache?.payload?.snapshot?.assignments?.length,
+    });
   }
 
   /* ---- real submission through Schoology's own dropbox ---- */
@@ -472,5 +536,5 @@ server.listen(PORT, "127.0.0.1", () => {
   const { domain } = readConfig();
   console.log(`\n  Slates scraper listening on http://127.0.0.1:${PORT}`);
   console.log(`  Schoology domain: ${domain ?? "(not set — run: npm run login -- <district>.schoology.com)"}`);
-  console.log(`  Endpoints: /health  /snapshot  /snapshot?fresh=1\n`);
+  console.log(`  Endpoints: /health  /snapshot  /snapshot?fresh=1  /browser/release\n`);
 });

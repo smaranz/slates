@@ -427,11 +427,20 @@ export default function ModelPicker({
   onChange,
   thinking,
   onThinkingChange,
+  placement = "up",
+  variant = "outline",
 }: {
   value: TutorModelId;
   onChange: (id: TutorModelId) => void;
   thinking: ThinkingLevel;
   onThinkingChange: (t: ThinkingLevel) => void;
+  /**
+   * Which way the menu opens. The composer sits at the bottom of the window so
+   * its picker grows upward; the tutor's header sits at the top and grows down.
+   */
+  placement?: "up" | "down";
+  /** "bare" drops the pill outline — the header wears the model name as a title. */
+  variant?: "outline" | "bare";
 }) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState<{ kind: HoverKind; rect: DOMRect } | null>(null);
@@ -520,18 +529,21 @@ export default function ModelPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Model: ${triggerLabel(value, thinking)}`}
+        className="model-trigger"
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
-          height: 30,
+          height: variant === "bare" ? 34 : 30,
           borderRadius: 9999,
-          border: "1px solid var(--line)",
+          border: variant === "bare" ? 0 : "1px solid var(--line)",
           background: open ? "var(--hover)" : "transparent",
-          padding: "0 10px",
+          padding: variant === "bare" ? "0 8px" : "0 10px",
           font: "inherit",
-          fontSize: 12.5,
-          color: "var(--text-2)",
+          fontSize: variant === "bare" ? 15 : 12.5,
+          fontWeight: variant === "bare" ? 600 : 400,
+          letterSpacing: variant === "bare" ? "-0.01em" : undefined,
+          color: variant === "bare" ? "var(--text)" : "var(--text-2)",
           cursor: "pointer",
         }}
       >
@@ -545,7 +557,9 @@ export default function ModelPicker({
           role="menu"
           style={{
             position: "absolute",
-            bottom: "calc(100% + 6px)",
+            ...(placement === "down"
+              ? { top: "calc(100% + 6px)" }
+              : { bottom: "calc(100% + 6px)" }),
             left: 0,
             zIndex: 20,
             minWidth: 220,

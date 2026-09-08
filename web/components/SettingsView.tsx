@@ -19,9 +19,9 @@ import {
   OpenAILogo,
   QwenLogo,
   Spinner,
-  Toggle,
   ZaiLogo,
 } from "./ui";
+import NotificationSettingsCard from "./NotificationSettingsCard";
 
 interface ProviderInfo {
   /** Tutor backends plus ElevenLabs, which powers narration rather than chat. */
@@ -63,6 +63,10 @@ export default function SettingsView() {
     running: boolean;
     domain?: string | null;
     loggedInAt?: string | null;
+    /** Whether the *last sync* worked — not whether the service is reachable. */
+    ok?: boolean | null;
+    error?: string | null;
+    lastSyncAt?: number | null;
   } | null>(null);
 
   const checkScraper = useCallback(async () => {
@@ -144,7 +148,16 @@ export default function SettingsView() {
   return (
     <div className="scroll centered" style={{ paddingBottom: 32 }}>
       <div className="col" style={{ maxWidth: 1100, gap: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="card mobile-host-notice">
+          <span className="mobile-host-kicker">Mobile connection</span>
+          <strong>Your Schoology session stays on the host computer.</strong>
+          <p>
+            This phone uses the Slates server configured when the native app was built.
+            Keep that trusted host and its scraper running to sync, send, submit, or use
+            server-backed tutor features. Cached board data remains on this device.
+          </p>
+        </div>
+        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div className="card" style={{ padding: "20px 22px" }}>
           <span className="card-title">Profile</span>
           <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14 }}>
@@ -213,29 +226,7 @@ export default function SettingsView() {
           </div>
         </div>
 
-        <div className="card" style={{ padding: "20px 22px" }}>
-          <span className="card-title">Notifications</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: "var(--text)" }}>Push reminders</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                  Nightly nudge for what&apos;s due.
-                </div>
-              </div>
-              <Toggle on={s.notifPush} onClick={s.togglePush} label="Push reminders" />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: "var(--text)" }}>Weekly digest</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                  Grade summary every Sunday.
-                </div>
-              </div>
-              <Toggle on={s.notifDigest} onClick={s.toggleDigest} label="Weekly digest" />
-            </div>
-          </div>
-        </div>
+        <NotificationSettingsCard />
         </div>
 
         {/* The only sync path: a dedicated logged-in browser, driven locally. */}
@@ -247,7 +238,16 @@ export default function SettingsView() {
                 height: 8,
                 flexShrink: 0,
                 borderRadius: 9999,
-                background: scraper?.running ? "var(--good)" : "var(--muted)",
+                /*
+                 * Amber for "running but not syncing". A green light over a
+                 * service whose every scrape is failing is how an expired
+                 * Schoology session went unnoticed for a day.
+                 */
+                background: !scraper?.running
+                  ? "var(--muted)"
+                  : scraper.ok === false
+                    ? "var(--warn)"
+                    : "var(--good)",
               }}
             />
             <span className="card-title">Schoology sync</span>
@@ -276,12 +276,21 @@ export default function SettingsView() {
           </p>
 
           {scraper?.running ? (
-            <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--good)", lineHeight: 1.5 }}>
-              Running · {scraper.domain ?? "no domain set"}
-              {scraper.loggedInAt
-                ? ` · signed in ${new Date(scraper.loggedInAt).toLocaleDateString()}`
-                : ""}
-            </p>
+            scraper.ok === false ? (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
+                Running, but the last sync failed — {scraper.error ?? "unknown error"}
+                <br />
+                Your board is showing the last good copy, so nothing new will appear
+                until this is fixed.
+              </p>
+            ) : (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--good)", lineHeight: 1.5 }}>
+                Running · {scraper.domain ?? "no domain set"}
+                {scraper.loggedInAt
+                  ? ` · signed in ${new Date(scraper.loggedInAt).toLocaleDateString()}`
+                  : ""}
+              </p>
+            )
           ) : (
             <pre
               style={{
@@ -424,7 +433,7 @@ npm run serve      # leave this running`}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div className="card" style={{ padding: "20px 22px" }}>
             <span className="card-title">Tutor defaults</span>
             <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 
 import { readAttachment, toTutorMessageParts, type Attachment } from "@/lib/attachments";
@@ -19,10 +19,14 @@ import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-mo
 import { parseTutorQuiz, stripTutorQuiz, type QuizFRQuestion } from "@/lib/tutor-quiz";
 import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
 import AITextLoading from "./AITextLoading";
+import ArtifactChip from "./ArtifactChip";
+import ArtifactPanel from "./ArtifactPanel";
 import DocumentCard from "./DocumentCard";
+import GeneratedImageCard from "./GeneratedImageCard";
 import GraphCard from "./GraphCard";
 import ModelPicker from "./ModelPicker";
 import LessonCard from "./LessonCard";
+import OutputFiles from "./OutputFiles";
 import QuizCard from "./QuizCard";
 import TutorMarkdown from "./TutorMarkdown";
 import { Icon, ICON } from "./ui";
@@ -64,10 +68,44 @@ export default function TutorView() {
   const [pending, setPending] = useState<Attachment[]>([]);
   const [reading, setReading] = useState(false);
   const [railOpen, toggleRail] = useTutorRail();
+  const dictation = useDictation((heard) =>
+    setDraft((cur) => (cur ? `${cur.replace(/\s+$/, "")} ${heard}` : heard))
+  );
+  /** The reply whose Copy button is showing its tick. */
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  /** Thumbs on a reply, kept for the session — a rating, not a filed report. */
+  const [rated, setRated] = useState<Record<string, "up" | "down">>({});
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Aborts the reply currently streaming, so the composer can stop it. */
   const abortRef = useRef<AbortController | null>(null);
+
+  /**
+   * The quiz or document currently open in the side panel — opened the way
+   * Claude opens an artifact next to the conversation instead of burying it
+   * in scrollback. `null` means the panel is closed; the chip in the
+   * transcript is what opens it (or reopens it after a close).
+   */
+  const [openArtifact, setOpenArtifact] = useState<{ kind: "quiz" | "document"; messageId: string } | null>(null);
+  const [artifactFullscreen, setArtifactFullscreen] = useState(false);
+  // A different conversation has nothing to do with whatever was pinned open —
+  // reset during render rather than in an effect, so the old artifact never
+  // paints for a frame against the newly-opened chat.
+  const [artifactChatId, setArtifactChatId] = useState(chats.activeId);
+  if (artifactChatId !== chats.activeId) {
+    setArtifactChatId(chats.activeId);
+    setOpenArtifact(null);
+    setArtifactFullscreen(false);
+  }
+
+  /**
+   * Replies currently drawing an illustration. Generation takes seconds, not
+   * the minutes a video render does, so unlike `lessonChatId` this doesn't
+   * occupy the composer — the card just shows its own loading state until
+   * the message picks up the finished image.
+   */
+  const [imagePendingIds, setImagePendingIds] = useState<Set<string>>(() => new Set());
 
   // Either kind of work occupies the composer, and both are stoppable.
   const occupied = busyChatId ?? lessonChatId;
@@ -105,15 +143,28 @@ export default function TutorView() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, thinking]);
 
+  /*
+   * The composer grows with what's in it and springs back when it's sent.
+   * `rows={1}` alone gives a one-line box that scrolls internally, which hides
+   * the top of anything longer than a sentence.
+   */
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
+
   /** Every course, every assignment, every submission and grade — see lib/tutor-context.ts. */
   const buildContext = useCallback(() => buildTutorContext(s), [s]);
 
   /** Runs a board action the tutor asked for, returning what changed (or null if it couldn't). */
   const applyAction = useCallback(
     (action: ReturnType<typeof parseTutorActions>["actions"][number]) => {
-      // A video isn't a board edit and resolves to no assignment. It's kicked
-      // off separately below, once the reply it belongs to is on screen.
-      if (action.kind === "make_video") return null;
+      // Neither a video nor an image is a board edit or resolves to an
+      // assignment. Both are kicked off separately below, once the reply
+      // they belong to is on screen.
+      if (action.kind === "make_video" || action.kind === "generate_image") return null;
       const a = s.assignmentById(action.id);
       if (!a) return null;
       switch (action.kind) {
@@ -183,10 +234,46 @@ export default function TutorView() {
     [buildContext, chats]
   );
 
+  /** Draws one illustration and pins it to the reply that asked for it. */
+  const beginImage = useCallback(
+    async (chatId: string, messageId: string, prompt: string) => {
+      setImagePendingIds((prev) => new Set(prev).add(messageId));
+      try {
+        const res = await fetch("/api/image", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+        const body = (await res.json()) as { dataUrl?: string; error?: string };
+        if (!res.ok || !body.dataUrl) throw new Error(body.error ?? "Couldn't draw that.");
+        chats.updateMessages(chatId, (prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, image: { prompt, dataUrl: body.dataUrl! } } : m))
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't draw that.");
+      } finally {
+        setImagePendingIds((prev) => {
+          if (!prev.has(messageId)) return prev;
+          const next = new Set(prev);
+          next.delete(messageId);
+          return next;
+        });
+      }
+    },
+    [chats]
+  );
+
   const send = useCallback(
-    async (raw?: string) => {
+    /**
+     * `history` and `files` are only passed by Retry, which replays a turn
+     * from a transcript it has just truncated. Reading them from state there
+     * would read the pre-truncation thread — this render's `messages` is a
+     * frame behind the store write that dropped the old answer.
+     */
+    async (raw?: string, history?: TutorChatMessage[], files?: Attachment[]) => {
       const text = (raw ?? draft).trim();
-      const attachments = pending;
+      const attachments = files ?? pending;
+      const base = history ?? messages;
       if ((!text && attachments.length === 0) || thinking) return;
 
       /*
@@ -197,7 +284,7 @@ export default function TutorView() {
       const chatId = chats.activeId || chats.startChat();
 
       const next: TutorChatMessage[] = [
-        ...messages,
+        ...base,
         {
           id: `u${Date.now()}`,
           role: "user",
@@ -206,6 +293,9 @@ export default function TutorView() {
         },
       ];
       const replyId = `a${Date.now()}`;
+      // Files are matched by modification time against this mark, so a reply
+      // can only ever show what appeared while it was actually running.
+      const turnStartedAt = Date.now();
       const controller = new AbortController();
       abortRef.current = controller;
       chats.updateMessages(chatId, () => [...next, { id: replyId, role: "assistant", text: "" }]);
@@ -273,10 +363,34 @@ export default function TutorView() {
           )
         );
 
+        // Opens the same way Claude surfaces a freshly-made artifact — on
+        // screen already, not just a chip waiting to be noticed. A document
+        // wins if a reply somehow produced both; only one panel shows at once.
+        if (doc) setOpenArtifact({ kind: "document", messageId: replyId });
+        else if (quiz) setOpenArtifact({ kind: "quiz", messageId: replyId });
+
         // Started after the reply lands rather than awaited inside it: a video
         // takes minutes, and the student should be reading the answer already.
         const video = actions.find((a) => a.kind === "make_video");
         if (video) void beginLesson(chatId, replyId, video.topic, video.images);
+
+        /*
+         * Whatever a skill wrote while this turn ran. Read from the directory
+         * rather than from the reply: the tutor saying it made a document and
+         * a document existing are different claims, and only one is checkable.
+         */
+        void fetch(`/api/tutor/files?since=${turnStartedAt}`, { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : { files: [] }))
+          .then((body: { files?: { name: string; size: number }[] }) => {
+            if (!body.files?.length) return;
+            chats.updateMessages(chatId, (prev) =>
+              prev.map((m) => (m.id === replyId ? { ...m, files: body.files } : m))
+            );
+          })
+          .catch(() => {});
+
+        const drawing = actions.find((a) => a.kind === "generate_image");
+        if (drawing) void beginImage(chatId, replyId, drawing.prompt);
       } catch (e) {
         // Stopping is something the student did on purpose, not a failure.
         if (!(e instanceof DOMException && e.name === "AbortError")) {
@@ -289,7 +403,20 @@ export default function TutorView() {
         setBusyChatId(null);
       }
     },
-    [applyAction, beginLesson, buildContext, chats, draft, effort, messages, model, pending, s.studentName, thinking]
+    [
+      applyAction,
+      beginImage,
+      beginLesson,
+      buildContext,
+      chats,
+      draft,
+      effort,
+      messages,
+      model,
+      pending,
+      s.studentName,
+      thinking,
+    ]
   );
 
   /** Locks in a multiple-choice pick — persisted on the message, like everything else in the thread. */
@@ -333,20 +460,91 @@ export default function TutorView() {
     [send]
   );
 
+  /**
+   * Take a turn back. The answer and the question both leave the transcript,
+   * and the question is asked again from the history that preceded it — which
+   * is what "regenerate" means everywhere it appears.
+   */
+  const retry = useCallback(
+    (replyId: string) => {
+      if (thinking || !chats.activeId) return;
+      const at = messages.findIndex((m) => m.id === replyId);
+      if (at < 0) return;
+      let ask = at - 1;
+      while (ask >= 0 && messages[ask].role !== "user") ask -= 1;
+      if (ask < 0) return;
+
+      const question = messages[ask];
+      const history = messages.slice(0, ask);
+      const chatId = chats.activeId;
+      chats.updateMessages(chatId, () => history);
+      void send(question.text, history, question.attachments ?? []);
+    },
+    [chats, messages, send, thinking]
+  );
+
+  /**
+   * Rephrase a question. The turn is lifted back into the composer and the
+   * thread rewinds to just before it, so the follow-ups that were answers to
+   * the old wording don't linger under the new one.
+   */
+  const editAsk = useCallback(
+    (messageId: string) => {
+      if (thinking || !chats.activeId) return;
+      const at = messages.findIndex((m) => m.id === messageId);
+      if (at < 0) return;
+      setDraft(messages[at].text);
+      setPending(messages[at].attachments ?? []);
+      chats.updateMessages(chats.activeId, () => messages.slice(0, at));
+      composerRef.current?.focus();
+    },
+    [chats, messages, thinking]
+  );
+
+  /** Thumbs toggle rather than latch — a misclick shouldn't be permanent. */
+  const rate = useCallback((id: string, verdict: "up" | "down") => {
+    setRated((prev) => {
+      const next = { ...prev };
+      if (next[id] === verdict) delete next[id];
+      else next[id] = verdict;
+      return next;
+    });
+  }, []);
+
+  /** Copy a reply, with a two-second tick on the button that did it. */
+  const copyReply = useCallback((id: string, text: string) => {
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopiedId(id);
+        window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1600);
+      },
+      () => {}
+    );
+  }, []);
+
   const empty = messages.length === 0;
 
+  const openMessage = openArtifact ? messages.find((m) => m.id === openArtifact.messageId) : undefined;
+  const openQuiz = openArtifact?.kind === "quiz" ? openMessage?.quiz : undefined;
+  const openDoc = openArtifact?.kind === "document" ? openMessage?.document : undefined;
+
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-      <ChatRail
+    <div className="gpt" data-drawer={railOpen ? "open" : "closed"}>
+      {/* The drawer is a sheet over the thread on a phone and a docked column
+          on a laptop. Same markup either way — only the CSS differs, so the
+          conversation list can't drift between the two shells. */}
+      <div className="gpt-scrim" onClick={toggleRail} aria-hidden="true" />
+
+      <ChatDrawer
         chats={chats.chats}
         activeId={chats.activeId}
         busyChatId={busyChatId}
-        open={railOpen}
-        onToggle={toggleRail}
+        onClose={toggleRail}
         onNew={() => {
           chats.startChat();
           setError(null);
           setPending([]);
+          setDraft("");
         }}
         onOpen={(id) => {
           chats.openChat(id);
@@ -356,344 +554,510 @@ export default function TutorView() {
         onRename={chats.renameChat}
       />
 
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          padding: "0 24px 8px",
-          display: "flex",
-          justifyContent: "center",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1040,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            justifyContent: "flex-start",
-            minHeight: "100%",
-          }}
-        >
-          {empty && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 10,
-                margin: "auto 0",
-                textAlign: "center",
-              }}
-            >
-              <Image
-                src="/assets/slates-mark.png"
-                alt=""
-                width={34}
-                height={34}
-                style={{ display: "block", objectFit: "contain", opacity: 0.9 }}
-              />
-              <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" }}>
-                What are you working on?
-              </div>
-              <p style={{ margin: 0, maxWidth: 420, fontSize: 14, lineHeight: 1.5, color: "var(--muted)" }}>
-                Ask about any assignment, a concept you&apos;re stuck on, or how to spend tonight.
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 6 }}>
-                {SUGGESTIONS.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => send(q)}
-                    style={{
-                      border: "1px solid var(--line)",
-                      borderRadius: 9999,
-                      background: "transparent",
-                      padding: "8px 14px",
-                      font: "inherit",
-                      fontSize: 13,
-                      color: "var(--text-2)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+      <div className="gpt-main">
+        {/* Sidebar toggle, the model you're talking to, and a new chat —
+            the three things ChatGPT keeps in its header, in that order. */}
+        <header className="gpt-header">
+          <button
+            type="button"
+            className="gpt-icon-btn"
+            onClick={toggleRail}
+            aria-label={railOpen ? "Hide conversations" : "Show conversations"}
+            aria-expanded={railOpen}
+          >
+            <Icon path={ICON.sidebar} size={19} />
+          </button>
 
-          {messages.map((m) => {
-            /*
-             * The assistant's message is created empty and filled as the reply
-             * streams in, so for the first moment there is nothing to draw.
-             * Rendering the bubble anyway left a stray rounded box hanging
-             * above the typing indicator, which already says the same thing.
-             */
-            const hasBubble = !!m.text || !!m.attachments?.length || !!m.actions?.length;
-            if (!hasBubble && !m.quiz && !m.lesson && !m.document && !m.graph) return null;
+          <ModelPicker
+            value={model}
+            onChange={handleModelChange}
+            thinking={effort}
+            onThinkingChange={setEffort}
+            placement="down"
+            variant="bare"
+          />
 
-            return (
-            <div
-              key={m.id}
-              style={{ display: "flex", width: "100%", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                  maxWidth: m.role === "user" ? "75%" : "min(92%, 640px)",
-                  alignItems: m.role === "user" ? "flex-end" : "flex-start",
-                }}
-              >
-                {hasBubble && (
-                <div
-                  style={
-                    m.role === "user"
-                      ? {
-                          borderRadius: 24,
-                          background: "var(--raised)",
-                          padding: "10px 16px",
-                          fontSize: 15,
-                          lineHeight: 1.5,
-                          color: "var(--text)",
-                          boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.2)",
-                          whiteSpace: "pre-wrap",
-                        }
-                      : {
-                          borderRadius: 24,
-                          border: "1px solid var(--line)",
-                          background: "var(--surface)",
-                          padding: "10px 16px",
-                          fontSize: 15,
-                          lineHeight: 1.55,
-                          color: "var(--text)",
-                          boxShadow: "var(--shadow-card)",
-                          whiteSpace: "pre-wrap",
-                        }
-                  }
-                >
-                  {m.attachments && m.attachments.length > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 6,
-                        marginBottom: m.text ? 8 : 0,
-                      }}
-                    >
-                      {m.attachments.map((a) => (
-                        <AttachmentChip key={a.id} attachment={a} />
-                      ))}
+          <span className="gpt-header-gap" />
+
+          <button
+            type="button"
+            className="gpt-icon-btn"
+            onClick={() => {
+              chats.startChat();
+              setError(null);
+              setPending([]);
+              setDraft("");
+            }}
+            aria-label="New chat"
+            title="New chat"
+          >
+            <Icon path={ICON.compose} size={19} />
+          </button>
+        </header>
+
+        <div className="gpt-thread" ref={scrollRef}>
+          <div className={`gpt-column${empty ? " gpt-column--empty" : ""}`}>
+            {empty && (
+              <div className="gpt-greeting">
+                <Image
+                  src="/assets/slates-mark.png"
+                  alt=""
+                  width={30}
+                  height={30}
+                  className="gpt-greeting-mark"
+                />
+                <h1>What are you working on?</h1>
+                <div className="gpt-starters">
+                  {SUGGESTIONS.map((q) => (
+                    <button key={q} type="button" className="gpt-starter" onClick={() => send(q)}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((m, i) => {
+              /*
+               * The assistant's message is created empty and filled as the
+               * reply streams in, so for the first moment there is nothing to
+               * draw. Rendering the row anyway left a stray gap above the
+               * typing indicator, which already says the same thing.
+               */
+              const hasText = !!m.text || !!m.attachments?.length || !!m.actions?.length;
+              const drawingImage = imagePendingIds.has(m.id);
+              if (!hasText && !m.quiz && !m.lesson && !m.document && !m.graph && !m.image && !drawingImage) {
+                return null;
+              }
+
+              // Actions belong to a finished reply. Offering Retry on half an
+              // answer would throw away the half that had already arrived.
+              const streaming = thinking && i === messages.length - 1;
+              const rating = rated[m.id];
+
+              if (m.role === "user") {
+                return (
+                  <div key={m.id} className="gpt-turn gpt-turn--user">
+                    <div className="gpt-bubble">
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div className="gpt-bubble-files">
+                          {m.attachments.map((a) => (
+                            <AttachmentChip key={a.id} attachment={a} />
+                          ))}
+                        </div>
+                      )}
+                      {m.text}
+                    </div>
+                    <div className="gpt-actions gpt-actions--user">
+                      <ActionButton
+                        label={copiedId === m.id ? "Copied" : "Copy"}
+                        icon={copiedId === m.id ? ICON.check : ICON.copy}
+                        onClick={() => copyReply(m.id, m.text)}
+                      />
+                      <ActionButton
+                        label="Edit"
+                        icon={ICON.pencil}
+                        disabled={thinking}
+                        onClick={() => editAsk(m.id)}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                /* No bubble on this side. The reply is the page — the way
+                   ChatGPT stopped boxing the assistant once answers got long
+                   enough that a box was just a border around a whole screen. */
+                <div key={m.id} className="gpt-turn gpt-turn--assistant">
+                  {hasText && (
+                    <div className="gpt-reply">
+                      <TutorMarkdown text={m.text} className="prose--chat" />
+                      {m.actions && m.actions.length > 0 && (
+                        <div className="gpt-applied">
+                          {m.actions.map((label, k) => (
+                            <div key={k} className="gpt-applied-row">
+                              <Icon path={ICON.check} size={12} />
+                              {label}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
-                  {m.role === "assistant" ? <TutorMarkdown text={m.text} /> : m.text}
-                  {m.actions && m.actions.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: m.text ? 10 : 0 }}>
-                      {m.actions.map((label, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 12,
-                            color: "var(--good)",
-                          }}
-                        >
-                          <Icon path={ICON.check} size={12} />
-                          {label}
-                        </div>
-                      ))}
+
+                  {m.quiz && (
+                    <ArtifactChip
+                      icon={ICON.assignments}
+                      title={m.quiz.title || "Practice set"}
+                      subtitle={`${m.quiz.questions.length} question${m.quiz.questions.length === 1 ? "" : "s"}`}
+                      active={openArtifact?.kind === "quiz" && openArtifact.messageId === m.id}
+                      onClick={() =>
+                        setOpenArtifact((cur) =>
+                          cur?.kind === "quiz" && cur.messageId === m.id ? null : { kind: "quiz", messageId: m.id }
+                        )
+                      }
+                    />
+                  )}
+
+                  {m.files && m.files.length > 0 && <OutputFiles files={m.files} />}
+
+                  {m.lesson && (
+                    <LessonCard
+                      id={m.lesson.id}
+                      topic={m.lesson.topic}
+                      onSettled={() => {
+                        if (lessonRef.current === m.lesson!.id) lessonRef.current = null;
+                        setLessonChatId((c) => (c === chats.activeId ? null : c));
+                      }}
+                    />
+                  )}
+
+                  {m.document && (
+                    <ArtifactChip
+                      icon={ICON.file}
+                      title={m.document.title}
+                      subtitle={`${m.document.body.trim().split(/\s+/).filter(Boolean).length} words`}
+                      active={openArtifact?.kind === "document" && openArtifact.messageId === m.id}
+                      onClick={() =>
+                        setOpenArtifact((cur) =>
+                          cur?.kind === "document" && cur.messageId === m.id
+                            ? null
+                            : { kind: "document", messageId: m.id }
+                        )
+                      }
+                    />
+                  )}
+
+                  {m.graph && <GraphCard graph={m.graph} />}
+
+                  {m.image && <GeneratedImageCard image={m.image} />}
+
+                  {drawingImage && !m.image && (
+                    <div className="gpt-inline-status">
+                      <AITextLoading texts={["Drawing..."]} />
+                    </div>
+                  )}
+
+                  {hasText && !streaming && (
+                    <div className="gpt-actions">
+                      <ActionButton
+                        label={copiedId === m.id ? "Copied" : "Copy"}
+                        icon={copiedId === m.id ? ICON.check : ICON.copy}
+                        onClick={() => copyReply(m.id, m.text)}
+                      />
+                      <ActionButton
+                        label="Good response"
+                        icon={ICON.thumbUp}
+                        active={rating === "up"}
+                        onClick={() => rate(m.id, "up")}
+                      />
+                      <ActionButton
+                        label="Bad response"
+                        icon={ICON.thumbDown}
+                        active={rating === "down"}
+                        onClick={() => rate(m.id, "down")}
+                      />
+                      <ActionButton
+                        label="Try again"
+                        icon={ICON.retry}
+                        disabled={thinking}
+                        onClick={() => retry(m.id)}
+                      />
                     </div>
                   )}
                 </div>
-                )}
+              );
+            })}
 
-                {m.quiz && (
-                  <QuizCard
-                    quiz={m.quiz}
-                    busy={thinking}
-                    onSelect={(questionIndex, choice) => answerQuizChoice(m.id, questionIndex, choice)}
-                    onReveal={(questionIndex) => revealQuizSample(m.id, questionIndex)}
-                    onRequestFeedback={requestQuizFeedback}
-                  />
-                )}
-
-                {m.lesson && (
-                  <LessonCard
-                    id={m.lesson.id}
-                    topic={m.lesson.topic}
-                    onSettled={() => {
-                      if (lessonRef.current === m.lesson!.id) lessonRef.current = null;
-                      setLessonChatId((c) => (c === chats.activeId ? null : c));
-                    }}
-                  />
-                )}
-
-                {m.document && <DocumentCard document={m.document} />}
-
-                {m.graph && <GraphCard graph={m.graph} />}
+            {thinking && messages[messages.length - 1]?.text === "" && (
+              <div className="gpt-turn gpt-turn--assistant">
+                <div className="gpt-thinking">
+                  <AITextLoading />
+                </div>
               </div>
-            </div>
-            );
-          })}
-
-          {thinking && messages[messages.length - 1]?.text === "" && (
-            <div style={{ display: "flex", justifyContent: "flex-start" }}>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  height: 36,
-                  borderRadius: 9999,
-                  border: "1px solid var(--line)",
-                  background: "var(--surface)",
-                  padding: "0 16px",
-                }}
-              >
-                <AITextLoading />
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div style={{ fontSize: 12, color: "var(--warn)", textAlign: "center" }}>{error}</div>
-          )}
-        </div>
-      </div>
-
-      <div style={{ padding: "8px 24px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1040,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-            borderRadius: 26,
-            border: "1px solid var(--line)",
-            background: "var(--sunken)",
-            boxShadow: "var(--shadow-sunken)",
-            padding: "8px 8px 8px 10px",
-          }}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (canAttach && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
-          }}
-        >
-          {pending.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "2px 2px 0" }}>
-              {pending.map((a) => (
-                <AttachmentChip key={a.id} attachment={a} onRemove={() => removePending(a.id)} />
-              ))}
-            </div>
-          )}
-
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            onPaste={(e) => {
-              const files = Array.from(e.clipboardData.files);
-              if (canAttach && files.length) addFiles(files);
-            }}
-            rows={1}
-            placeholder="Ask your tutor"
-            aria-label="Ask your tutor"
-            className="bare-field bare-field--chat"
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {canAttach && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept={ACCEPTED_FILE_TYPES}
-                  onChange={(e) => {
-                    if (e.target.files?.length) addFiles(e.target.files);
-                    e.target.value = "";
-                  }}
-                  style={{ display: "none" }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  aria-label="Add photos or files"
-                  disabled={reading}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 30,
-                    height: 30,
-                    flexShrink: 0,
-                    borderRadius: 9999,
-                    border: "1px solid var(--line)",
-                    background: "transparent",
-                    color: "var(--text-2)",
-                    cursor: "pointer",
-                    opacity: reading ? 0.5 : 1,
-                  }}
-                >
-                  <Icon path={ICON.plus} size={15} />
-                </button>
-              </>
             )}
-            <ModelPicker
-              value={model}
-              onChange={handleModelChange}
-              thinking={effort}
-              onThinkingChange={setEffort}
-            />
-            <span style={{ flex: 1 }} />
-            {/* One button in two states. While a reply streams it stops it —
-                a send button greyed out for the whole answer leaves no way to
-                take back a question you'd rather rephrase. */}
-            <button
-              type="button"
-              onClick={() => (thinking ? stop() : send())}
-              aria-label={thinking ? "Stop" : "Send"}
-              title={thinking ? "Stop generating" : "Send"}
-              disabled={!thinking && !draft.trim() && pending.length === 0}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36,
-                height: 36,
-                flexShrink: 0,
-                border: 0,
-                borderRadius: 9999,
-                cursor: "pointer",
-                backgroundImage:
-                  "linear-gradient(180deg, oklch(0.42 0 0) 0%, oklch(0.37 0 0) 100%)",
-                color: "var(--text)",
-                boxShadow: "inset 0 1px 0 oklch(1 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.2)",
-                opacity: !thinking && !draft.trim() && pending.length === 0 ? 0.4 : 1,
-                pointerEvents: !thinking && !draft.trim() && pending.length === 0 ? "none" : "auto",
-              }}
-            >
-              <Icon path={thinking ? ICON.stop : [ICON.send, ICON.send2]} size={thinking ? 13 : 18} />
-            </button>
+
+            {error && <div className="gpt-error">{error}</div>}
           </div>
         </div>
+
+        <div className="gpt-composer-dock">
+          <form
+            className="gpt-composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!thinking) send();
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (canAttach && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+            }}
+          >
+            {pending.length > 0 && (
+              <div className="gpt-composer-files">
+                {pending.map((a) => (
+                  <AttachmentChip key={a.id} attachment={a} onRemove={() => removePending(a.id)} />
+                ))}
+              </div>
+            )}
+
+            <textarea
+              ref={composerRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.files);
+                if (canAttach && files.length) addFiles(files);
+              }}
+              rows={1}
+              placeholder="Ask anything"
+              aria-label="Ask your tutor"
+              className="gpt-input"
+            />
+
+            <div className="gpt-composer-row">
+              {canAttach && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept={ACCEPTED_FILE_TYPES}
+                    onChange={(e) => {
+                      if (e.target.files?.length) addFiles(e.target.files);
+                      e.target.value = "";
+                    }}
+                    style={{ display: "none" }}
+                  />
+                  <button
+                    type="button"
+                    className="gpt-round-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Add photos or files"
+                    disabled={reading}
+                  >
+                    <Icon path={ICON.plus} size={17} />
+                  </button>
+                </>
+              )}
+
+              <span className="gpt-composer-gap" />
+
+              {/* Dictation, only where the browser actually has it. A mic that
+                  does nothing is worse than no mic, and WKWebView has none. */}
+              {dictation.available && (
+                <button
+                  type="button"
+                  className={`gpt-round-btn${dictation.listening ? " is-live" : ""}`}
+                  onClick={dictation.toggle}
+                  aria-label={dictation.listening ? "Stop dictating" : "Dictate"}
+                  aria-pressed={dictation.listening}
+                >
+                  <Icon path={dictation.listening ? ICON.waveform : ICON.mic} size={17} />
+                </button>
+              )}
+
+              {/* One button in two states. While a reply streams it stops it —
+                  a send button greyed out for the whole answer leaves no way
+                  to take back a question you'd rather rephrase. */}
+              <button
+                type={thinking ? "button" : "submit"}
+                className="gpt-send"
+                onClick={thinking ? stop : undefined}
+                aria-label={thinking ? "Stop" : "Send"}
+                title={thinking ? "Stop generating" : "Send"}
+                disabled={!thinking && !draft.trim() && pending.length === 0}
+              >
+                <Icon path={thinking ? ICON.stop : ICON.arrowUp} size={thinking ? 13 : 19} />
+              </button>
+            </div>
+          </form>
+
+          <p className="gpt-disclaimer">Slates can make mistakes. Check anything that matters.</p>
+        </div>
       </div>
-      </div>
+
+      {openQuiz && (
+        <ArtifactPanel
+          title={openQuiz.title || "Practice set"}
+          icon={ICON.assignments}
+          fullscreen={artifactFullscreen}
+          onToggleFullscreen={() => setArtifactFullscreen((v) => !v)}
+          onClose={() => {
+            setOpenArtifact(null);
+            setArtifactFullscreen(false);
+          }}
+        >
+          <QuizCard
+            quiz={openQuiz}
+            busy={thinking}
+            onSelect={(questionIndex, choice) => answerQuizChoice(openMessage!.id, questionIndex, choice)}
+            onReveal={(questionIndex) => revealQuizSample(openMessage!.id, questionIndex)}
+            onRequestFeedback={requestQuizFeedback}
+          />
+        </ArtifactPanel>
+      )}
+
+      {openDoc && (
+        <ArtifactPanel
+          title="Document"
+          icon={ICON.file}
+          fullscreen={artifactFullscreen}
+          onToggleFullscreen={() => setArtifactFullscreen((v) => !v)}
+          onClose={() => {
+            setOpenArtifact(null);
+            setArtifactFullscreen(false);
+          }}
+        >
+          <DocumentCard document={openDoc} />
+        </ArtifactPanel>
+      )}
     </div>
+  );
+}
+
+/**
+ * Dictation, where the browser has it.
+ *
+ * ChatGPT puts a mic next to send, so this does too — but only when there is
+ * something behind it. `webkitSpeechRecognition` is a Safari/Chrome feature
+ * and is absent from the WKWebView the packaged app runs in, so on the phone
+ * build the button simply never appears rather than appearing and doing
+ * nothing, which is the worse of the two failures.
+ */
+interface SpeechLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start(): void;
+  stop(): void;
+  onresult:
+    | ((event: {
+        /** Where the new results start — `results` is cumulative, not a delta. */
+        resultIndex: number;
+        results: ArrayLike<ArrayLike<{ transcript: string }>>;
+      }) => void)
+    | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+
+function speechCtor(): (new () => SpeechLike) | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechLike;
+    webkitSpeechRecognition?: new () => SpeechLike;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
+/** Never changes for the life of the page — there is nothing to subscribe to. */
+function subscribeSpeech(): () => void {
+  return () => {};
+}
+function speechAvailable(): boolean {
+  return speechCtor() !== null;
+}
+function speechAvailableOnServer(): boolean {
+  return false;
+}
+
+function useDictation(onText: (text: string) => void) {
+  /*
+   * Read through `useSyncExternalStore` rather than in an effect: the server
+   * has no `window`, and setting this from an effect would render the button
+   * once without the mic and once with it — a control that pops into the
+   * composer a frame after the view opens.
+   */
+  const available = useSyncExternalStore(subscribeSpeech, speechAvailable, speechAvailableOnServer);
+  const [listening, setListening] = useState(false);
+  const engine = useRef<SpeechLike | null>(null);
+  const sink = useRef(onText);
+
+  // After commit, not during render: the callback closes over this render's
+  // draft, and the recognizer is long-lived enough to outlive several.
+  useEffect(() => {
+    sink.current = onText;
+  });
+
+  useEffect(() => () => engine.current?.stop(), []);
+
+  const toggle = useCallback(() => {
+    if (engine.current) {
+      engine.current.stop();
+      return;
+    }
+    const Ctor = speechCtor();
+    if (!Ctor) return;
+
+    const rec = new Ctor();
+    rec.lang = navigator.language || "en-US";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (event) => {
+      // Only what arrived since the last callback: `results` holds the whole
+      // session, so replaying it from zero would retype every sentence.
+      let heard = "";
+      for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
+        heard += event.results[i][0].transcript;
+      }
+      const trimmed = heard.trim();
+      if (trimmed) sink.current(trimmed);
+    };
+    const finish = () => {
+      engine.current = null;
+      setListening(false);
+    };
+    rec.onend = finish;
+    rec.onerror = finish;
+
+    try {
+      rec.start();
+      engine.current = rec;
+      setListening(true);
+    } catch {
+      // Already running, or permission refused at the OS level.
+      finish();
+    }
+  }, []);
+
+  return { available, listening, toggle };
+}
+
+/** A ghost icon button with its label as a tooltip — the transcript's action bar. */
+function ActionButton({
+  label,
+  icon,
+  onClick,
+  active,
+  disabled,
+}: {
+  label: string;
+  icon: string | string[];
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="gpt-action"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      disabled={disabled}
+    >
+      <Icon path={icon} size={15} />
+    </button>
   );
 }
 
@@ -712,19 +1076,30 @@ function whenLabel(at: number): string {
   return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** The headings a conversation list is filed under, newest band first. */
+function band(at: number): string {
+  const days = Math.round(
+    (new Date().setHours(0, 0, 0, 0) - new Date(at).setHours(0, 0, 0, 0)) / 86_400_000
+  );
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 7) return "Previous 7 days";
+  if (days <= 30) return "Previous 30 days";
+  return "Older";
+}
+
 /**
- * Every conversation, and the way into a new one.
+ * Every saved conversation, and the way into a new one.
  *
- * Collapses to a narrow strip rather than disappearing: the tutor is mostly
- * used full-width on a laptop, but a way back to what you asked yesterday
- * shouldn't be behind a control you have to remember exists.
+ * A sheet over the thread on a phone and a docked column on a laptop, filed
+ * under Today / Yesterday / the last week — which is how you actually look for
+ * a conversation you half remember having.
  */
-function ChatRail({
+function ChatDrawer({
   chats,
   activeId,
   busyChatId,
-  open,
-  onToggle,
+  onClose,
   onNew,
   onOpen,
   onDelete,
@@ -733,14 +1108,13 @@ function ChatRail({
   chats: TutorChat[];
   activeId: string;
   busyChatId: string | null;
-  open: boolean;
-  onToggle: () => void;
+  onClose: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
 }) {
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
 
@@ -749,165 +1123,117 @@ function ChatRail({
     setEditing(null);
   };
 
-  const iconButton = (label: string, path: string, onClick: () => void) => (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="icon-btn"
-      style={{ width: 30, height: 30 }}
-    >
-      <Icon path={path} size={15} />
-    </button>
-  );
+  const needle = query.trim().toLowerCase();
+  const matches = needle
+    ? chats.filter(
+        (c) =>
+          (c.title || "New chat").toLowerCase().includes(needle) ||
+          c.messages.some((m) => m.text.toLowerCase().includes(needle))
+      )
+    : chats;
 
-  if (!open) {
-    return (
-      <div
-        style={{
-          width: 52,
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 6,
-          padding: "2px 0 20px",
-          borderRight: "1px solid var(--line)",
-        }}
-      >
-        {iconButton("Show conversations", ICON.sidebar, onToggle)}
-        {iconButton("New chat", ICON.plus, onNew)}
-      </div>
-    );
+  // Already newest-first from the store, so the bands come out in order too.
+  const groups: { label: string; items: TutorChat[] }[] = [];
+  for (const chat of matches) {
+    const label = band(chat.updatedAt);
+    const last = groups[groups.length - 1];
+    if (last?.label === label) last.items.push(chat);
+    else groups.push({ label, items: [chat] });
   }
 
   return (
-    <div
-      style={{
-        width: 248,
-        flexShrink: 0,
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "column",
-        borderRight: "1px solid var(--line)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px 8px 10px" }}>
-        <span className="section-label" style={{ flex: 1 }}>
-          Chats
-        </span>
-        {iconButton("New chat", ICON.plus, onNew)}
-        {iconButton("Hide conversations", ICON.sidebar, onToggle)}
+    <aside className="gpt-drawer" aria-label="Conversations">
+      <div className="gpt-drawer-head">
+        <button type="button" className="gpt-icon-btn" onClick={onClose} aria-label="Hide conversations">
+          <Icon path={ICON.sidebar} size={19} />
+        </button>
+        <span className="gpt-header-gap" />
+        <button type="button" className="gpt-icon-btn" onClick={onNew} aria-label="New chat" title="New chat">
+          <Icon path={ICON.compose} size={19} />
+        </button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", padding: "0 8px 20px" }}>
+      <div className="gpt-search">
+        <Icon path={ICON.magnifier} size={15} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search chats"
+          aria-label="Search chats"
+          className="bare-field"
+        />
+      </div>
+
+      <button type="button" className="gpt-drawer-new" onClick={onNew}>
+        <span className="gpt-drawer-new-icon">
+          <Icon path={ICON.compose} size={15} />
+        </span>
+        New chat
+      </button>
+
+      <div className="gpt-drawer-list">
         {chats.length === 0 && (
-          <p style={{ margin: "4px 6px", fontSize: 12, lineHeight: 1.5, color: "var(--muted)" }}>
-            Nothing yet. Whatever you ask below is kept here.
-          </p>
+          <p className="gpt-drawer-empty">Nothing yet. Whatever you ask below is kept here.</p>
+        )}
+        {chats.length > 0 && matches.length === 0 && (
+          <p className="gpt-drawer-empty">No chat matches “{query.trim()}”.</p>
         )}
 
-        {chats.map((chat) => {
-          const active = chat.id === activeId;
-          return (
-            <div
-              key={chat.id}
-              onMouseEnter={() => setHovered(chat.id)}
-              onMouseLeave={() => setHovered((id) => (id === chat.id ? null : id))}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                borderRadius: "var(--radius-xs)",
-                background: active ? "var(--raised)" : "transparent",
-                paddingRight: 2,
-              }}
-            >
-              {editing === chat.id ? (
-                <input
-                  autoFocus
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") setEditing(null);
-                  }}
-                  aria-label="Rename chat"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    border: 0,
-                    borderRadius: "var(--radius-xs)",
-                    background: "var(--sunken)",
-                    padding: "8px 10px",
-                    font: "inherit",
-                    fontSize: 13,
-                    color: "var(--text)",
-                    outline: "1px solid var(--ring)",
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onOpen(chat.id)}
-                  onDoubleClick={() => {
-                    setEditing(chat.id);
-                    setNameDraft(chat.title || "New chat");
-                  }}
-                  title={chat.title || "New chat"}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 2,
-                    border: 0,
-                    background: "transparent",
-                    padding: "7px 8px 7px 10px",
-                    font: "inherit",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <span
-                    className="truncate"
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      fontSize: 13,
-                      color: active ? "var(--text)" : "var(--text-2)",
+        {groups.map((group) => (
+          <div key={group.label} className="gpt-drawer-group">
+            <div className="gpt-drawer-band">{group.label}</div>
+            {group.items.map((chat) => {
+              const active = chat.id === activeId;
+              if (editing === chat.id) {
+                return (
+                  <input
+                    key={chat.id}
+                    autoFocus
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setEditing(null);
                     }}
+                    aria-label="Rename chat"
+                    className="gpt-drawer-rename"
+                  />
+                );
+              }
+              return (
+                <div key={chat.id} className="gpt-drawer-row" data-active={active ? "1" : undefined}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(chat.id)}
+                    onDoubleClick={() => {
+                      setEditing(chat.id);
+                      setNameDraft(chat.title || "New chat");
+                    }}
+                    title={chat.title || "New chat"}
+                    className="gpt-drawer-open"
                   >
-                    {chat.title || "New chat"}
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--faint)" }}>
-                    {busyChatId === chat.id ? "replying…" : whenLabel(chat.updatedAt)}
-                  </span>
-                </button>
-              )}
-
-              {/* Only on the row you're pointing at — a delete button on every
-                  row turns a list of conversations into a list of hazards. */}
-              {editing !== chat.id && (hovered === chat.id || active) && (
-                <button
-                  type="button"
-                  onClick={() => onDelete(chat.id)}
-                  aria-label={`Delete ${chat.title || "chat"}`}
-                  title="Delete"
-                  className="icon-btn"
-                  style={{ width: 26, height: 26, flexShrink: 0 }}
-                >
-                  <Icon path={ICON.trash} size={13} />
-                </button>
-              )}
-            </div>
-          );
-        })}
+                    <span className="truncate">{chat.title || "New chat"}</span>
+                    <span className="gpt-drawer-when">
+                      {busyChatId === chat.id ? "replying…" : whenLabel(chat.updatedAt)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(chat.id)}
+                    aria-label={`Delete ${chat.title || "chat"}`}
+                    title="Delete"
+                    className="gpt-drawer-delete"
+                  >
+                    <Icon path={ICON.trash} size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
-    </div>
+    </aside>
   );
 }
 

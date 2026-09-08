@@ -6,7 +6,43 @@ import { documentFileName, type TutorDocument } from "@/lib/tutor-documents";
 import { splitDocumentGraphs } from "@/lib/tutor-graph";
 import GraphCard from "./GraphCard";
 import TutorMarkdown from "./TutorMarkdown";
-import { Icon, ICON } from "./ui";
+import { Icon, ICON, Spinner } from "./ui";
+
+/**
+ * Build a Word file from the document and hand it to the browser.
+ *
+ * Goes through the server because turning markdown into .docx is not
+ * something a page can do — and doing it here rather than in a skill is what
+ * lets every model produce one, not just the backend that can run a local
+ * Claude Code session.
+ */
+async function downloadWord(doc: TutorDocument, setBusy: (v: boolean) => void, onError: (m: string) => void) {
+  setBusy(true);
+  try {
+    const res = await fetch("/api/tutor/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: doc.title, body: doc.body, format: "docx" }),
+    });
+    const body = (await res.json()) as { name?: string; error?: string };
+    if (!res.ok || !body.name) throw new Error(body.error ?? "Couldn't build that file.");
+    /*
+     * An anchor rather than a location assignment: this is a download, not a
+     * navigation, and the `download` attribute is what keeps the page in
+     * place while the browser saves the file.
+     */
+    const a = document.createElement("a");
+    a.href = `/api/tutor/files?name=${encodeURIComponent(body.name)}`;
+    a.download = body.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    onError(e instanceof Error ? e.message : "Couldn't build that file.");
+  } finally {
+    setBusy(false);
+  }
+}
 
 /** Blob-download a document as a plain `.md` file — no server round trip needed. */
 function download(doc: TutorDocument) {
@@ -27,6 +63,9 @@ function download(doc: TutorDocument) {
  */
 export default function DocumentCard({ document: doc }: { document: TutorDocument }) {
   const [copied, setCopied] = useState(false);
+
+  const [building, setBuilding] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const copy = async () => {
     try {
@@ -70,13 +109,26 @@ export default function DocumentCard({ document: doc }: { document: TutorDocumen
           type="button"
           className="icon-btn"
           onClick={() => download(doc)}
-          aria-label="Download document"
-          title="Download"
+          aria-label="Download as markdown"
+          title="Download .md"
           style={{ width: 26, height: 26, flexShrink: 0 }}
         >
           <Icon path={ICON.download} size={13} />
         </button>
+        <button
+          type="button"
+          className="btn btn--quiet"
+          onClick={() => void downloadWord(doc, setBuilding, setFailed)}
+          disabled={building}
+          aria-label="Download as a Word document"
+          title="Download .docx"
+          style={{ height: 26, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+        >
+          {building ? <Spinner size={11} /> : "Word"}
+        </button>
       </div>
+
+      {failed && <span style={{ fontSize: 11.5, color: "var(--bad)" }}>{failed}</span>}
 
       {splitDocumentGraphs(doc.body).map((block, i) =>
         block.type === "graph" ? (

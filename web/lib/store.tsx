@@ -11,8 +11,10 @@ import {
   type ReactNode,
 } from "react";
 
+import { useIdentity } from "./identity";
 import { estimateAssignments } from "./estimate";
 import { normalizeSnapshot } from "./normalize";
+import { emptyOwnWork, isOwnWork, withOwnWork, type OwnWork } from "./own-work";
 import { EMPTY_SNAPSHOT, IMPACT_LABEL } from "./demo";
 import { gradeFor, letterFor } from "./grades";
 import { nowLabel } from "./format";
@@ -35,6 +37,7 @@ export type View =
   | "grades"
   | "calendar"
   | "tutor"
+  | "essays"
   | "messages"
   | "settings";
 
@@ -63,8 +66,6 @@ const PERSIST_KEY = "slates.state.v1";
  * the snapshot being any good.
  */
 const MARKS_KEY = "slates.marks.v1";
-/** Name and photo live here so they survive a refresh, demo mode, and disconnect. */
-const PROFILE_KEY = "slates.profile.v1";
 
 interface Persisted {
   snapshot: SyncSnapshot;
@@ -93,6 +94,11 @@ interface Marks {
   archived: Record<string, number>;
   /** The reset boundary already applied, so a week is never swept twice. */
   sweptAt: number;
+  /**
+   * Work you added that Schoology never knew about. Kept with the marks, not
+   * the snapshot, because a bad scrape must never delete something you typed.
+   */
+  ownWork: OwnWork[];
 }
 
 /**
@@ -109,11 +115,6 @@ export function lastSundayReset(now: Date = new Date()): number {
   // Sunday before 7pm belongs to the week that started last Sunday.
   if (boundary.getTime() > now.getTime()) boundary.setDate(boundary.getDate() - 7);
   return boundary.getTime();
-}
-
-interface Profile {
-  studentName: string;
-  avatar: string | null;
 }
 
 function loadPersisted(): Partial<Persisted> | null {
@@ -136,12 +137,13 @@ const NO_MARKS: Marks = {
   attempts: {},
   buckets: {},
   archived: {},
+  ownWork: [],
   // No sweep recorded yet: start from this week's boundary rather than
   // sweeping a first-run board that hasn't had a week to accumulate anything.
   sweptAt: lastSundayReset(),
 };
 
-const BUCKETS: Bucket[] = ["tonight", "soon", "week", "done"];
+const BUCKETS: Bucket[] = ["overdue", "tonight", "soon", "week", "done"];
 
 /** Only keep placements that name a column this build still has. */
 function readBuckets(value: unknown): Record<string, Bucket> {
@@ -167,6 +169,7 @@ function readMarks(raw: string | null): Marks | null {
       buckets: readBuckets(p.buckets),
       archived: typeof p.archived === "object" && p.archived ? p.archived : {},
       sweptAt: typeof p.sweptAt === "number" ? p.sweptAt : lastSundayReset(),
+      ownWork: Array.isArray(p.ownWork) ? p.ownWork : [],
     };
   } catch {
     return null;
@@ -186,37 +189,6 @@ function loadMarks(): Marks {
   } catch {
     return NO_MARKS;
   }
-}
-
-function loadProfile(): Profile {
-  try {
-    const raw = window.localStorage.getItem(PROFILE_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as Partial<Profile>;
-      return {
-        studentName: typeof p.studentName === "string" ? p.studentName : "",
-        avatar:
-          typeof p.avatar === "string" && p.avatar.startsWith("data:image/") ? p.avatar : null,
-      };
-    }
-  } catch {
-    /* ignore a bad profile blob */
-  }
-
-  // Names saved before the profile split lived on the snapshot key.
-  try {
-    const raw = window.localStorage.getItem(PERSIST_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as Partial<Persisted>;
-      if (typeof p.studentName === "string" && p.studentName) {
-        return { studentName: p.studentName, avatar: null };
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-
-  return { studentName: "", avatar: null };
 }
 
 interface SubmitEvent {
@@ -325,6 +297,13 @@ interface Store {
   assignmentId: string | null;
   openAssignment: (id: string | null) => void;
 
+  /** Work you added by hand, newest first. */
+  ownWork: OwnWork[];
+  /** Adds a blank one for a course and returns it, ready to edit. */
+  addOwnWork: (courseId?: string) => OwnWork;
+  saveOwnWork: (work: OwnWork) => void;
+  removeOwnWork: (id: string) => void;
+
   statusOf: (a: Assignment) => Status;
   setStatus: (id: string, s: Status) => void;
 
@@ -377,7 +356,7 @@ interface Store {
   /* messages */
   msgRead: Record<string, boolean>;
   msgOpen: string | null;
-  openMessage: (id: string) => void;
+  openMessage: (id: string | null) => void;
   /** What you've typed back to a teacher, per thread. */
   replyDrafts: Record<string, string>;
   setReplyDraft: (id: string, v: string) => void;
@@ -405,10 +384,6 @@ interface Store {
   setStudentName: (v: string) => void;
   avatar: string | null;
   setAvatar: (dataUrl: string | null) => void;
-  notifPush: boolean;
-  togglePush: () => void;
-  notifDigest: boolean;
-  toggleDigest: () => void;
 
   /* time tracking */
   timeTotals: Record<string, number>;
@@ -459,6 +434,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [commentDraft, setCommentDraftMap] = useState<Record<string, string>>({});
 
   const [customScores, setCustomScores] = useState<CustomScore[]>([]);
+  const [ownWork, setOwnWork] = useState<OwnWork[]>([]);
   const [msgRead, setMsgRead] = useState<Record<string, boolean>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyState, setReplyState] = useState<Record<string, SubmitState>>({});
@@ -471,10 +447,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [composeState, setComposeState] = useState<SubmitState>({ phase: "idle" });
   const [msgOpen, setMsgOpen] = useState<string | null>(null);
 
-  const [studentName, setStudentName] = useState("");
-  const [avatar, setAvatar] = useState<string | null>(null);
-  const [notifPush, setNotifPush] = useState(true);
-  const [notifDigest, setNotifDigest] = useState(true);
+  // The student's name and photo are shared with the counselor half rather
+  // than owned here — see lib/identity.tsx. The store still exposes them under
+  // their old names so nothing that reads `s.studentName` had to change.
+  const identity = useIdentity();
+  const { name: studentName, avatar } = identity;
+  const { setName: setStudentName, setAvatar } = identity;
 
   const [timeTotals, setTimeTotals] = useState<Record<string, number>>({});
   const [activeTimer, setActiveTimer] = useState<string | null>(null);
@@ -490,7 +468,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ---- persistence ---- */
 
   const hydrated = useRef(false);
-  const profileReady = useRef(false);
   const cacheReady = useRef(false);
   const marksReady = useRef(false);
   // Whatever a debounced write below hasn't flushed to disk yet — a closing
@@ -502,10 +479,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Restore the last synced state before any network call, so a refresh shows
   // your real board immediately instead of sample data.
   useEffect(() => {
-    const profile = loadProfile();
-    setStudentName(profile.studentName);
-    setAvatar(profile.avatar);
-
     // Marks load on their own terms — a rejected snapshot must never take your
     // ticked-off work down with it.
     const marks = loadMarks();
@@ -515,6 +488,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setSweptAt(marks.sweptAt);
     setTimeTotals(marks.timeTotals);
     setCustomScores(marks.customScores);
+    setOwnWork(marks.ownWork);
     setSubmittedAt(marks.submittedAt);
     setAttempts(marks.attempts);
 
@@ -527,22 +501,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setConnected(true);
     if (p.syncStats) setSyncStats(p.syncStats);
   }, []);
-
-  // Profile is written on every change, including demo mode and an empty board.
-  // Skip the first pass after hydrate so the empty initial state can't wipe a
-  // saved name or photo before those values have been applied.
-  useEffect(() => {
-    if (!hydrated.current) return;
-    if (!profileReady.current) {
-      profileReady.current = true;
-      return;
-    }
-    try {
-      window.localStorage.setItem(PROFILE_KEY, JSON.stringify({ studentName, avatar }));
-    } catch {
-      /* quota or private mode — persistence is a nicety, not required */
-    }
-  }, [studentName, avatar]);
 
   /**
    * Marks are written on every change, and — like the profile — the first pass
@@ -564,6 +522,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status,
             timeTotals,
             customScores,
+            ownWork,
             submittedAt,
             attempts,
             buckets,
@@ -579,7 +538,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pendingMarksWrite.current = write;
     const t = window.setTimeout(write, 300);
     return () => window.clearTimeout(t);
-  }, [status, timeTotals, customScores, submittedAt, attempts, buckets, archived, sweptAt]);
+  }, [status, timeTotals, customScores, ownWork, submittedAt, attempts, buckets, archived, sweptAt]);
 
   // Cache the snapshot after hydration, so the initial demo state can't
   // overwrite a good saved board on first paint.
@@ -894,6 +853,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setTextMap((prev) => ({ ...prev, [id]: v }));
   }, []);
 
+  /* ---- work you added yourself ---- */
+
+  const addOwnWork = useCallback((courseId = "") => {
+    const work = emptyOwnWork(courseId);
+    setOwnWork((prev) => [work, ...prev]);
+    return work;
+  }, []);
+
+  const saveOwnWork = useCallback((work: OwnWork) => {
+    setOwnWork((prev) => (prev.some((w) => w.id === work.id) ? prev.map((w) => (w.id === work.id ? work : w)) : [work, ...prev]));
+  }, []);
+
+  const removeOwnWork = useCallback((id: string) => {
+    setOwnWork((prev) => prev.filter((w) => w.id !== id));
+    // Its marks go with it, or a later id collision would inherit them.
+    setStatusMap((prev) => {
+      const { [id]: _gone, ...rest } = prev;
+      void _gone;
+      return rest;
+    });
+    setBucketMap((prev) => {
+      const { [id]: _gone, ...rest } = prev;
+      void _gone;
+      return rest;
+    });
+  }, []);
+
   const addFiles = useCallback((id: string, list: FileList | null) => {
     const arr = Array.from(list ?? []);
     if (!arr.length) return;
@@ -1135,7 +1121,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addScore = useCallback((s: Omit<CustomScore, "id" | "date">) => {
     setCustomScores((prev) => [
-      ...prev,
+      // One what-if per real assignment: typing a new score onto a row you've
+      // already tried replaces it, rather than counting both.
+      ...prev.filter((x) => !(s.itemId && x.itemId === s.itemId && x.courseId === s.courseId)),
       { ...s, id: `s${Date.now()}`, date: "Today" },
     ]);
   }, []);
@@ -1157,9 +1145,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ---- messages ---- */
 
-  const openMessage = useCallback((id: string) => {
+  const openMessage = useCallback((id: string | null) => {
     setMsgOpen(id);
-    setMsgRead((prev) => ({ ...prev, [id]: true }));
+    if (id) setMsgRead((prev) => ({ ...prev, [id]: true }));
   }, []);
 
   const setReplyDraft = useCallback((id: string, v: string) => {
@@ -1345,9 +1333,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(t);
   }, [activeTimer]);
 
+  /**
+   * The board, as everything downstream sees it: what Schoology synced plus
+   * what you added. Derived rather than stored, so a resync can replace the
+   * snapshot without ever touching your own entries, and every view — board,
+   * list, calendar, tutor context, counselor workload — gets both with no
+   * special case of its own.
+   */
+  const board = useMemo<SyncSnapshot>(
+    () => (ownWork.length ? { ...snapshot, assignments: withOwnWork(snapshot.assignments, ownWork) } : snapshot),
+    [snapshot, ownWork]
+  );
+
   const value = useMemo<Store>(
     () => ({
-      snapshot,
+      snapshot: board,
       demoMode,
       connected,
       connecting,
@@ -1365,6 +1365,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openCourse,
       assignmentId,
       openAssignment,
+      ownWork,
+      addOwnWork,
+      saveOwnWork,
+      removeOwnWork,
       statusOf,
       setStatus,
       bucketOf,
@@ -1419,16 +1423,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setStudentName,
       avatar,
       setAvatar,
-      notifPush,
-      togglePush: () => setNotifPush((v) => !v),
-      notifDigest,
-      toggleDigest: () => setNotifDigest((v) => !v),
       timeTotals,
       activeTimer,
       toggleTimer,
     }),
     [
-      snapshot, demoMode, connected, connecting, syncError, syncStats, resync,
+      board, demoMode, connected, connecting, syncError, syncStats, resync,
       syncScraper,
       connect, disconnect,
       view, nav, setNav, courseId, openCourse, assignmentId,
@@ -1441,8 +1441,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       replyDrafts, setReplyDraft, replyState, sendReply,
       composing, openCompose, composeTo, addRecipient, removeRecipient,
       composeSubject, composeBody, findRecipients, composeState, sendNewMessage,
-      studentName,
-      avatar, notifPush, notifDigest, timeTotals, activeTimer, toggleTimer,
+      ownWork, addOwnWork, saveOwnWork, removeOwnWork,
+      studentName, setStudentName,
+      avatar, setAvatar, timeTotals, activeTimer, toggleTimer,
     ]
   );
 

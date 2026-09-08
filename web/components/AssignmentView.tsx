@@ -7,6 +7,8 @@ import { fmtBytes, fmtClock, fmtMinutes } from "@/lib/format";
 import type { AssessmentReview, ItemAttachment } from "@/lib/types";
 import { Badge, ClockIcon, Icon, ICON, Spinner } from "./ui";
 import AssessmentPanel from "./AssessmentPanel";
+import OwnWorkDialog from "./OwnWorkDialog";
+import { isOwnWork } from "@/lib/own-work";
 import QuestionReview from "./QuestionReview";
 
 /**
@@ -158,6 +160,7 @@ export default function AssignmentView() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [editingOwn, setEditingOwn] = useState(false);
 
   /*
    * Some graded items aren't tagged `kind === "assessment"` at all — a
@@ -249,6 +252,9 @@ export default function AssignmentView() {
   // A locally-ticked item was never handed in anywhere; saying otherwise would
   // misreport what Schoology actually has.
   const nothingToSubmit = a.submit === "none";
+  /** Work the student added themselves — editable, and with no Schoology page. */
+  const mine = isOwnWork(id);
+  const ownWork = mine ? s.ownWork.find((w) => w.id === id) : undefined;
 
   const meta = s.submittedAt[id]
     ? `Turned in · ${s.submittedAt[id]}`
@@ -392,10 +398,11 @@ export default function AssignmentView() {
               gap: 10,
             }}
           >
-            <span className="section-label">Nothing to hand in</span>
+            <span className="section-label">{mine ? "Yours" : "Nothing to hand in"}</span>
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-2)" }}>
-              Schoology has no submission box for this — it&apos;s handed in on paper, done in
-              class, or just something to have ready. Tick it off here when you&apos;ve done it.
+              {mine
+                ? "You added this one — Schoology has never heard of it. It sits on your board like anything else and stays there through every resync."
+                : "Schoology has no submission box for this — it's handed in on paper, done in class, or just something to have ready. Tick it off here when you've done it."}
             </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button
@@ -406,20 +413,28 @@ export default function AssignmentView() {
               >
                 {submitted ? "Move back to to-do" : "Mark done"}
               </button>
-              <a
-                className="btn"
-                href={a.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ height: 40, textDecoration: "none" }}
-              >
-                <Icon path={ICON.external} size={14} />
-                View on Schoology
-              </a>
+              {mine ? (
+                <button type="button" className="btn" style={{ height: 40 }} onClick={() => setEditingOwn(true)}>
+                  <Icon path={ICON.settings} size={14} />
+                  Edit
+                </button>
+              ) : (
+                <a
+                  className="btn"
+                  href={a.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ height: 40, textDecoration: "none" }}
+                >
+                  <Icon path={ICON.external} size={14} />
+                  View on Schoology
+                </a>
+              )}
             </div>
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
-              This only changes Slates. There is nothing for Schoology to receive, so your
-              teacher still marks it however they normally do.
+              {mine
+                ? "Nothing here is sent anywhere. It lives on this machine with the rest of what you've ticked off."
+                : "This only changes Slates. There is nothing for Schoology to receive, so your teacher still marks it however they normally do."}
             </p>
           </div>
         ) : a.assessment ? (
@@ -802,6 +817,8 @@ export default function AssignmentView() {
           </div>
         </div>
       </div>
+
+      {editingOwn && ownWork && <OwnWorkDialog editing={ownWork} onClose={() => setEditingOwn(false)} />}
     </div>
   );
 }

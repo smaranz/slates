@@ -9,7 +9,9 @@ export type TutorAction =
   | { kind: "move_bucket"; id: string; bucket: Bucket }
   | { kind: "toggle_timer"; id: string }
   /** Not a board edit — this one goes off and builds a narrated video. */
-  | { kind: "make_video"; topic: string; images: boolean };
+  | { kind: "make_video"; topic: string; images: boolean }
+  /** Not a board edit — this one draws a single illustration. */
+  | { kind: "generate_image"; prompt: string };
 
 /**
  * Every action the tutor can take on the student's behalf. Deliberately
@@ -45,6 +47,16 @@ in text, and do not offer to follow up later. Reply with a single short line
 naming what the video will cover, then the tag. Never say it's happening "in
 the background" or that you'll "let them know": the tutor is occupied until
 it's finished, and the student watches it being built under your message.
+
+You can also draw a single illustration — a diagram, a labeled figure, a
+scene — on the same one-per-line form:
+  [[do:generate_image prompt="a labeled diagram of a neuron, cell body, axon, and dendrites marked"]]
+Only when a picture is genuinely the clearer way to show something, not to
+decorate an ordinary answer. Write the prompt as a full description of what
+should be drawn, not a request ("a diagram of the water cycle showing
+evaporation, condensation, and precipitation", not "draw the water cycle").
+It takes a few seconds and appears under your message — say what you're
+drawing in one short line, don't promise it or narrate that it's loading.
 `.trim();
 
 /**
@@ -67,11 +79,15 @@ function parseParams(raw: string): Record<string, string> {
 const TRUTHY = /^(yes|true|1)$/i;
 
 function toAction(kind: string, params: Record<string, string>): TutorAction | null {
-  // The only action that isn't about an assignment, so it's read before the
-  // id check every board action shares.
+  // Neither of these is about an assignment, so both are read before the id
+  // check every board action shares.
   if (kind === "make_video") {
     const topic = params.topic?.trim();
     return topic ? { kind: "make_video", topic, images: TRUTHY.test(params.images ?? "") } : null;
+  }
+  if (kind === "generate_image") {
+    const prompt = params.prompt?.trim();
+    return prompt ? { kind: "generate_image", prompt } : null;
   }
 
   const id = params.id;
@@ -121,5 +137,7 @@ export function describeTutorAction(action: TutorAction, title: string): string 
       return `Toggled the timer on "${title}"`;
     case "make_video":
       return `Making a video: ${action.topic}`;
+    case "generate_image":
+      return `Drawing: ${action.prompt}`;
   }
 }

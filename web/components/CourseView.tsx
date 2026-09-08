@@ -41,8 +41,37 @@ export default function CourseView() {
   const impactById = new Map(timeline.filter((t) => t.id).map((t) => [t.id!, t]));
 
   const mine = s.customScores.filter((c) => c.courseId === id);
+  /** Saved what-ifs that stand in for a real row, by that row's id. */
+  const whatIfByItem = new Map(mine.filter((c) => c.itemId).map((c) => [c.itemId!, c]));
+  /** What each marked row currently contributes, so a what-if can cancel it. */
+  const realById = new Map(
+    cats.flatMap((c) =>
+      c.items
+        .filter((it) => it.id && typeof it.earned === "number" && typeof it.possible === "number")
+        .map((it) => [it.id!, { earned: it.earned!, possible: it.possible! }] as const)
+    )
+  );
+
+  /*
+   * What-ifs as `gradeFor` needs them.
+   *
+   * A score typed onto an *unmarked* assignment is simply added — the category
+   * average doesn't include it yet. One typed onto a *marked* assignment has
+   * to cancel the real score first, or the row is counted twice and a
+   * replacement reads as an extra assignment.
+   */
+  const extras = mine.map((c) => {
+    const real = c.itemId ? realById.get(c.itemId) : undefined;
+    return {
+      cat: c.cat,
+      weight: c.weight,
+      earned: c.earned - (real?.earned ?? 0),
+      possible: c.possible - (real?.possible ?? 0),
+    };
+  });
+
   const base = gradeFor(cats);
-  const proj = gradeFor(cats, mine);
+  const proj = gradeFor(cats, extras);
   // A course with nothing scored has no percentage, so there is nothing to
   // project against either — and no delta to draw.
   const projecting = mine.length > 0 && proj.pct !== null && base.pct !== null;
@@ -55,11 +84,22 @@ export default function CourseView() {
    * Grades screen instead of quietly recomputing a different answer. What-ifs
    * switch it to the projection, which has to be recomputed to mean anything.
    */
-  const headline = projecting
-    ? proj.pct
-    : course.gradeSource === "none"
-      ? null
-      : course.pct;
+  /*
+   * Schoology's reported percentage, moved by whatever the what-ifs actually
+   * change — not the recomputed one.
+   *
+   * Recomputing from points disagrees with Schoology whenever the gradebook
+   * has ungraded categories or weights that don't sum to 100: this course
+   * reports 96.9% and recomputes to 78.7%. Showing the recomputed figure made
+   * a what-if read "78.7% → 78.5%" to a student whose grade is 96.9%, which
+   * answers a question nobody asked. The *difference* between two recomputed
+   * numbers is sound, so that difference is applied to the real grade.
+   */
+  const anchor = course.gradeSource === "none" ? null : course.pct;
+  const anchored = (p: number | null): number | null =>
+    anchor === null || base.pct === null || p === null ? p : anchor + (p - base.pct);
+
+  const headline = projecting ? anchored(proj.pct) : anchor;
 
   const options = [...cats.map((c) => ({ value: c.cat, label: c.cat })), { value: CUSTOM, label: "Custom category" }];
   const catLabel = options.find((o) => o.value === cat)?.label ?? "Choose category";
@@ -76,7 +116,7 @@ export default function CourseView() {
   const draftValid = possible.trim() !== "" && earned.trim() !== "" && !Number.isNaN(draftEarned) && draftPossible > 0;
   const draftWithScore = draftValid
     ? gradeFor(cats, [
-        ...mine,
+        ...extras,
         {
           cat: cat === CUSTOM ? customCat.trim() || "Custom" : cat || cats[0]?.cat || "General",
           weight: cat === CUSTOM ? parseFloat(weight) || 10 : 0,
@@ -118,35 +158,76 @@ export default function CourseView() {
    * ("A+") both rendered as "NaN%" — a made-up number where the honest answer
    * is that there isn't one yet.
    */
+  /*
+   * What each outstanding item is out of.
+   *
+   * The grades report gives no total for work that hasn't been marked — an
+   * ungraded row is a bare "—" — so the only place a total can come from is
+   * the assignment's own page, which the scraper reads separately. Without
+   * this a what-if on unmarked work would make you type the total as well as
+   * the score.
+   */
+  const pointsById = new Map(
+    s.snapshot.assignments
+      .filter((a) => typeof a.points === "number" && a.points! > 0)
+      .map((a) => [a.id, a.points!])
+  );
+
   const groups = cats.map((c) => ({
     name: c.cat,
     rows: c.items.map((it) => {
       const scored = typeof it.earned === "number" && typeof it.possible === "number" && it.possible > 0;
       const pct = scored ? Math.round((it.earned! / it.possible!) * 100) : null;
+      // Published total if there is one, else whatever the assignment knows.
+      const outOf = scored ? it.possible! : (it.id ? pointsById.get(it.id) ?? null : null);
       const impact = it.id ? impactById.get(it.id) : undefined;
+      /*
+       * A score you typed and kept for this row shows *instead of* the
+       * gradebook's, so the list reads as the grade you're imagining rather
+       * than the real one with a duplicate stapled underneath.
+       */
+      const saved = it.id ? whatIfByItem.get(it.id) : undefined;
+      const savedPct = saved ? Math.round((saved.earned / saved.possible) * 100) : null;
       return {
         key: it.id || it.name,
         name: it.name,
         date: it.date,
-        score: scored ? `${it.earned}/${it.possible} · ${pct}%` : it.letter || "Not scored yet",
-        pct,
+        score: saved
+          ? `${saved.earned}/${saved.possible} · ${savedPct}%`
+          : scored
+            ? `${it.earned}/${it.possible} · ${pct}%`
+            : it.letter || "Not scored yet",
+        pct: saved ? savedPct : pct,
         // The item that first put a percentage on the board has nothing to be
         // measured against, so it gets no delta rather than a made-up one.
-        delta: impact && !impact.first ? impact.delta : null,
+        // A what-if isn't in that history at all.
+        delta: saved ? null : impact && !impact.first ? impact.delta : null,
         // What you got wrong lives on the assignment itself, not here — a
         // scored row with a real assignment behind it just opens that.
         assignmentId: it.id ?? null,
-        // Raw numbers behind `score`, so a what-if edit has something to start from.
-        earned: scored ? it.earned! : null,
-        possible: scored ? it.possible! : null,
+        /*
+         * What the editor starts from: your kept score if there is one, else
+         * the real one. `earned` stays null on unmarked work with no what-if —
+         * that is the difference between "no score" and "scored zero", and the
+         * projection depends on it.
+         */
+        earned: saved ? saved.earned : scored ? it.earned! : null,
+        possible: saved ? saved.possible : outOf,
+        scored,
+        /** What the gradebook itself holds, which a what-if has to cancel. */
+        realEarned: scored ? it.earned! : null,
+        realPossible: scored ? it.possible! : null,
+        itemId: it.id ?? undefined,
         cat: c.cat,
-        removable: false,
-        id: "",
+        // A kept what-if is removable — that's how you take it back off.
+        removable: !!saved,
+        id: saved?.id ?? "",
+        whatIf: !!saved,
       };
     }),
   }));
 
-  for (const c of mine) {
+  for (const c of mine.filter((x) => !x.itemId)) {
     const pct = Math.round((c.earned / c.possible) * 100);
     const row = {
       key: c.id,
@@ -162,9 +243,14 @@ export default function CourseView() {
       assignmentId: null as string | null,
       earned: null as number | null,
       possible: null as number | null,
+      scored: false,
+      realEarned: null as number | null,
+      realPossible: null as number | null,
+      itemId: undefined as string | undefined,
       cat: c.cat,
       removable: true,
       id: c.id,
+      whatIf: true,
     };
     let g = groups.find((g) => g.name === c.cat);
     if (!g) {
@@ -185,21 +271,28 @@ export default function CourseView() {
   const editPossible = editing ? parseFloat(editing.possible) : NaN;
   const editValid =
     editing &&
-    editingRow?.earned != null &&
-    editingRow.possible != null &&
+    !!editingRow &&
     editing.earned.trim() !== "" &&
     editing.possible.trim() !== "" &&
     !Number.isNaN(editEarned) &&
     editPossible > 0;
+  /*
+   * Folded in as a delta against whatever the category *already counts* for
+   * this row — which for unmarked work is nothing at all. Subtracting its
+   * displayed total would have removed points the average never included, so
+   * a what-if on an ungraded assignment came out looking like a loss.
+   */
   const editProjection =
     editValid && editingRow
       ? gradeFor(cats, [
-          ...mine,
+          // Any saved what-if for this same row is dropped, not stacked: the
+          // dialog is showing a replacement for it, not a second attempt.
+          ...extras.filter((_, i) => mine[i].itemId !== editingRow.itemId),
           {
             cat: editingRow.cat,
             weight: 0,
-            earned: editEarned - editingRow.earned!,
-            possible: editPossible - editingRow.possible!,
+            earned: editEarned - (editingRow.scored ? editingRow.realEarned! : 0),
+            possible: editPossible - (editingRow.scored ? editingRow.realPossible! : 0),
           },
         ])
       : null;
@@ -290,22 +383,26 @@ export default function CourseView() {
               const graded = standing !== null;
               const pct = standing ?? 0;
               return (
-                <div key={cat.name} style={{ display: "flex", alignItems: "center", gap: 14, padding: "7px 0" }}>
-                  <span className="truncate" style={{ flex: "0 0 150px", fontSize: 13, color: "var(--text-2)" }}>
+                <div
+                  key={cat.name}
+                  className="cat-row"
+                  style={{ display: "flex", alignItems: "center", gap: 14, padding: "7px 0" }}
+                >
+                  <span className="truncate cat-name" style={{ flex: "0 0 150px", fontSize: 13, color: "var(--text-2)" }}>
                     {cat.custom ? `${cat.name} (custom)` : cat.name}
                   </span>
-                  <span className="tabular" style={{ flex: "0 0 54px", fontSize: 12, color: "var(--muted)" }}>
+                  <span className="tabular cat-weight" style={{ flex: "0 0 54px", fontSize: 12, color: "var(--muted)" }}>
                     {cat.weight}%
                   </span>
                   <Meter pct={pct} color={course.dot} flex="1 1 100px" />
                   <span
-                    className="tabular"
+                    className="tabular cat-points"
                     style={{ flex: "0 0 92px", textAlign: "right", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}
                   >
                     {cat.possible > 0 ? `${cat.earned}/${cat.possible}` : source?.letter || "—"}
                   </span>
                   <span
-                    className="tabular"
+                    className="tabular cat-pct"
                     style={{ flex: "0 0 54px", textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--text)" }}
                   >
                     {graded ? `${Math.round(pct)}%` : "—"}
@@ -450,9 +547,21 @@ export default function CourseView() {
                     {g.name}
                   </div>
                   {g.rows.map((it) => {
-                    const editable = it.possible !== null && it.possible > 0;
+                    /*
+                     * Every real gradebook row is editable, marked or not —
+                     * seeing what an outstanding assignment would do to the
+                     * grade is the main reason to open this. Only what-ifs
+                     * you typed yourself are excluded; those are removed and
+                     * re-added rather than edited.
+                     */
+                    const editable = !it.removable;
                     const toggle = () =>
-                      setEditing({ key: it.key, earned: String(it.earned), possible: String(it.possible) });
+                      setEditing({
+                        key: it.key,
+                        // Blank, not "null": there is no score to start from.
+                        earned: it.earned == null ? "" : String(it.earned),
+                        possible: it.possible == null ? "" : String(it.possible),
+                      });
                     return (
                     <div key={it.key} style={{ borderTop: "1px solid var(--line)" }}>
                     <div
@@ -564,11 +673,36 @@ export default function CourseView() {
           possible={editing.possible}
           onEarned={(v) => setEditing((cur) => cur && { ...cur, earned: v })}
           onPossible={(v) => setEditing((cur) => cur && { ...cur, possible: v })}
-          from={proj.pct}
-          to={editProjection?.pct ?? null}
+          from={anchored(proj.pct)}
+          to={anchored(editProjection?.pct ?? null)}
           delta={editDelta}
           onOpenAssignment={
             editingRow.assignmentId ? () => s.openAssignment(editingRow.assignmentId!) : undefined
+          }
+          onKeep={
+            editValid && editingRow.itemId
+              ? () => {
+                  s.addScore({
+                    courseId: id,
+                    cat: editingRow.cat,
+                    // Weight 0: it joins a category Schoology already weights.
+                    weight: 0,
+                    name: editingRow.name,
+                    earned: editEarned,
+                    possible: editPossible,
+                    itemId: editingRow.itemId,
+                  });
+                  setEditing(null);
+                }
+              : undefined
+          }
+          onClear={
+            editingRow.whatIf && editingRow.id
+              ? () => {
+                  s.removeScore(editingRow.id);
+                  setEditing(null);
+                }
+              : undefined
           }
           onClose={() => setEditing(null)}
         />
@@ -596,6 +730,8 @@ function ScoreDialog({
   to,
   delta,
   onOpenAssignment,
+  onKeep,
+  onClear,
   onClose,
 }: {
   name: string;
@@ -608,12 +744,28 @@ function ScoreDialog({
   to: number | null;
   delta: number | null;
   onOpenAssignment?: () => void;
+  /** Persist the typed score. Absent when there's nothing valid to keep. */
+  onKeep?: () => void;
+  /** True when this row already carries a kept score, so it can be taken off. */
+  onClear?: () => void;
   onClose: () => void;
 }) {
   const first = useRef<HTMLInputElement>(null);
 
+  /*
+   * Select the existing score once, on open, so it can be typed straight over.
+   *
+   * Deliberately its own mount-only effect. It used to share the Escape
+   * listener's effect, which depends on `onClose` — an inline arrow rebuilt on
+   * every parent render — so the effect re-ran after each keystroke and
+   * re-selected the field. Every character then replaced the last one: typing
+   * "25" left "5".
+   */
   useEffect(() => {
     first.current?.select();
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -720,8 +872,22 @@ function ScoreDialog({
             </button>
           )}
           <span style={{ flex: 1 }} />
-          <button type="button" className="btn btn--primary" style={{ height: 30 }} onClick={onClose}>
-            Done
+          {onClear && (
+            <button type="button" className="btn btn--quiet" style={{ height: 30 }} onClick={onClear}>
+              Remove
+            </button>
+          )}
+          {/* Keeping is the point: a what-if you can't leave the screen with
+              answers nothing about how several scores add up. */}
+          <button
+            type="button"
+            className="btn btn--primary"
+            style={{ height: 30 }}
+            onClick={onKeep ?? onClose}
+            disabled={!onKeep && !onClear}
+            aria-disabled={!onKeep && !onClear}
+          >
+            {onKeep ? "Keep" : "Done"}
           </button>
         </div>
       </div>

@@ -7,8 +7,13 @@ import { Badge } from "./ui";
 export default function ListView() {
   const s = useStore();
 
+  /*
+   * Overdue work belongs in today's list as well as its own board column —
+   * the column is about seeing it, this list is about doing it, and something
+   * past due is the first thing you should be doing.
+   */
   const tonight = s.snapshot.assignments.filter(
-    (a) => s.bucketOf(a) === "tonight" && s.statusOf(a) !== "done"
+    (a) => ["overdue", "tonight"].includes(s.bucketOf(a)) && s.statusOf(a) !== "done"
   );
 
   return (

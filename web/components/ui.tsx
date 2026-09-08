@@ -100,6 +100,40 @@ export const ICON = {
   close: "M12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5z",
   download: "M12 3v10.17l3.59-3.58L17 11l-5 5-5-5 1.41-1.41L11 13.17V3zM5 19h14v2H5z",
   copy: "M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m0 16H8V7h11z",
+  /** Four corner brackets, open toward the center — "make this full screen". */
+  expand: "M4 4h6v2h-4v4h-2zM20 4h-6v2h4v4h2zM4 20h6v-2h-4v-4h-2zM20 20h-6v-2h4v-4h2z",
+  /** A square frame — "back to the side panel". */
+  collapse: "M5 5h14v14H5zM8 8h8v8H8z",
+  /** A capsule mic over its stand. */
+  mic: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm-7 9h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.93V21h3v2H8v-2h3v-3.07A7 7 0 0 1 5 11z",
+  /** Concentric rings — the reach / match / safety bands. */
+  bands: "M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+  /** A ticked checklist. */
+  checklist: "M3 5h2v2H3zm0 6h2v2H3zm0 6h2v2H3zM8 5h13v2H8zm0 6h13v2H8zm0 6h13v2H8z",
+  /** A page with a pen across it. */
+  essay: "M5 3h9l5 5v13H5zm2 2v14h10V9h-4V5zm8.9 6.6 1.5 1.5-5.6 5.6-2 .5.5-2z",
+  /** Two arrows passing — "swap to the other side of Slates". */
+  swap: "M7 7h9V4l5 4.5-5 4.5v-3H7zm10 10H8v3l-5-4.5L8 11v3h9z",
+  /* ----- tutor (ChatGPT-shaped controls) ----- */
+  /** The send arrow. A bare shaft-and-head, drawn to sit centred in a circle. */
+  arrowUp: "M12 3.6 20.4 12 19 13.4 13 7.4V20h-2V7.4l-6 6L3.6 12z",
+  /** Square with a pen across it — "start a new chat", as ChatGPT draws it. */
+  compose:
+    "M3 4h9v2H5v13h13v-7h2v9H3zm15.9-1.5 2.6 2.6-8.5 8.5-3.4.8.8-3.4zm0 2.8-5.7 5.7-.2.9.9-.2 5.7-5.7z",
+  /** Five bars of a level meter — voice mode. */
+  waveform: "M3 10h2v4H3zm4-3h2v10H7zm4-4h2v18h-2zm4 4h2v10h-2zm4 3h2v4h-2z",
+  /** A circling arrow — regenerate this reply. */
+  retry:
+    "M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
+  /** A pen — edit what you asked. */
+  pencil: "M17.5 2.6 21.4 6.5 8.9 19H5v-3.9zM7 16.1V17h.9l9.7-9.7-.9-.9z",
+  thumbUp:
+    "M9 21H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h5zm2-11 3.6-8A3 3 0 0 1 17 5.6L15.8 10H20a2 2 0 0 1 2 2.4l-1.6 7A2 2 0 0 1 18.4 21H11z",
+  thumbDown:
+    "M9 3H4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h5zm2 11 3.6 8A3 3 0 0 0 17 18.4L15.8 14H20a2 2 0 0 0 2-2.4l-1.6-7A2 2 0 0 0 18.4 3H11z",
+  /** A lens on its handle — search the conversation list. */
+  magnifier:
+    "M10.5 3a7.5 7.5 0 1 1-4.6 13.4l-3.2 3.2-1.4-1.4 3.2-3.2A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z",
 } as const;
 
 export function Icon({

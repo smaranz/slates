@@ -17,6 +17,11 @@ import {
 } from "@/lib/tutor-models";
 import type { TutorMessagePart } from "@/lib/attachments";
 import { TUTOR_ACTION_INSTRUCTIONS } from "@/lib/tutor-actions";
+import {
+  claudeSkillOptions,
+  skillInstructionsForClaude,
+  skillInstructionsForTextOnlyBackend,
+} from "@/lib/tutor-skills";
 import { TUTOR_DOCUMENT_INSTRUCTIONS } from "@/lib/tutor-documents";
 import { TUTOR_GRAPH_INSTRUCTIONS } from "@/lib/tutor-graph";
 import { TUTOR_QUIZ_INSTRUCTIONS } from "@/lib/tutor-quiz";
@@ -172,6 +177,17 @@ export async function POST(req: Request) {
     return new Response("messages required", { status: 400 });
   }
 
+  /*
+   * Resolved before the prompt is built, because what the tutor should be told
+   * about skills depends entirely on whether this backend can run one.
+   */
+  const resolvedModel: TutorModelId = isTutorModel(model)
+    ? model
+    : isTutorModel(process.env.SLATES_TUTOR_MODEL)
+      ? process.env.SLATES_TUTOR_MODEL
+      : DEFAULT_TUTOR_MODEL;
+  const canRunSkills = tutorModelBackend(resolvedModel) === "claude-code";
+
   const system = [
     "You are Slates Tutor, a concise high-school study coach.",
     studentName ? `The student's name is ${studentName}.` : "",
@@ -191,7 +207,26 @@ export async function POST(req: Request) {
     "The student may attach images or the extracted text of a document —",
     "read them closely before answering.",
     "",
+    /*
+     * Chat, documents and quizzes all render through the same KaTeX-enabled
+     * markdown (components/TutorMarkdown.tsx), so maths is written as maths.
+     * Without this the model falls back to flat text — "(2 + (-4))/2",
+     * "3cos(2(x - pi/4)) - 1" — which is notation a student has to decode
+     * rather than the one their textbook uses.
+     */
+    "Write every piece of maths in LaTeX, wrapped in $…$ inline or $$…$$ on",
+    "its own line for anything worth setting apart. It is rendered properly,",
+    "so use the real notation: \\frac{a}{b} for a fraction rather than a/b,",
+    "\\pi, \\theta, \\cdot, \\le, \\pm, x^{2}, \\sqrt{x}, and \\sin \\cos \\tan for",
+    "function names so they don't italicise like variables.",
+    "",
+    "That means every number-with-symbols goes in maths mode, not just the big",
+    "equations: $D = \\frac{2 + (-4)}{2} = -1$, not \"D = (2 + (-4))/2 = -1\".",
+    "Plain prose stays plain — don't wrap ordinary words or bare counts.",
+    "",
     TUTOR_ACTION_INSTRUCTIONS,
+    "",
+    canRunSkills ? skillInstructionsForClaude() : skillInstructionsForTextOnlyBackend(),
     "",
     TUTOR_DOCUMENT_INSTRUCTIONS,
     "",
@@ -204,11 +239,7 @@ export async function POST(req: Request) {
 
   // Only ids from the picker's list are honoured, so a crafted request can't
   // point the tutor at an arbitrary (or far pricier) model.
-  const modelId: TutorModelId = isTutorModel(model)
-    ? model
-    : isTutorModel(process.env.SLATES_TUTOR_MODEL)
-      ? process.env.SLATES_TUTOR_MODEL
-      : DEFAULT_TUTOR_MODEL;
+  const modelId = resolvedModel;
 
   const modelMessages: ModelMessage[] = messages.map((m) => ({
     role: m.role,
@@ -227,8 +258,16 @@ export async function POST(req: Request) {
   const result =
     backend === "claude-code"
       ? streamText({
-          // Runs through the local Claude Code CLI login — no API key needed.
-          model: claudeCode(modelId),
+          /*
+           * Runs through the local Claude Code CLI login — no API key needed.
+           *
+           * Skills and the sandbox are passed as model *settings*, not as
+           * `providerOptions`: that channel carries reasoning options only
+           * (`thinking`, `effort`) and silently drops everything else, so
+           * configuring the sandbox there left the session with no sandbox at
+           * all. See lib/tutor-skills.ts.
+           */
+          model: claudeCode(modelId, claudeSkillOptions()),
           system,
           messages: modelMessages,
           providerOptions: {

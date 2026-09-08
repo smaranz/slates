@@ -165,7 +165,9 @@ function Building({ status, topic }: { status: LessonStatus | null; topic: strin
           }}
         />
 
-        <div style={{ position: "relative", display: "flex", gap: 8 }}>
+        {/* Panels share the row rather than each claiming a fixed width: a
+            twelve-scene lesson at 46px apiece is wider than the card. */}
+        <div style={{ position: "relative", display: "flex", gap: 8, width: "100%", maxWidth: 420 }}>
           {Array.from({ length: total }, (_, i) => (
             <Panel key={i} index={i} filled={i < filled} rendering={stage === "rendering"} />
           ))}
@@ -239,7 +241,9 @@ function Panel({ index, filled, rendering }: { index: number; filled: boolean; r
           : { type: "spring", stiffness: 320, damping: 22 }
       }
       style={{
-        width: 46,
+        flex: "1 1 0",
+        minWidth: 0,
+        maxWidth: 46,
         height: 26,
         borderRadius: 5,
         border: "1px solid var(--line-strong)",

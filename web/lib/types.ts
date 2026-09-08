@@ -36,7 +36,14 @@ export type ItemKind =
 
 export type Impact = "high" | "medium" | "low";
 export type Status = "todo" | "active" | "done";
-export type Bucket = "tonight" | "soon" | "week" | "done";
+/**
+ * Which column a card sits in.
+ *
+ * "overdue" is derived from the due date rather than chosen — it's a fact
+ * about the work, not a plan for it. You can drag a card *out* of it (which
+ * is how you say "I'm doing this today"), but never into it.
+ */
+export type Bucket = "overdue" | "tonight" | "soon" | "week" | "done";
 
 export interface Course {
   /** Schoology section id */
@@ -97,6 +104,15 @@ export interface CustomScore {
   earned: number;
   possible: number;
   date: string;
+  /**
+   * The gradebook row this what-if stands in for, when it stands in for one.
+   *
+   * Set when you type a score onto a real assignment: the row then shows your
+   * number in place instead of the gradebook's, rather than a second row
+   * appearing beside it. Absent for a wholly invented assignment, which has no
+   * row of its own to attach to.
+   */
+  itemId?: string;
 }
 
 /**
@@ -252,6 +268,14 @@ export interface Assignment {
   /** When the teacher posted it, worded as Schoology words it. */
   postedAt?: string;
   due: string;
+  /**
+   * Exact due instant when Schoology supplied one, or when its due label
+   * included an explicit clock time. Absent for date-only work: Slates never
+   * invents a notification time for an all-day assignment.
+   */
+  dueAt?: string | null;
+  /** True when the source explicitly described the due date as all-day. */
+  allDay?: boolean;
   /** days from today; negative = past */
   dateOffset: number | null;
   code: string;
@@ -271,6 +295,14 @@ export interface Assignment {
   resumable?: boolean;
   /** Schoology's own submission timestamp, when one was exposed. */
   submittedAt?: string | null;
+  /**
+   * What the item is out of, read off its own Schoology page.
+   *
+   * The grades report publishes no total for work that hasn't been marked yet
+   * — an ungraded row is a bare "—" with no max — so for a what-if on
+   * something still outstanding this is the only place the total comes from.
+   */
+  points?: number | null;
 }
 
 export interface Message {

@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { CounselorProvider } from "@/lib/counselor/store";
+import { IdentityProvider } from "@/lib/identity";
+import { ModeProvider } from "@/lib/mode";
 import { StoreProvider } from "@/lib/store";
 
 // The design uses the platform's rounded UI face (ui-rounded / SF Pro Rounded),
@@ -11,8 +14,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#3d3d3d",
+  // The app background, not the icon tile — this paints the browser and PWA
+  // chrome, so it has to be the colour the page actually starts with.
+  themeColor: "#242424",
   colorScheme: "dark",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout(props: LayoutProps<"/">) {
@@ -24,7 +33,18 @@ export default function RootLayout(props: LayoutProps<"/">) {
           for this element's own attributes only — one level deep, so genuine
           mismatches inside the app still surface. */}
       <body suppressHydrationWarning>
-        <StoreProvider>{props.children}</StoreProvider>
+        {/* Identity is outermost: both halves of the app read the student's
+            name and photo from it, so it has to exist before either store. */}
+        <IdentityProvider>
+          <ModeProvider>
+            <StoreProvider>
+              {/* The counselor's record is mounted app-wide, not just inside
+                  the counselor: essays live in it and are edited from the
+                  school side, while the counselor still reads them. */}
+              <CounselorProvider>{props.children}</CounselorProvider>
+            </StoreProvider>
+          </ModeProvider>
+        </IdentityProvider>
       </body>
     </html>
   );

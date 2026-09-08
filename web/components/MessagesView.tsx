@@ -47,9 +47,10 @@ export default function MessagesView() {
   const activeCourse = active ? s.courseById(active.courseId) : null;
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 24px 24px" }}>
-      <div style={{ width: "100%", display: "flex", minHeight: 0 }}>
+    <div className="messages-view" style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 24px 24px" }}>
+      <div className={`messages-layout ${active || s.composing ? "messages-layout--detail" : ""}`} style={{ width: "100%", display: "flex", minHeight: 0 }}>
         <div
+          className="messages-list"
           style={{
             width: 380,
             flexShrink: 0,
@@ -124,7 +125,19 @@ export default function MessagesView() {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: 0, padding: "22px 26px" }}>
+        <div className="messages-detail" style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: 0, padding: "22px 26px" }}>
+          {(active || s.composing) && (
+            <button
+              type="button"
+              className="btn btn--quiet messages-back"
+              onClick={() => {
+                s.openCompose(false);
+                s.openMessage(null);
+              }}
+            >
+              Back to inbox
+            </button>
+          )}
           {s.composing && <ComposePanel />}
           {!s.composing && !active && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: 13, color: "var(--muted)" }}>

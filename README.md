@@ -6,7 +6,7 @@
 
 ### Schoology, rebuilt as a workspace.
 
-**A board that plans your night. A gradebook that tells the truth. A tutor that actually read the assignment.**
+**A board that plans your night. A gradebook that tells the truth. A tutor that actually read the assignment — and a college counselor that remembers you.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3d3d3d?style=flat-square)](LICENSE)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white)](https://nextjs.org)
@@ -29,6 +29,20 @@ Schoology is a filing cabinet. Every class is a different drawer, every due date
 No more twenty tabs. No more "I thought I turned that in."
 
 <br>
+
+## Watch
+
+<div align="center">
+
+<a href="https://youtu.be/Uy-wxAlgRG0">
+  <img src="https://img.youtube.com/vi/Uy-wxAlgRG0/maxresdefault.jpg" width="860" alt="Slates Launch Video — click to play on YouTube">
+</a>
+
+### [▶&nbsp; Watch the launch video](https://youtu.be/Uy-wxAlgRG0)
+
+</div>
+
+In a hurry? The [48-second demo](https://github.com/smaranz/slates/blob/main/.github/readme/slates-demo.mp4) goes straight to the board.
 
 ## Everything on one board
 
@@ -93,6 +107,34 @@ Ask it a question and it answers in four sentences, like a person who respects y
 
 <br>
 
+## Two halves
+
+Slates opens on a choice, because the year has two halves and they share nothing but the student.
+
+**School** is everything above: the board, the gradebook, the tutor. The work in front of you.
+
+**Counselor** is an agentic AI college counselor — not a chat window with a prompt on it.
+
+- **It reads a real library.** Point it at a folder of counseling material — guides, workshops, strategy documents — and `npm run counselor:ingest` chunks, embeds, and indexes the lot into `~/.slates/knowledge/`. Every "how do I…" question is answered out of that first, cited by document name. Ask how to open a *why us* essay and it comes back with the house view, not the internet's.
+- **It researches what it can't know.** Deadlines, costs, test-optional policies, admit rates — looked up on the web with the source named, never recalled from training data. Twelve load-bearing facts (SAT format, what ED binds you to, when FAFSA opens) are hard-coded and beat everything.
+- **It remembers.** Goals, worries, money constraints, the teacher writing your recommendation. Saved as you say them and carried into every later conversation, voice included. You can read everything it holds and delete any of it.
+- **It has a verdict.** "Apply ED to Michigan." "Retake once, then stop." "Cut two reaches." It's instructed at length not to hand you a balanced list of options and call that advice.
+- **It acts on your real record.** Thirty tools over your profile, next steps, documents, check-ins, college list, and application tracker — so "I'll add that" means a row appeared. When it needs a decision from you it opens a short form instead of burying four questions in a paragraph.
+- **Documents you keep.** Activity lists, brag sheets, deadline checklists, essay outlines, draft emails. Markdown, editable, downloadable. It will not write your personal statement, and says why.
+- **Talk to it.** A live call on `gpt-realtime-2.1-mini`, peer-to-peer from your browser to OpenAI over WebRTC — audio never touches Slates, which only mints the one-call key. It searches the same library, saves memories, and records scores mid-sentence.
+- **Honest odds.** A logistic model over each school's acceptance rate, your position in its middle 50%, rigor, activities, first-gen status, and round — always a band, never a single false-precision number.
+
+The counselor's whole record — profile, memories, documents, applications — lives in `localStorage` on your machine, and the library index in `~/.slates/`. No account, no database, nothing to sign into.
+
+```bash
+# Index a counseling library so the counselor answers from it
+cd web && npm run counselor:ingest -- ~/path/to/your/guides
+```
+
+The library itself is never copied into this repo — it's somebody's professional material, and only the index lands on your machine.
+
+<br>
+
 ## How it's built
 
 ```
@@ -145,6 +187,29 @@ npm run dev    # attaches to the Next server you already started
 npm run dist   # packaged build (macOS arm64)
 ```
 
+### Mobile app
+
+The `mobile/` project is a Capacitor shell for iPhone and Android. It uses a
+phone-specific navigation and layout, while loading the same Next.js server so
+route handlers, AI backends, and Schoology proxying continue to work.
+
+```bash
+cd web
+npm run dev:mobile           # exposes the portal to your trusted LAN
+
+cd ../mobile
+npm install
+cp .env.example .env         # set the host computer's reachable URL
+npm run check:server
+npm run sync
+npm run open:ios             # or npm run open:android
+```
+
+The phone does not run the Playwright scraper itself. Keep the portal and
+scraper running on the configured trusted computer for sync, submissions,
+messages, assessment overlays, and server-backed tutor features. See the full
+setup and signing notes in [`mobile/README.md`](mobile/README.md).
+
 ### Keys
 
 Every key is optional in isolation — the app runs on sample data with none of them, and each feature just degrades gracefully to "not configured" until you add its key.
@@ -155,6 +220,7 @@ Every key is optional in isolation — the app runs on sample data with none of 
 | `OPENROUTER_API_KEY` | DeepSeek, GLM, Qwen, Gemini, MiniMax |
 | `NEXT_PUBLIC_DESMOS_API_KEY` | Live, interactive graphs from the tutor |
 | `ELEVENLABS_API_KEY` | Narration for AI-generated teaching videos |
+| `OPENAI_API_KEY` | Also powers the counselor, its library index, and voice calls |
 | `NEXT_PUBLIC_SLATES_EXTENSION_ID` | Real Schoology sync (unset = sample data) |
 | Claude | `claude auth login` — no key lives in the env |
 | Grok / Composer | `cd web && npm run cursor:login` |

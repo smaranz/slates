@@ -105,9 +105,38 @@ export function parseDueOffset(text: string, now = new Date()): number | null {
   return null;
 }
 
+/**
+ * Resolve Schoology due prose only when it contains an explicit 12-hour clock
+ * time. Date-only work intentionally returns null: a reminder at an invented
+ * hour is more misleading than no reminder.
+ */
+export function parseDueInstant(text: string, now = new Date()): string | null {
+  const clock = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (!clock) return null;
+
+  const offset = parseDueOffset(text, now);
+  if (offset === null) return null;
+
+  const minute = Number(clock[2] ?? 0);
+  let hour = Number(clock[1]);
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+  hour %= 12;
+  if (clock[3].toLowerCase() === "pm") hour += 12;
+
+  const due = new Date(now);
+  due.setHours(0, 0, 0, 0);
+  due.setDate(due.getDate() + offset);
+  due.setHours(hour, minute, 0, 0);
+  return Number.isNaN(due.getTime()) ? null : due.toISOString();
+}
+
 export function bucketFor(offset: number | null): Bucket {
   if (offset === null) return "week"; // undated — still show it
-  if (offset <= 1) return "tonight"; // includes overdue
+  // Past due gets its own column. It used to land in "tonight", where a week
+  // of missed work sat mixed in with tonight's homework and read as the same
+  // kind of thing.
+  if (offset < 0) return "overdue";
+  if (offset <= 1) return "tonight";
   if (offset <= 3) return "soon";
   return "week";
 }
@@ -448,13 +477,15 @@ export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnaps
       const kind = a.kind ?? "assignment";
       // An exact timestamp beats parsing prose — prefer it when the source
       // (the iCal feed) provides one.
+      const rawDueAt = a.dueAt && !Number.isNaN(Date.parse(a.dueAt)) ? a.dueAt : null;
+      const dueAt = rawDueAt ?? (a.allDay ? null : parseDueInstant(a.due ?? "", now));
       const offset =
         a.dateOffset ??
-        (a.dueAt ? offsetFromIso(a.dueAt, now) : null) ??
+        (rawDueAt ? offsetFromIso(rawDueAt, now) : null) ??
         parseDueOffset(a.due ?? "", now);
       const overdue = offset !== null && offset < 0;
       const dueLabel =
-        a.due?.trim() || (a.dueAt ? formatDue(a.dueAt, a.allDay ?? false) : "");
+        a.due?.trim() || (rawDueAt ? formatDue(rawDueAt, a.allDay ?? false) : "");
 
       return {
         id: a.id,
@@ -468,6 +499,8 @@ export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnaps
         attachments: a.attachments ?? [],
         postedAt: a.postedAt ?? "",
         due: dueLabel || "No due date",
+        dueAt,
+        allDay: a.allDay ?? false,
         dateOffset: offset,
         code: a.code ?? codeFor(courseById.get(a.courseId), a.id),
         minutes: a.minutes ?? fallbackMinutes(kind, a.title, a.brief ?? ""),
@@ -485,6 +518,7 @@ export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnaps
         attemptsAllowed: a.attemptsAllowed ?? null,
         resumable: a.resumable ?? true,
         submittedAt: a.submittedAt ?? null,
+        points: a.points ?? null,
       };
     })
     // Soonest first, so column order reads as a plan.

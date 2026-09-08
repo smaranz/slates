@@ -14,13 +14,35 @@ const COLUMNS: Array<{
   empty: string;
   ordered?: boolean;
   actions?: boolean;
+  /** Derived from the due date, so cards leave it but never arrive by hand. */
+  derived?: boolean;
+  /** Hidden entirely when empty, rather than showing an empty-state card. */
+  hideWhenEmpty?: boolean;
 }> = [
+  // Past due, and first because that's the order you should read the board in.
+  // Not a drop target: "overdue" is a fact about the date, and letting a card
+  // be dragged in would let the board claim something is late when it isn't.
+  {
+    key: "overdue",
+    name: "Overdue",
+    tone: "oklch(0.72 0.16 25)",
+    empty: "Nothing overdue.",
+    actions: true,
+    derived: true,
+    /*
+     * The other columns are the shape of the plan and stay put even when
+     * empty — "Nothing left today" is worth reading. Overdue is an exception
+     * state, and a permanent empty one both takes a fifth of the board and
+     * makes "nothing is late" look like a thing to keep checking.
+     */
+    hideWhenEmpty: true,
+  },
   // The bucket key stays `tonight` — it's the internal name the estimator and
   // the stored placements both use, and renaming it would strip every card a
   // student has already dragged into this column.
   { key: "tonight", name: "Today", tone: "oklch(0.82 0.14 250)", empty: "Nothing left today.", ordered: true, actions: true },
   { key: "soon", name: "Tomorrow", tone: "oklch(0.76 0.13 75)", empty: "Nothing waiting for tomorrow." },
-  { key: "week", name: "This week", tone: "oklch(0.72 0 0)", empty: "Nothing further out." },
+  { key: "week", name: "Later", tone: "oklch(0.72 0 0)", empty: "Nothing further out." },
   { key: "done", name: "Turned in", tone: "oklch(0.72 0.13 145)", empty: "Nothing turned in yet." },
 ];
 
@@ -218,32 +240,49 @@ export default function BoardView() {
     setOver(null);
   };
 
+  /*
+   * `onBoard` drops what the Sunday sweep retired — finished and past-due work
+   * from previous weeks, still findable everywhere else. Hoisted out of the
+   * column loop because the column count depends on it now.
+   */
+  const live = s.snapshot.assignments.filter((a) => s.onBoard(a));
+  const columns = COLUMNS.map((col) => ({
+    col,
+    items:
+      col.key === "done"
+        ? live.filter((a) => s.statusOf(a) === "done")
+        : live.filter((a) => s.bucketOf(a) === col.key && s.statusOf(a) !== "done"),
+  })).filter(({ col, items }) => items.length || !col.hideWhenEmpty);
+
   return (
     <div className="scroll">
       <div
+        className="board-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 16,
+          /*
+           * Always one row. `auto-fit` with a 260px minimum wrapped the fifth
+           * column onto its own line the moment Overdue was added — on a 14"
+           * screen "Turned in" dropped below the fold and the board stopped
+           * reading left-to-right as a timeline. Columns share the width
+           * instead, and `minmax(0, …)` is what actually lets them shrink:
+           * grid items default to min-content, which would refuse to.
+           */
+          gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
+          gap: 12,
           alignItems: "start",
         }}
       >
-        {COLUMNS.map((col) => {
-          // `onBoard` drops what the Sunday sweep retired — finished and
-          // past-due work from previous weeks, still findable everywhere else.
-          const live = s.snapshot.assignments.filter((a) => s.onBoard(a));
-          const items =
-            col.key === "done"
-              ? live.filter((a) => s.statusOf(a) === "done")
-              : live.filter((a) => s.bucketOf(a) === col.key && s.statusOf(a) !== "done");
+        {columns.map(({ col, items }) => {
           const minutes = items.reduce((acc, a) => acc + a.minutes, 0);
           const target = over === col.key;
 
           return (
             <div
+              className="board-column"
               key={col.key}
               onDragOver={(e) => {
-                if (!dragging) return;
+                if (!dragging || col.derived) return;
                 // Without this the browser refuses the drop outright.
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
@@ -255,7 +294,7 @@ export default function BoardView() {
                 if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
                 setOver((prev) => (prev === col.key ? null : prev));
               }}
-              onDrop={drop(col.key)}
+              onDrop={col.derived ? undefined : drop(col.key)}
               style={{
                 display: "flex",
                 flexDirection: "column",

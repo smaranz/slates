@@ -84,12 +84,36 @@ carry the substance. A question about reading, sketching, or comparing a
 graph gets its own "graph" field instead of describing the graph in the
 prompt: {"type":"mcq","prompt":"...","graph":{"expressions":["y=x^2-4"]},
 "choices":[...],"answer":0} — same {"expressions":[...]} shape as a
-standalone [[graph]] block.
+standalone [[graph]] block. Only include "graph" on a question that is
+actually about a graph; leave the field off entirely otherwise; never send
+it empty ({"expressions":[]}) as a placeholder.
 `.trim();
 
 const BLOCK_RE = /\[\[quiz\]\]([\s\S]*?)\[\[\/quiz\]\]/;
 const GLOBAL_BLOCK_RE = /\[\[quiz\]\][\s\S]*?\[\[\/quiz\]\]/g;
 const TRAILING_OPEN_RE = /\[\[quiz\]\][\s\S]*$/;
+
+/**
+ * Drops a question's `graph` field if it wouldn't validate on its own —
+ * a model that tacks on `{"expressions":[]}` out of habit rather than because
+ * the question actually needs one shouldn't cost the other seven questions
+ * their whole quiz. Everything else about the question is untouched; only a
+ * `graph` this broken is worth failing loudly over, and this isn't it.
+ */
+function dropInvalidGraphs(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { questions?: unknown }).questions)) {
+    return value;
+  }
+  const { questions, ...rest } = value as { questions: unknown[] };
+  return {
+    ...rest,
+    questions: questions.map((q) => {
+      if (!q || typeof q !== "object" || !("graph" in q)) return q;
+      const { graph, ...question } = q as Record<string, unknown>;
+      return TutorGraphSchema.safeParse(graph).success ? q : question;
+    }),
+  };
+}
 
 /** Hides a quiz block — complete or still streaming in — from what the student reads. */
 export function stripTutorQuiz(text: string): string {
@@ -106,7 +130,7 @@ export function parseTutorQuiz(text: string): { clean: string; quiz: Quiz | null
   if (!match) return { clean: text, quiz: null };
 
   try {
-    const parsed = QuizSchema.parse(JSON.parse(match[1]));
+    const parsed = QuizSchema.parse(dropInvalidGraphs(JSON.parse(match[1])));
     return { clean: (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim(), quiz: parsed };
   } catch {
     return { clean: text, quiz: null };

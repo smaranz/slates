@@ -28,6 +28,7 @@ export default function GradesView() {
           return (
             <div key={c.id} className="card" style={{ overflow: "hidden" }}>
               <button
+                className="grade-course-button"
                 type="button"
                 onClick={() => s.openCourse(c.id)}
                 style={{
@@ -45,6 +46,7 @@ export default function GradesView() {
               >
                 <Dot color={c.dot} size={10} radius={3} />
                 <span
+                  className="grade-course-info"
                   style={{
                     minWidth: 0,
                     flex: 1,
@@ -55,6 +57,7 @@ export default function GradesView() {
                   }}
                 >
                   <span
+                    className="grade-course-name"
                     style={{
                       fontSize: 15,
                       fontWeight: 600,
@@ -65,7 +68,7 @@ export default function GradesView() {
                   >
                     {c.name}
                   </span>
-                  <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                  <span className="grade-course-meta" style={{ fontSize: 12, color: "var(--muted)" }}>
                     {c.period} ·{" "}
                     {open.length ? `${open.length} open · ${fmtMinutes(mins)} left` : "nothing open"}
                     {/* Say plainly whose arithmetic the headline number is. */}
@@ -76,6 +79,7 @@ export default function GradesView() {
 
                 {hasTrend && (
                   <span
+                    className="grade-course-trend"
                     style={{
                       flexShrink: 0,
                       whiteSpace: "nowrap",
@@ -89,7 +93,7 @@ export default function GradesView() {
                   </span>
                 )}
 
-                <span style={{ display: "flex", alignItems: "baseline", gap: 10, flexShrink: 0 }}>
+                <span className="grade-course-score" style={{ display: "flex", alignItems: "baseline", gap: 10, flexShrink: 0 }}>
                   <span
                     className="tabular"
                     style={{
@@ -128,6 +132,7 @@ export default function GradesView() {
                     cat.possible > 0 ? `${cat.earned}/${cat.possible}` : cat.letter || "—";
                   return (
                     <div
+                      className="grade-category-row"
                       key={cat.cat}
                       style={{
                         display: "flex",
@@ -138,20 +143,20 @@ export default function GradesView() {
                       }}
                     >
                       <span
-                        className="truncate"
+                        className="truncate grade-category-name"
                         style={{ flex: "0 0 150px", textAlign: "center", fontSize: 13, color: "var(--text-2)" }}
                       >
                         {cat.cat}
                       </span>
                       <span
-                        className="tabular"
+                        className="tabular grade-category-weight"
                         style={{ flex: "0 0 54px", textAlign: "center", fontSize: 12, color: "var(--muted)" }}
                       >
                         {cat.weight}%
                       </span>
                       <Meter pct={pct} color={c.dot} />
                       <span
-                        className="tabular"
+                        className="tabular grade-category-points"
                         style={{
                           flex: "0 0 86px",
                           textAlign: "center",
@@ -163,7 +168,7 @@ export default function GradesView() {
                         {points}
                       </span>
                       <span
-                        className="tabular"
+                        className="tabular grade-category-pct"
                         style={{
                           flex: "0 0 54px",
                           textAlign: "center",

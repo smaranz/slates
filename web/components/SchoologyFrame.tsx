@@ -159,7 +159,10 @@ export default function SchoologyFrame({ url, onClose, onFinished, startedAt, ti
         gap: 12,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+      <div
+        className="schoology-viewer-bar"
+        style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}
+      >
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
           Schoology · live
         </span>

@@ -9,9 +9,10 @@ import { Badge, ClockIcon, SearchIcon } from "./ui";
 
 /* These name the board's columns, so they track whatever those are called. */
 const COLUMN: Record<Bucket, string> = {
+  overdue: "Overdue",
   tonight: "Today",
   soon: "Tomorrow",
-  week: "This week",
+  week: "Later",
   done: "Turned in",
 };
 
@@ -84,7 +85,7 @@ export default function CommandPalette() {
     // Nothing typed yet: offer the plan, nearest first, rather than an empty
     // panel — the same order the board reads in.
     if (!terms.length) {
-      const order: Bucket[] = ["tonight", "soon", "week"];
+      const order: Bucket[] = ["overdue", "tonight", "soon", "week"];
       return s.snapshot.assignments
         .filter((a) => s.onBoard(a) && s.statusOf(a) !== "done")
         .sort((x, y) => order.indexOf(s.bucketOf(x)) - order.indexOf(s.bucketOf(y)))
