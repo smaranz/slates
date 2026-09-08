@@ -58,9 +58,22 @@ jobs:
         working-directory: desktop
         run: npm install
 
+      # Retried because electron-builder downloads the Electron binary from
+      # GitHub's release CDN mid-build, and that download is the one step here
+      # that fails for reasons having nothing to do with this repository
+      # ("connection forcibly closed by the remote host"). Three attempts, and
+      # the cached zip means a retry after a partial download is cheap.
       - name: Build
         working-directory: desktop
-        run: npm run ${{ matrix.script }}
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run ${{ matrix.script }}; then exit 0; fi
+            echo "::warning::build attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          echo "::error::build failed after 3 attempts"
+          exit 1
         env:
           # Unsigned. Without this electron-builder tries to discover a signing
           # identity and fails the build on a runner that has none.

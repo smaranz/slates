@@ -42,6 +42,22 @@ function nativeResources() {
   return out;
 }
 
+/**
+ * `public/` — but only when the standalone bundle didn't already bring it.
+ *
+ * Next copies public/ into .next/standalone itself, so naming it a second time
+ * makes electron-builder hard-link every file twice and die on the first
+ * collision (`EEXIST ... public/globe.svg`). Kept as a fallback rather than
+ * deleted outright because whether standalone includes public/ is a Next
+ * implementation detail, and an app missing its icons is a worse failure than
+ * a redundant check.
+ */
+function publicDir() {
+  const bundled = path.join(WEB, ".next", "standalone", "public");
+  if (fs.existsSync(bundled)) return [];
+  return [{ from: "../web/public", to: "web/public" }];
+}
+
 module.exports = {
   appId: "com.slates.app",
   productName: "Slates",
@@ -49,8 +65,10 @@ module.exports = {
   files: ["main.mjs", "splash.html", "package.json"],
   extraResources: [
     { from: "../web/.next/standalone", to: "web" },
+    // Not in the standalone bundle — Next leaves the static chunks out of it
+    // deliberately, on the assumption a CDN serves them.
     { from: "../web/.next/static", to: "web/.next/static" },
-    { from: "../web/public", to: "web/public" },
+    ...publicDir(),
     ...nativeResources(),
   ],
   mac: {
