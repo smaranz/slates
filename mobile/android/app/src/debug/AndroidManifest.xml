@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- LAN development commonly uses HTTP. Release builds deliberately omit
+         this override and should use an authenticated HTTPS endpoint. -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

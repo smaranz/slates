@@ -1,0 +1,5122 @@
+/* Slates — design tokens ported from "Slates Dashboard.dc.html" */
+
+:root {
+  /* surfaces */
+  --bg: oklch(0.26 0 0);
+  --surface: oklch(0.301 0 0);
+  --surface-soft: oklch(0.301 0 0 / 0.55);
+  --surface-faint: oklch(0.301 0 0 / 0.4);
+  --sunken: oklch(0.269 0 0);
+  --raised: oklch(0.36 0 0);
+  --hover: oklch(0.34 0 0);
+
+  /* text */
+  --text: oklch(0.907 0 0);
+  --text-2: oklch(0.798 0 0);
+  --muted: oklch(0.683 0 0);
+  --faint: oklch(0.62 0 0);
+  --dim: oklch(0.48 0 0);
+
+  /* lines + elevation */
+  --line: oklch(1 0 0 / 0.07);
+  --line-strong: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.72 0.14 250);
+
+  --shadow-card: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 1px 2px oklch(0 0 0 / 0.18);
+  --shadow-inset: inset 0 1px 2px oklch(0 0 0 / 0.28), inset 0 -1px 0 oklch(1 0 0 / 0.03);
+  --shadow-sunken: inset 0 1px 2px oklch(0 0 0 / 0.28);
+  --shadow-raised: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.2),
+    0 2px 4px oklch(0 0 0 / 0.25);
+  --shadow-pop: 0 24px 60px oklch(0 0 0 / 0.45);
+  --shadow-menu: 0 12px 28px oklch(0 0 0 / 0.35);
+
+  /* semantic accents */
+  --good: oklch(0.82 0.15 145);
+  --warn: oklch(0.82 0.14 80);
+  --bad: oklch(0.78 0.18 25);
+  --info: oklch(0.82 0.14 250);
+
+  --radius-xl: 28px;
+  --radius-lg: 24px;
+  --radius-md: 20px;
+  --radius-sm: 16px;
+  --radius-xs: 12px;
+
+  --font: "Slates Ellipsis", ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN",
+    -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/*
+ * SF Rounded (and Maru Gothic) draw U+2026 on the midline. Pull that one
+ * glyph from a text face so "…" and text-overflow sit on the baseline.
+ */
+@font-face {
+  font-family: "Slates Ellipsis";
+  src: local("SF Pro Text"), local("SF Pro"), local(".SF NS Text"),
+    local("Helvetica Neue"), local("Arial");
+  unicode-range: U+2026;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  /* Rounded faces ligate "..." into a midline ellipsis. Keep the three dots. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+a:hover {
+  color: oklch(0.98 0 0);
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+/*
+ * ::placeholder does not reliably honor unicode-range composite fonts, so the
+ * rounded midline "…" still wins there. Use a text face for placeholder only —
+ * typed text stays rounded.
+ */
+::placeholder {
+  color: var(--muted);
+  font-family: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "calt" 0;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.42 0 0) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: oklch(0.42 0 0);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0 0);
+}
+
+@keyframes slates-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes slates-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.spin {
+  animation: slates-spin 1s linear infinite;
+}
+
+/*
+ * Handing work in drives a real browser through Schoology's dropbox, which
+ * takes several seconds. There is no percentage to report — a sweep that keeps
+ * moving says "still working" without inventing progress that doesn't exist.
+ */
+@keyframes slates-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress {
+  position: relative;
+  height: 3px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, var(--text-2), transparent);
+  animation: slates-sweep 1.15s ease-in-out infinite;
+}
+
+/* A step that has already finished stays legible but recedes. */
+.step-done {
+  color: var(--muted);
+}
+
+.step-now {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress::after {
+    animation-duration: 3s;
+  }
+  .spin {
+    animation-duration: 2.5s;
+  }
+}
+
+/* ---------- motion ---------- */
+
+/*
+ * Three curves and nothing else, so everything that moves in Slates moves in
+ * the same handwriting.
+ *
+ * `--ease-out` is the workhorse: fast off the mark, long settle, which is what
+ * reads as "responsive" rather than "slow". `--ease-spring` overshoots a hair
+ * and is only for things you pressed — a tap wants to feel like it pushed
+ * back. `--ease-emphasis` is for panels that travel a long way, where a slower
+ * start keeps a full-height sheet from feeling like it was thrown.
+ */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes slates-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes slates-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes slates-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes slates-pulse-ring {
+  50% {
+    box-shadow: 0 0 0 5px oklch(0.72 0.14 250 / 0.18);
+  }
+}
+
+/*
+ * The pane that swaps when you change nav. It exists to be keyed on the
+ * current view: React remounts it, which is what gives the entrance something
+ * to play against. Otherwise it is a transparent flex column.
+ */
+.view-swap {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/*
+ * Press feedback.
+ *
+ * A phone has no hover, so the only way a control can acknowledge a tap is to
+ * move. Kept to a hair under 1 — enough to feel, not enough to look like the
+ * layout jumped. `:has()` is how a card that is really a button gets it
+ * without every view remembering to ask.
+ */
+@media (hover: none) {
+  .btn:active:not(:disabled),
+  .icon-btn:active,
+  .badge:active,
+  .grade-course-button:active,
+  .mobile-more-row:active,
+  .mobile-sheet-close:active,
+  .palette-row:active,
+  .launcher-card:active {
+    transform: scale(0.97);
+  }
+
+  .btn,
+  .icon-btn,
+  .grade-course-button,
+  .mobile-more-row,
+  .mobile-sheet-close,
+  .palette-row,
+  .launcher-card {
+    transition: transform 120ms var(--ease-spring), background 0.15s, box-shadow 0.15s,
+      opacity 0.15s, color 0.15s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-swap,
+  .card {
+    animation: none !important;
+  }
+}
+
+/* ---------- badges ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.badge--secondary {
+  background: var(--sunken);
+  color: var(--text-2);
+  border-color: var(--line);
+  box-shadow: var(--shadow-inset);
+}
+.badge--outline {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+}
+.badge--warning {
+  background: oklch(0.45 0.12 70 / 0.3);
+  color: var(--warn);
+  border-color: oklch(0.55 0.18 55 / 0.3);
+}
+.badge--success {
+  background: oklch(0.4 0.1 145 / 0.3);
+  color: var(--good);
+  border-color: oklch(0.5 0.15 145 / 0.3);
+}
+.badge--danger {
+  background: oklch(0.6 0.18 25 / 0.2);
+  color: var(--bad);
+  border-color: oklch(0.6 0.18 25 / 0.3);
+}
+.badge--speed {
+  background: oklch(0.4 0.1 250 / 0.3);
+  color: var(--info);
+  border-color: oklch(0.5 0.15 250 / 0.3);
+}
+.badge--premium {
+  background: oklch(0.4 0.1 300 / 0.3);
+  color: oklch(0.82 0.14 300);
+  border-color: oklch(0.5 0.15 300 / 0.3);
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  border-radius: 9999px;
+  cursor: pointer;
+  user-select: none;
+  border: 0;
+  transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.btn--primary {
+  background-image: linear-gradient(180deg, oklch(0.42 0 0) 0%, oklch(0.37 0 0) 100%);
+  color: var(--text);
+  text-shadow: 0 1px 1px oklch(0 0 0 / 0.4);
+  box-shadow: var(--shadow-raised);
+}
+.btn--primary:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, oklch(0.46 0 0) 0%, oklch(0.4 0 0) 100%);
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.btn--quiet:hover:not(:disabled) {
+  color: var(--text);
+  background: oklch(1 0 0 / 0.03);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Dimmed enough to read as unavailable, bright enough that the spinner in it
+   is still visible — a frozen-looking button is what made this feel hung. */
+.btn--busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+.icon-btn:hover {
+  color: var(--text);
+}
+
+.pfp-btn {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.pfp-btn .pfp-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: oklch(0 0 0 / 0.45);
+  color: oklch(0.96 0 0);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pfp-btn:hover .pfp-overlay,
+.pfp-btn:focus-visible .pfp-overlay {
+  opacity: 1;
+}
+
+/* card footer action strip */
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 0;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+}
+.strip:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+/* ---------- command palette ---------- */
+
+/* Sits above the assessment viewer's own overlay so nothing can bury it. */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  /* High, not centred: the list grows downward into empty space instead of
+     shifting the whole panel every time a result appears. */
+  padding: 14vh 16px 16px;
+  background: oklch(0 0 0 / 0.45);
+  backdrop-filter: blur(3px);
+  animation: slates-fade 120ms ease-out;
+}
+
+.palette {
+  width: 100%;
+  max-width: 560px;
+  align-self: flex-start;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: slates-pop 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+@keyframes slates-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slates-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-backdrop,
+  .palette {
+    animation: none;
+  }
+}
+
+/* ---------- dialog ---------- */
+
+/*
+ * Centred, unlike the command palette, which sits high because its list grows
+ * downward. A dialog is a fixed-size question and belongs in the middle.
+ */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.45);
+  backdrop-filter: blur(3px);
+  animation: slates-fade 120ms ease-out;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  max-height: 84vh;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  padding: 18px 20px 16px;
+  animation: slates-pop 140ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-backdrop,
+  .dialog {
+    animation: none;
+  }
+}
+
+/* ---------- surfaces ---------- */
+
+.card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.card--xl {
+  border-radius: var(--radius-xl);
+}
+
+.card--pad {
+  padding: 18px 20px;
+}
+
+.input {
+  width: 100%;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.input:focus {
+  border-color: oklch(1 0 0 / 0.16);
+}
+
+.input--lg {
+  height: 38px;
+  border-radius: var(--radius-xs);
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+/* Fake placeholder so the dots can use a text face. ::placeholder ligates. */
+.ph-field {
+  position: relative;
+}
+.ph-field__hint {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  /* One text face for the whole hint so "here" and "..." share a baseline. */
+  font-family: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
+.ph-field--compact .ph-field__hint {
+  left: 10px;
+  top: 8px;
+}
+.ph-field:has(textarea:not(:placeholder-shown)) .ph-field__hint,
+.ph-field:has(input:not(:placeholder-shown)) .ph-field__hint {
+  visibility: hidden;
+}
+.ph-field__dots {
+  font: inherit;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  outline: none;
+}
+
+/* Borderless field that sits inside its own styled shell (search box, chat
+   composer). Kept as a class rather than an inline style object: shorthand
+   properties in React's `style` prop expand to longhands in the DOM, which
+   trips the hydration diff on form elements. */
+.bare-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.bare-field--chat {
+  resize: none;
+  padding: 8px;
+  font-size: 15px;
+  line-height: 1.4;
+  max-height: 140px;
+}
+
+.field-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---------- layout ---------- */
+
+.shell {
+  display: flex;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.main {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 24px 24px;
+}
+
+.centered {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.col {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* meter bars used in grade categories */
+.meter {
+  min-width: 60px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  overflow: hidden;
+  display: block;
+}
+/*
+ * Slides rather than jumps when a resync moves the number underneath it.
+ *
+ * Only the *change* is animated, never the first paint. A bar is a grade, not
+ * decoration, so its resting style has to be the correct one: an entrance that
+ * grows from zero renders an empty bar for as long as anything keeps the
+ * animation from running — a throttled background tab freezes the document
+ * timeline outright — and an empty bar next to "92%" is a wrong number, not a
+ * missing flourish. Growing from the previous width has no such failure: the
+ * worst case is a bar that is briefly a resync out of date.
+ */
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 620ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter > span {
+    transition: none;
+  }
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * A teacher's write-up, rendered as they wrote it.
+ *
+ * Sync keeps the structure — paragraphs, lists, links, emphasis — and
+ * throws away every class, style and font Schoology carried, so what lands
+ * here is bare markup that has to be given a voice. It gets this app's, not
+ * the 16px Google Sans a teacher pasted out of a Google Doc.
+ *
+ * Rules are scoped under .prose rather than set on the elements themselves,
+ * because these are the only places in Slates where raw HTML is rendered.
+ */
+.prose {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.prose div,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose table {
+  margin: 0 0 10px;
+}
+
+/* Pasted rich text nests div-per-line; only the outermost needs the gap. */
+.prose div div,
+.prose li p {
+  margin-bottom: 0;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 22px;
+}
+
+.prose li {
+  margin: 0 0 4px;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prose strong,
+.prose b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prose a {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+}
+
+/*
+ * A teacher who pastes a handout into Schoology's editor can land it in a
+ * <pre>, which is a statement about line breaks, not about code. Keeping the
+ * breaks is right; drawing prose in a monospace code block is not — only a
+ * <code> inside one gets that treatment.
+ */
+.prose pre {
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.prose pre code {
+  display: block;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-xs);
+  background: var(--sunken);
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+.prose table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.prose th,
+.prose td {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+/*
+ * The tutor's own replies. `.prose` is sized for a teacher's write-up on a
+ * full-width page; inside a chat bubble it should be the bubble's own type,
+ * not a second, smaller and greyer voice sitting inside it.
+ */
+.prose--chat {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.prose--chat p,
+.prose--chat ul,
+.prose--chat ol {
+  margin: 0 0 8px;
+}
+
+/* Rendered maths. Display blocks earn a little air and scroll rather than
+   stretching the bubble when an equation is wider than the column. */
+.prose .katex-display {
+  margin: 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.prose .katex {
+  /* KaTeX ships slightly large against body copy at these sizes. */
+  font-size: 1.05em;
+}
+
+/* Plain text keeps the line breaks the teacher typed. */
+.prose--plain {
+  white-space: pre-wrap;
+}
+
+/*
+ * The brand row owns its padding here rather than inline, so the desktop
+ * override below can actually win — an inline `padding` shorthand outranks any
+ * stylesheet `padding-top`.
+ */
+.app-brand {
+  padding: 12px 16px;
+}
+
+/*
+ * Desktop shell only. The window is frameless with inset traffic lights, so
+ * the brand row has to clear them — otherwise the red/yellow/green sit on top
+ * of the paperclip. The strip doubles as the window's drag handle, which a
+ * frameless window would otherwise lack entirely.
+ */
+
+/*
+ * The wordmark, as the way back to the launcher.
+ *
+ * It sits inside `.app-brand`, which in the desktop shell is the frameless
+ * window's drag handle — so this has to opt out, or the click is swallowed by
+ * a window move. The rest of the strip stays draggable.
+ */
+.brand-home {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -4px -7px;
+  border: 0;
+  border-radius: 12px;
+  padding: 4px 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.brand-home:hover {
+  background: oklch(1 0 0 / 0.05);
+}
+
+.brand-home:active {
+  opacity: 0.7;
+}
+
+:root[data-desktop="1"] .app-brand {
+  padding-top: 40px;
+  -webkit-app-region: drag;
+}
+
+/*
+ * The live Schoology viewer is a full-window overlay, so it covers the sidebar
+ * strip that normally keeps the inset traffic lights clear. The bar is the
+ * title row — sit the label to the right of the lights (x:16, ~54px wide).
+ */
+:root[data-desktop="1"] .schoology-viewer-bar {
+  padding-left: 64px;
+}
+
+/* Nothing in the row is interactive, but keep text selection sane. */
+:root[data-desktop="1"] .app-brand * {
+  user-select: none;
+}
+
+/* ---------- tutor ---------- */
+
+/*
+ * The tutor is modelled on ChatGPT, deliberately and closely: a collapsing
+ * conversation drawer, a header carrying the model name, a thread where only
+ * the student's turn wears a bubble, an action bar under every reply, and a
+ * rounded composer with the attach control on the left and send on the right.
+ *
+ * The reason to copy rather than invent is that this is the chat UI every
+ * student already has muscle memory for. What is Slates' own is the palette
+ * and the rounded face — the shapes are ChatGPT's.
+ */
+
+.gpt {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+
+/* --- conversation drawer --- */
+
+/*
+ * A docked column that slides out of the layout on a laptop, and a sheet over
+ * the thread on a phone. Same markup either way — only the transform differs,
+ * so the list cannot drift between the two shells.
+ */
+.gpt-drawer {
+  display: flex;
+  width: 268px;
+  min-height: 0;
+  flex-shrink: 0;
+  flex-direction: column;
+  margin-left: 0;
+  border-right: 1px solid var(--line);
+  /* Darker than the thread, not lighter: a sidebar reads as behind the page. */
+  background: oklch(0.233 0 0);
+  transition: margin-left 300ms var(--ease-emphasis), visibility 0s;
+}
+
+.gpt[data-drawer="closed"] .gpt-drawer {
+  margin-left: -268px;
+  /* Delayed to the end of the slide, so a closed drawer leaves the tab order
+     without the list vanishing halfway out. */
+  visibility: hidden;
+  transition: margin-left 300ms var(--ease-emphasis), visibility 0s 300ms;
+}
+
+.gpt-drawer-head {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 8px 8px 4px;
+}
+
+.gpt-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 10px;
+  height: 36px;
+  color: var(--muted);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.gpt-search:focus-within {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.gpt-search .bare-field {
+  font-size: 13.5px;
+}
+
+.gpt-drawer-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 8px 8px;
+  border: 0;
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms var(--ease-spring);
+}
+
+.gpt-drawer-new:hover {
+  background: var(--hover);
+}
+
+.gpt-drawer-new:active {
+  transform: scale(0.98);
+}
+
+.gpt-drawer-new-icon {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text-2);
+}
+
+.gpt-drawer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 8px 20px;
+}
+
+.gpt-drawer-empty {
+  margin: 4px 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* Today, Yesterday, Previous 7 days — how you actually look for a conversation
+   you only half remember having. */
+.gpt-drawer-band {
+  padding: 12px 10px 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.gpt-drawer-group:first-child .gpt-drawer-band {
+  padding-top: 4px;
+}
+
+.gpt-drawer-row {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  padding-right: 2px;
+  transition: background 140ms ease;
+}
+
+.gpt-drawer-row:hover,
+.gpt-drawer-row[data-active="1"] {
+  background: var(--hover);
+}
+
+.gpt-drawer-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px 8px 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gpt-drawer-open .truncate {
+  display: block;
+  width: 100%;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.gpt-drawer-row[data-active="1"] .gpt-drawer-open .truncate {
+  color: var(--text);
+}
+
+.gpt-drawer-when {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.gpt-drawer-delete {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+/* Only on the row you're pointing at — a delete button on every row turns a
+   list of conversations into a list of hazards. */
+.gpt-drawer-row:hover .gpt-drawer-delete,
+.gpt-drawer-row[data-active="1"] .gpt-drawer-delete,
+.gpt-drawer-delete:focus-visible {
+  opacity: 1;
+}
+
+.gpt-drawer-delete:hover {
+  background: var(--sunken);
+  color: var(--bad);
+}
+
+.gpt-drawer-rename {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  outline: 1px solid var(--ring);
+}
+
+/* The scrim only exists on a phone, where the drawer covers the thread. */
+.gpt-scrim {
+  display: none;
+}
+
+/* --- header --- */
+
+.gpt-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.gpt-header {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  min-height: 50px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--bg);
+}
+
+/*
+ * The thread dissolves into the header and into the composer rather than
+ * being sliced off at each edge. Both are ChatGPT's, and both are the reason
+ * a scrolling transcript reads as one surface instead of three stacked panes.
+ */
+.gpt-header::after,
+.gpt-composer-dock::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  pointer-events: none;
+}
+
+.gpt-header::after {
+  top: 100%;
+  background: linear-gradient(var(--bg), transparent);
+}
+
+.gpt-composer-dock::before {
+  bottom: 100%;
+  background: linear-gradient(transparent, var(--bg));
+}
+
+.gpt-header-gap {
+  flex: 1;
+}
+
+.gpt-icon-btn {
+  display: flex;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms var(--ease-spring);
+}
+
+.gpt-icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gpt-icon-btn:active {
+  transform: scale(0.9);
+}
+
+/* The drawer's own toggle is redundant with the header's while the drawer is
+   docked beside it, but on a phone the drawer covers the header entirely. */
+.gpt[data-drawer="open"] .gpt-main > .gpt-header > .gpt-icon-btn:first-child {
+  color: var(--faint);
+}
+
+/* --- thread --- */
+
+.gpt-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.gpt-column {
+  display: flex;
+  width: 100%;
+  max-width: 768px;
+  flex-direction: column;
+  gap: 22px;
+  margin: 0 auto;
+  padding: 6px 24px 28px;
+}
+
+/* Nothing asked yet: the greeting and its starters take the middle of the
+   page, the way an empty ChatGPT sits the composer at eye level. */
+.gpt-column--empty {
+  min-height: 100%;
+  justify-content: center;
+}
+
+.gpt-greeting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  animation: slates-rise 420ms var(--ease-out) backwards;
+}
+
+.gpt-greeting-mark {
+  display: block;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+.gpt-greeting h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.gpt-starters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.gpt-starter {
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  background: transparent;
+  padding: 9px 15px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  animation: slates-rise 420ms var(--ease-out) backwards;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease,
+    transform 150ms var(--ease-spring);
+}
+
+/* Dealt out rather than appearing at once. */
+.gpt-starter:nth-child(1) {
+  animation-delay: 60ms;
+}
+.gpt-starter:nth-child(2) {
+  animation-delay: 120ms;
+}
+.gpt-starter:nth-child(3) {
+  animation-delay: 180ms;
+}
+.gpt-starter:nth-child(4) {
+  animation-delay: 240ms;
+}
+
+.gpt-starter:hover {
+  border-color: var(--line-strong);
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gpt-starter:active {
+  transform: scale(0.96);
+}
+
+.gpt-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: slates-rise 340ms var(--ease-out) backwards;
+}
+
+.gpt-turn--user {
+  align-items: flex-end;
+}
+
+.gpt-turn--assistant {
+  align-items: stretch;
+}
+
+/* Only the student's turn is boxed. ChatGPT stopped drawing a border around
+   the assistant's once replies got long enough that the box was just a frame
+   around the whole screen — and it reads as the page talking back, which is
+   exactly right. */
+.gpt-bubble {
+  max-width: 76%;
+  border-radius: 22px;
+  background: var(--raised);
+  padding: 11px 17px;
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.2);
+}
+
+.gpt-bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.gpt-bubble-files:last-child {
+  margin-bottom: 0;
+}
+
+.gpt-reply {
+  font-size: 15.5px;
+  /* Looser than a bubble: unboxed text needs the leading to hold together as
+     a column. */
+  line-height: 1.7;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.gpt-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.gpt-applied-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--good);
+}
+
+.gpt-inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 12px 16px;
+}
+
+.gpt-thinking {
+  display: inline-flex;
+  height: 34px;
+  align-self: flex-start;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  background: var(--surface);
+  padding: 0 15px;
+  animation: slates-scale-in 240ms var(--ease-out) backwards;
+}
+
+.gpt-error {
+  align-self: center;
+  color: var(--warn);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* --- the action bar under a turn --- */
+
+/*
+ * Present on the last turn and on whatever you're pointing at, which is how
+ * ChatGPT keeps a long transcript from reading as a wall of buttons. A touch
+ * screen has no "pointing at", so there they are simply always there.
+ */
+.gpt-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -2px -6px 0;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.gpt-turn:last-child .gpt-actions,
+.gpt-turn:hover .gpt-actions,
+.gpt-turn:focus-within .gpt-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .gpt-actions {
+    opacity: 1;
+  }
+}
+
+.gpt-action {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms var(--ease-spring);
+}
+
+.gpt-action:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gpt-action:active:not(:disabled) {
+  transform: scale(0.88);
+}
+
+.gpt-action[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.gpt-action:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* --- composer --- */
+
+.gpt-composer-dock {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 24px 14px;
+  background: var(--bg);
+}
+
+.gpt-composer {
+  display: flex;
+  width: 100%;
+  max-width: 768px;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--surface);
+  padding: 6px 8px 8px 10px;
+  box-shadow: 0 2px 10px oklch(0 0 0 / 0.18);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.gpt-composer:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 6px 20px oklch(0 0 0 / 0.3);
+}
+
+.gpt-composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px 2px;
+}
+
+.gpt-input {
+  width: 100%;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  outline: none;
+  resize: none;
+  padding: 8px 6px 4px;
+  font: inherit;
+  /* 16px, because anything smaller makes iOS zoom the page on focus. */
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.gpt-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gpt-composer-gap {
+  flex: 1;
+}
+
+.gpt-round-btn {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease,
+    transform 140ms var(--ease-spring);
+}
+
+.gpt-round-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.gpt-round-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.gpt-round-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Dictating. The ring breathes so it's obvious the mic is still open. */
+.gpt-round-btn.is-live {
+  border-color: transparent;
+  background: var(--info);
+  color: var(--bg);
+  animation: slates-pulse-ring 1.6s ease-in-out infinite;
+}
+
+/*
+ * Send, as ChatGPT draws it: a filled light disc with a dark arrow, which is
+ * the one high-contrast element in the whole view. Empty, it recedes to a grey
+ * disc and shrinks a little — so typing the first character springs it up.
+ */
+.gpt-send {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--text);
+  color: var(--bg);
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, transform 200ms var(--ease-spring);
+}
+
+.gpt-send:hover:not(:disabled) {
+  background: oklch(0.97 0 0);
+}
+
+.gpt-send:active:not(:disabled) {
+  transform: scale(0.88);
+}
+
+.gpt-send:disabled {
+  background: var(--raised);
+  color: var(--faint);
+  transform: scale(0.92);
+  pointer-events: none;
+}
+
+.gpt-disclaimer {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gpt-drawer,
+  .gpt-scrim {
+    transition-duration: 0s;
+  }
+  .gpt-turn,
+  .gpt-greeting,
+  .gpt-starter,
+  .gpt-thinking {
+    animation: none;
+  }
+  .gpt-round-btn.is-live {
+    animation: none;
+  }
+}
+
+/* ---------- phone shell ---------- */
+
+.mobile-nav,
+.mobile-more-backdrop,
+.messages-back,
+.mobile-host-notice {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --mobile-gutter: 14px;
+    --mobile-nav-height: 62px;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --radius-xl: 22px;
+    --radius-lg: 20px;
+    --radius-md: 18px;
+  }
+
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
+  body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  button,
+  a,
+  input,
+  textarea {
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea {
+    /* iOS zooms focused controls whose text is smaller than 16px. */
+    font-size: 16px !important;
+  }
+
+  .shell {
+    flex-direction: column;
+  }
+
+  .slates-sidebar {
+    display: none !important;
+  }
+
+  .main {
+    min-height: 0;
+  }
+
+  .topbar {
+    min-height: calc(54px + var(--safe-top));
+    padding: calc(9px + var(--safe-top)) var(--mobile-gutter) 8px !important;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .topbar-leading {
+    gap: 8px !important;
+  }
+
+  .topbar-leading > .btn {
+    min-height: 36px;
+    padding-inline: 11px;
+  }
+
+  .topbar-status {
+    display: none !important;
+  }
+
+  .scroll {
+    padding: 12px var(--mobile-gutter) 18px;
+    overscroll-behavior-y: contain;
+  }
+
+  .card--pad {
+    padding: 16px;
+  }
+
+  .btn {
+    min-height: 40px;
+  }
+
+  .icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .palette-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .palette {
+    max-width: none;
+    max-height: calc(82dvh - var(--safe-top));
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .dialog-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .dialog {
+    max-height: calc(88dvh - var(--safe-top));
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+
+  /* The board becomes a row of full, swipeable slates. Each column lands on
+     a snap point, so the due-date sequence still reads left to right without
+     crushing five columns into a phone viewport. */
+  .board-grid {
+    grid-template-columns: none !important;
+    grid-auto-flow: column;
+    grid-auto-columns: calc(100vw - (var(--mobile-gutter) * 2) - 22px);
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0;
+    scrollbar-width: none;
+    padding: 1px 22px 8px 1px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .board-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .board-column {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    padding: 12px !important;
+  }
+
+  /* Inbox is master/detail on larger screens and route-like on phones. */
+  .messages-view {
+    padding: 0 !important;
+  }
+
+  .messages-list {
+    width: 100% !important;
+    border-right: 0 !important;
+  }
+
+  .messages-detail {
+    display: none;
+  }
+
+  .messages-layout--detail .messages-list {
+    display: none !important;
+  }
+
+  .messages-layout--detail .messages-detail {
+    display: block;
+    width: 100%;
+    padding: 12px var(--mobile-gutter) 24px !important;
+  }
+
+  .messages-back {
+    display: inline-flex;
+    margin-bottom: 16px;
+  }
+
+  /* Month cells become tap targets first and tiny documents second. Event
+     names live in the day sheet; colored marks retain the at-a-glance load. */
+  .calendar-view {
+    padding: 12px var(--mobile-gutter) 14px !important;
+  }
+
+  .calendar-view > div {
+    gap: 10px !important;
+  }
+
+  .calendar-heading {
+    gap: 8px !important;
+  }
+
+  .calendar-heading > div:first-child {
+    min-width: 0;
+  }
+
+  .calendar-count {
+    display: none;
+  }
+
+  .calendar-slate {
+    padding: 8px !important;
+    border-radius: var(--radius-lg) !important;
+  }
+
+  .calendar-weekdays,
+  .calendar-weeks,
+  .calendar-week {
+    gap: 3px !important;
+  }
+
+  .calendar-cell {
+    min-height: 44px !important;
+    gap: 1px !important;
+    padding: 3px !important;
+    border-radius: 11px !important;
+  }
+
+  .calendar-events {
+    flex-direction: row !important;
+    justify-content: center;
+    gap: 2px !important;
+  }
+
+  .calendar-events > span {
+    width: auto !important;
+    font-size: 0 !important;
+  }
+
+  .calendar-events > span > span:last-child,
+  .calendar-events > span:last-child:not(:first-child) {
+    display: none !important;
+  }
+
+  .gpt-header {
+    min-height: calc(48px + var(--safe-top));
+    padding: calc(5px + var(--safe-top)) 6px 5px;
+  }
+
+  /* The drawer stops being part of the layout and becomes a sheet over it. */
+  .gpt-drawer,
+  .gpt[data-drawer="closed"] .gpt-drawer {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(86vw, 320px);
+    margin-left: 0;
+    border-right-color: var(--line-strong);
+    background: var(--bg);
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    box-shadow: 18px 0 40px oklch(0 0 0 / 0.4);
+    transform: translateX(-101%);
+    transition: transform 320ms var(--ease-emphasis), visibility 0s 320ms;
+  }
+
+  .gpt[data-drawer="open"] .gpt-drawer {
+    visibility: visible;
+    transform: none;
+    transition: transform 320ms var(--ease-emphasis), visibility 0s;
+  }
+
+  .gpt-scrim {
+    position: absolute;
+    z-index: 39;
+    display: block;
+    inset: 0;
+    background: oklch(0 0 0 / 0.5);
+    opacity: 0;
+    visibility: hidden;
+    backdrop-filter: blur(2px);
+    transition: opacity 260ms ease, visibility 0s 260ms;
+  }
+
+  .gpt[data-drawer="open"] .gpt-scrim {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 260ms ease, visibility 0s;
+  }
+
+  .gpt-column {
+    max-width: none;
+    gap: 20px;
+    padding: 4px var(--mobile-gutter) 16px;
+  }
+
+  .gpt-bubble {
+    max-width: 84%;
+    font-size: 15px;
+  }
+
+  .gpt-reply {
+    font-size: 15px;
+    line-height: 1.62;
+  }
+
+  .gpt-greeting h1 {
+    font-size: 23px;
+  }
+
+  /* Full-width starters read as a menu rather than as wrapped confetti at
+     this measure, and each one becomes a comfortable tap target. */
+  .gpt-starters {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+  }
+
+  .gpt-starter {
+    min-height: 44px;
+    text-align: left;
+  }
+
+  .gpt-composer-dock {
+    padding: 2px var(--mobile-gutter) 6px;
+  }
+
+  /* One line of legal text is not worth a line of a 5.4" screen. */
+  .gpt-disclaimer {
+    display: none;
+  }
+
+  /* Nothing is behind the keyboard, so the composer takes back the bar's
+     space rather than sitting on top of a strip that is no longer there. */
+  :root[data-keyboard-open="1"] .gpt-composer-dock {
+    padding-bottom: calc(6px + var(--safe-bottom));
+  }
+
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /*
+   * The grade card, at phone width.
+   *
+   * The name, the detail line, and the score each get their own grid cell
+   * rather than sharing a flex row: a course called "Intro Engineering & Alt
+   * Energy - 8150" is wider than the column it is given, and in a flex row a
+   * `nowrap` line simply overflows — which is what used to lay the detail line
+   * underneath the letter grade.
+   */
+  .grade-course-button {
+    display: grid !important;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 10px !important;
+    row-gap: 2px !important;
+    padding: 15px 14px 10px !important;
+  }
+
+  .grade-course-button > :first-child {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .grade-course-info {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .grade-course-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Wraps rather than running under the score. Two lines of teacher, period
+     and workload is worth more than one line of it plus an ellipsis. */
+  .grade-course-meta {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .grade-course-trend {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+    margin-top: 4px;
+  }
+
+  .grade-course-score {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+    gap: 5px !important;
+  }
+
+  /* The 40px reservation is there to line headline numbers up in a wide
+     column; at this width it is 40px of nothing pushing the score off-screen. */
+  .grade-course-score > span {
+    font-size: 21px !important;
+  }
+
+  .grade-course-score > span:last-child {
+    width: auto !important;
+  }
+
+  /*
+   * Category rows — the same shape on the Grades list and inside a course.
+   *
+   * Label and meter get their own lines and the three numbers sit in
+   * content-sized columns. The fixed track widths these carry on a wide screen
+   * add up to more than a phone-width card, so they used to clip "217.2/220"
+   * and run "124/155" straight off the right edge.
+   */
+  .grade-category-row,
+  .cat-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    justify-content: stretch !important;
+    column-gap: 8px !important;
+    row-gap: 5px !important;
+    padding: 7px 0 10px !important;
+  }
+
+  .grade-category-name,
+  .grade-category-weight,
+  .grade-category-points,
+  .grade-category-pct,
+  .cat-name,
+  .cat-weight,
+  .cat-points,
+  .cat-pct {
+    flex: none !important;
+    width: auto !important;
+    min-width: 0;
+    text-align: left !important;
+    white-space: nowrap;
+  }
+
+  .grade-category-weight,
+  .grade-category-points,
+  .grade-category-pct,
+  .cat-weight,
+  .cat-points,
+  .cat-pct {
+    text-align: right !important;
+  }
+
+  .grade-category-row .meter,
+  .cat-row .meter {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    flex: none !important;
+  }
+
+  .notification-settings-card {
+    padding: 16px !important;
+  }
+
+  .notification-settings-head {
+    align-items: flex-start;
+  }
+
+  .mobile-host-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 16px;
+    border-color: oklch(0.72 0.14 250 / 0.25);
+    background: oklch(0.3 0.018 250);
+  }
+
+  .mobile-host-notice strong {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  .mobile-host-notice p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .mobile-host-kicker {
+    color: var(--info);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .mobile-nav {
+    position: relative;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    flex-shrink: 0;
+    height: calc(var(--mobile-nav-height) + var(--safe-bottom));
+    padding: 5px 6px var(--safe-bottom);
+    border-top: 1px solid var(--line-strong);
+    background: oklch(0.26 0 0 / 0.96);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-nav-item {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 54px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--faint);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .mobile-nav-item[aria-current="page"] {
+    color: var(--text);
+    background: var(--surface-soft);
+  }
+
+  .mobile-nav-icon {
+    position: relative;
+    display: flex;
+    width: 28px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+  }
+
+  .mobile-nav-item[aria-current="page"] .mobile-nav-icon {
+    background: var(--raised);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  }
+
+  .mobile-nav-more-icon {
+    gap: 3px;
+  }
+
+  .mobile-nav-more-icon i {
+    width: 3px;
+    height: 3px;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+
+  .mobile-nav-dot {
+    position: absolute;
+    top: 0;
+    right: 1px;
+    width: 7px;
+    height: 7px;
+    border: 2px solid var(--bg);
+    border-radius: 9999px;
+    background: var(--info);
+  }
+
+  .mobile-more-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: flex;
+    align-items: flex-end;
+    background: oklch(0 0 0 / 0.5);
+    backdrop-filter: blur(3px);
+    animation: slates-fade 120ms ease-out;
+  }
+
+  .mobile-more-sheet {
+    width: 100%;
+    padding: 8px var(--mobile-gutter) calc(16px + var(--safe-bottom));
+    border-top: 1px solid var(--line-strong);
+    border-radius: 22px 22px 0 0;
+    background: var(--surface);
+    box-shadow: var(--shadow-pop);
+    animation: slates-sheet-up 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  .mobile-more-handle {
+    width: 34px;
+    height: 4px;
+    margin: 0 auto 8px;
+    border-radius: 9999px;
+    background: var(--dim);
+  }
+
+  .mobile-more-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mobile-more-heading > div {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mobile-more-heading strong {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-more-heading span {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .mobile-sheet-close {
+    min-width: 52px;
+    min-height: 40px;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .mobile-more-list {
+    display: flex;
+    flex-direction: column;
+    padding-top: 6px;
+  }
+
+  .mobile-more-row {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto 16px;
+    min-height: 54px;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+  }
+
+  .mobile-more-row[aria-current="page"] {
+    color: var(--text);
+  }
+
+  .mobile-more-icon {
+    display: flex;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--sunken);
+  }
+
+  .mobile-more-chevron {
+    color: var(--faint);
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .mobile-nav-badge {
+    min-width: 22px;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    background: var(--info);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  :root[data-keyboard-open="1"] .mobile-nav {
+    display: none;
+  }
+
+  /* ---------- phone motion ---------- */
+
+  /*
+   * Switching nav is the app's one big state change, so it gets the app's one
+   * transition: the incoming pane rises a few pixels into place. `backwards`
+   * rather than `both` on purpose — a lingering `transform` would turn this
+   * div into the containing block for every `position: fixed` descendant, and
+   * the artifact panel and the model menu are both fixed.
+   */
+  .view-swap {
+    animation: slates-view-in 280ms var(--ease-out) backwards;
+  }
+
+  /*
+   * Cards deal in rather than arriving as a block. Six is where the stagger
+   * stops being a flourish and starts being a wait, so it stops there and
+   * everything below simply comes in with the sixth.
+   */
+  .scroll .card {
+    animation: slates-rise 380ms var(--ease-out) backwards;
+  }
+
+  .scroll .card:nth-child(1) {
+    animation-delay: 20ms;
+  }
+  .scroll .card:nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .scroll .card:nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .scroll .card:nth-child(4) {
+    animation-delay: 140ms;
+  }
+  .scroll .card:nth-child(5) {
+    animation-delay: 180ms;
+  }
+  .scroll .card:nth-child(n + 6) {
+    animation-delay: 210ms;
+  }
+
+  .board-column {
+    animation: slates-rise 380ms var(--ease-out) backwards;
+  }
+
+  /* The tab you pressed acknowledges it: the label brightens and the icon
+     tile springs up under your thumb. */
+  .mobile-nav-item {
+    transition: color 180ms ease, background 180ms ease, transform 120ms var(--ease-spring);
+  }
+
+  .mobile-nav-item:active {
+    transform: scale(0.93);
+  }
+
+  .mobile-nav-icon {
+    transition: background 200ms var(--ease-out), transform 260ms var(--ease-spring),
+      box-shadow 200ms ease;
+  }
+
+  .mobile-nav-item[aria-current="page"] .mobile-nav-icon {
+    transform: translateY(-1px) scale(1.06);
+  }
+
+  .mobile-nav-badge,
+  .mobile-nav-dot {
+    animation: slates-scale-in 260ms var(--ease-spring) backwards;
+  }
+
+  /* A sheet travels the height of a thumb, so it gets the slower start. */
+  .mobile-more-sheet {
+    animation: slates-sheet-up 300ms var(--ease-emphasis);
+  }
+
+  .mobile-more-row {
+    animation: slates-rise 320ms var(--ease-out) backwards;
+  }
+
+  .mobile-more-row:nth-child(1) {
+    animation-delay: 40ms;
+  }
+  .mobile-more-row:nth-child(2) {
+    animation-delay: 80ms;
+  }
+  .mobile-more-row:nth-child(3) {
+    animation-delay: 120ms;
+  }
+
+  .messages-layout--detail .messages-detail {
+    animation: slates-view-in 260ms var(--ease-out) backwards;
+  }
+
+  .calendar-cell {
+    transition: background 160ms ease, transform 120ms var(--ease-spring);
+  }
+
+  .calendar-cell:active {
+    transform: scale(0.94);
+  }
+}
+
+.notification-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-permission {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.notification-permission--granted {
+  border-color: oklch(0.72 0.13 145 / 0.32);
+  color: var(--good);
+}
+
+.notification-permission--denied {
+  border-color: oklch(0.76 0.13 75 / 0.35);
+  color: var(--warn);
+}
+
+.notification-settings-copy,
+.notification-settings-note,
+.notification-settings-error {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.notification-settings-copy {
+  color: var(--text-2);
+}
+
+.notification-settings-note,
+.notification-unavailable {
+  color: var(--muted);
+}
+
+.notification-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.notification-settings-error {
+  color: var(--warn);
+}
+
+.mobile-network-banner {
+  position: fixed;
+  top: var(--safe-top, 0px);
+  left: 50%;
+  z-index: 100;
+  width: min(calc(100% - 24px), 520px);
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border: 1px solid oklch(0.76 0.13 75 / 0.45);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  background: oklch(0.28 0.025 75 / 0.97);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: var(--shadow-pop);
+}
+
+@keyframes slates-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+/*
+ * 375pt — the iPhone 13 mini, and the narrowest screen Slates is expected to
+ * be legible on. Everything here is a size, not a layout: the arrangement is
+ * already the phone one by this point, it just has 15pt less to work with per
+ * side than a 6.1" phone does.
+ */
+@media (max-width: 390px) {
+  :root {
+    --mobile-gutter: 10px;
+    --mobile-nav-height: 58px;
+  }
+
+  .mobile-nav {
+    padding-inline: 3px;
+  }
+
+  .mobile-nav-item {
+    min-height: 50px;
+    border-radius: 11px;
+    font-size: 9px;
+  }
+
+  .calendar-heading > div:first-child span {
+    font-size: 19px !important;
+  }
+
+  .calendar-heading .btn {
+    padding-inline: 10px;
+  }
+
+  .calendar-cell {
+    min-height: 40px !important;
+  }
+
+  /* A 5.4" screen is where a headline grade and a course name genuinely
+     compete for the same row, so the grade gives up two points first. */
+  .grade-course-score > span {
+    font-size: 19px !important;
+  }
+
+  .grade-course-name {
+    font-size: 14px !important;
+  }
+
+  .grade-category-name,
+  .cat-name {
+    font-size: 12.5px !important;
+  }
+
+  .grade-course-button {
+    column-gap: 8px !important;
+    padding: 14px 12px 9px !important;
+  }
+
+  .card--pad {
+    padding: 14px;
+  }
+
+  /* Tutor: the thread keeps its measure, the chrome around it gives way. */
+  .gpt-header {
+    padding-inline: 4px;
+  }
+
+  .gpt-icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .gpt-greeting {
+    gap: 14px;
+  }
+
+  .gpt-greeting h1 {
+    font-size: 21px;
+  }
+
+  .gpt-starter {
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+
+  .gpt-bubble {
+    max-width: 88%;
+    padding: 10px 15px;
+  }
+
+  .gpt-column {
+    gap: 18px;
+  }
+
+  .gpt-composer {
+    border-radius: 24px;
+    padding: 5px 6px 6px 8px;
+  }
+
+  .gpt-round-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .gpt-send {
+    width: 34px;
+    height: 34px;
+  }
+
+  .gpt-action {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .mobile-more-backdrop,
+  .mobile-more-sheet,
+  .mobile-more-row,
+  .mobile-nav-badge,
+  .mobile-nav-dot,
+  .view-swap,
+  .scroll .card,
+  .board-column,
+  .messages-layout--detail .messages-detail {
+    animation: none;
+  }
+
+  .mobile-nav-item[aria-current="page"] .mobile-nav-icon {
+    transform: none;
+  }
+}
+
+/* ---------- launcher ---------- */
+
+/*
+ * The School / Counselor choice. It owns the whole window — no sidebar, no
+ * topbar — so it carries its own traffic-light clearance in the desktop shell.
+ *
+ * Both names say what they are, so the cards hold a mark and a word and
+ * nothing else. Anything more would be explaining the obvious.
+ */
+.launcher {
+  display: flex;
+  height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 40px 28px;
+  background:
+    radial-gradient(120% 90% at 50% -10%, oklch(0.33 0 0) 0%, transparent 62%),
+    var(--bg);
+  -webkit-app-region: drag;
+}
+
+.launcher-mark {
+  display: flex;
+  opacity: 0.9;
+}
+
+.launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 200px);
+  gap: 16px;
+}
+
+.launcher-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  /* The card is a button inside a draggable region; without this the whole
+     window moves instead of the click landing. */
+  -webkit-app-region: no-drag;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.launcher-card:hover,
+.launcher-card:focus-visible {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  background: var(--hover);
+  box-shadow: var(--shadow-raised), 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--text-2);
+  outline: none;
+}
+
+.launcher-glyph {
+  display: flex;
+}
+
+.launcher-card-title {
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+@media (max-width: 520px) {
+  .launcher-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 380px;
+  }
+}
+
+/* ---------- counselor ---------- */
+
+/*
+ * The counselor half. Same shell geometry as the school side so switching
+ * between them doesn't feel like changing apps; the accent is violet rather
+ * than blue, which is the one signal that says which half you're in.
+ */
+.counselor {
+  --accent: oklch(0.8 0.13 300);
+  --accent-soft: oklch(0.8 0.13 300 / 0.14);
+}
+
+.counselor-rail {
+  display: flex;
+  flex-direction: column;
+  width: 256px;
+  height: 100%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.counselor-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.counselor-brand-mark {
+  display: flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin: -2px -4px 0 0;
+}
+
+.counselor-brand-mark img {
+  transform: translate(2px, -2px);
+  object-fit: contain;
+}
+
+.counselor-brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.counselor-brand-tag {
+  border-radius: 9999px;
+  padding: 2px 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.counselor-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.counselor-nav-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 20px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.counselor-nav-item:hover {
+  color: var(--text);
+}
+
+.counselor-nav-item.is-active {
+  background-image: linear-gradient(180deg, oklch(0.42 0 0) 0%, oklch(0.37 0 0) 100%);
+  box-shadow: var(--shadow-raised);
+  color: var(--text);
+  text-shadow: 0 1px 1px oklch(0 0 0 / 0.4);
+}
+
+.counselor-nav-item.is-active svg {
+  color: var(--accent);
+}
+
+.counselor-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.counselor-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+
+.counselor-rail-foot {
+  border-top: 1px solid var(--line);
+  padding: 8px;
+}
+
+/* The profile row at the foot of the rail. Matches the school sidebar's. */
+.counselor-me {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 20px;
+  padding: 6px 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.counselor-me:hover {
+  background: oklch(1 0 0 / 0.04);
+}
+
+.counselor-me-name {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.counselor-me-sub {
+  margin: 1px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---------- counselor: chat ---------- */
+
+.counselor-chat {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.counselor-chat-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.counselor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 8px;
+}
+
+.counselor-thread {
+  display: flex;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.counselor-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+
+.counselor-row.is-user {
+  align-items: flex-end;
+}
+
+.counselor-row.is-grouped {
+  margin-top: -8px;
+}
+
+.counselor-who {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.counselor-bubble {
+  max-width: 100%;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.counselor-bubble.is-user {
+  max-width: 78%;
+  border-radius: 18px;
+  padding: 9px 14px;
+  background: var(--raised);
+  box-shadow: var(--shadow-card);
+  white-space: pre-wrap;
+}
+
+.counselor-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.counselor-card-chip {
+  display: inline-flex;
+  max-width: 320px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 5px 11px;
+  background: var(--sunken);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.counselor-card-chip:hover:not(.is-static) {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  color: var(--text);
+}
+
+.counselor-card-chip.is-static {
+  cursor: default;
+}
+
+.counselor-card-chip svg {
+  color: var(--accent);
+}
+
+.counselor-chip-tag {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.counselor-error {
+  border: 1px solid color-mix(in oklch, var(--bad) 35%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 9px 13px;
+  background: color-mix(in oklch, var(--bad) 9%, transparent);
+  color: var(--bad);
+  font-size: 12.5px;
+}
+
+/* The working panel. */
+.counselor-activity {
+  display: flex;
+  width: fit-content;
+  min-width: 240px;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 9px 12px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.counselor-activity.is-collapsed {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.counselor-activity.is-collapsed:hover {
+  color: var(--muted);
+}
+
+.counselor-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.counselor-activity-hide {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.counselor-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.counselor-step-dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--line-strong);
+}
+
+.counselor-step.is-run .counselor-step-dot {
+  background: var(--accent);
+  animation: slates-pulse 1.2s ease-in-out infinite;
+}
+
+.counselor-step.is-ok .counselor-step-dot {
+  background: var(--good);
+}
+
+.counselor-step.is-fail .counselor-step-dot {
+  background: var(--bad);
+}
+
+.counselor-step.is-ok,
+.counselor-step.is-fail {
+  color: var(--faint);
+}
+
+.counselor-step-secs {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+@keyframes slates-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Composer. */
+.counselor-composer {
+  display: flex;
+  justify-content: center;
+  padding: 8px 24px 20px;
+}
+
+.counselor-composer-shell {
+  display: flex;
+  width: 100%;
+  max-width: 760px;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 6px 8px 6px 10px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.counselor-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 8px;
+}
+
+.counselor-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counselor-send {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: oklch(0.2 0 0);
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.counselor-send:disabled {
+  background: var(--raised);
+  color: var(--dim);
+  cursor: default;
+}
+
+/* Welcome. */
+.counselor-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 48px 0 12px;
+}
+
+.counselor-welcome h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+
+.counselor-welcome p {
+  margin: 0;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.counselor-openers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.counselor-opener {
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 7px 13px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.counselor-opener:hover {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Thread rail. */
+.counselor-threads {
+  display: flex;
+  width: 216px;
+  flex-shrink: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--surface-faint);
+}
+
+.counselor-threads.is-closed {
+  width: auto;
+  padding: 12px 8px;
+  background: transparent;
+  border-right: 0;
+}
+
+.counselor-threads-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 10px;
+}
+
+.counselor-threads-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.counselor-threads-empty {
+  margin: 8px 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.counselor-thread-row {
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+  transition: background 0.15s;
+}
+
+.counselor-thread-row:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+.counselor-thread-row.is-active {
+  background: var(--raised);
+}
+
+.counselor-thread-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 7px 4px 7px 10px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counselor-thread-row.is-active .counselor-thread-open {
+  color: var(--text);
+}
+
+.counselor-thread-del {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.counselor-thread-row:hover .counselor-thread-del,
+.counselor-task:hover .counselor-thread-del,
+.counselor-memory:hover .counselor-thread-del,
+.counselor-activity-row:hover .counselor-thread-del,
+.counselor-thread-del:focus-visible {
+  opacity: 1;
+}
+
+.counselor-thread-del:hover {
+  color: var(--bad);
+}
+
+/* ---------- counselor: pages ---------- */
+
+.counselor-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.counselor-page-inner {
+  display: flex;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 22px;
+  padding: 26px 24px 48px;
+}
+
+.counselor-section,
+.counselor-group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.counselor-section-head,
+.counselor-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.counselor-group-hint {
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.counselor-section-body,
+.counselor-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.counselor-empty-note {
+  margin: 4px 4px 6px;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.counselor-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 3px 4px 3px 10px;
+  background: var(--sunken);
+}
+
+.counselor-add .bare-field {
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.counselor-date {
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  color-scheme: dark;
+}
+
+.counselor-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-radius: 12px;
+  padding: 7px 6px 7px 8px;
+  transition: background 0.15s;
+}
+
+.counselor-task:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+.counselor-task.is-done .counselor-task-title {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
+.counselor-check {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: oklch(0.2 0 0);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.counselor-check.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.counselor-task-title {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.counselor-task-detail {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.counselor-tag {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  background: var(--sunken);
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.counselor-tag.is-strong {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.counselor-done {
+  margin-top: 4px;
+}
+
+.counselor-done summary {
+  padding: 4px 6px;
+  color: var(--dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.counselor-meeting {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.counselor-meeting-when {
+  flex-shrink: 0;
+  border-radius: 9px;
+  padding: 5px 9px;
+  background: var(--sunken);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.counselor-meeting-topic {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.counselor-meeting-agenda {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.counselor-app {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--sunken);
+}
+
+.counselor-app-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.counselor-app-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.counselor-app-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.counselor-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 2px 8px;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.counselor-item.is-done {
+  border-color: color-mix(in oklch, var(--good) 40%, transparent);
+  color: var(--good);
+}
+
+.counselor-item.is-in_progress {
+  border-color: color-mix(in oklch, var(--warn) 40%, transparent);
+  color: var(--warn);
+}
+
+.counselor-app-recs,
+.counselor-app-left {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.counselor-memory {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 7px 6px 7px 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+  transition: background 0.15s;
+}
+
+.counselor-memory:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+
+/* Sources behind a reply. Library and web read differently on purpose: one is
+   this practice's own written guidance, the other is a page on the internet. */
+.counselor-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.counselor-sources-label {
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.counselor-source {
+  max-width: 220px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 2px 9px;
+  color: var(--faint);
+  font-size: 10.5px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+a.counselor-source:hover {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  color: var(--text-2);
+}
+
+.counselor-source.is-library {
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The counselor's structured question set. */
+.counselor-ask {
+  display: flex;
+  width: 100%;
+  max-width: 520px;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 13px 14px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+/* Answered, or superseded by a later question. Readable, not clickable. */
+.counselor-ask.is-closed {
+  border-color: var(--line);
+  opacity: 0.55;
+}
+
+.counselor-ask-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.counselor-ask-q {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.counselor-ask .btn {
+  align-self: flex-start;
+}
+
+/* ---------- counselor: colleges ---------- */
+
+.counselor-warn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 9px 10px 9px 14px;
+  background: color-mix(in oklch, var(--warn) 8%, transparent);
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.counselor-balance {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.counselor-balance-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 10px 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.counselor-balance-n {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.counselor-balance-l {
+  color: var(--dim);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.counselor-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.counselor-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--sunken);
+  color: var(--dim);
+}
+
+.counselor-search .bare-field {
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.counselor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.counselor-chip {
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 4px 11px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.counselor-chip:hover {
+  color: var(--text);
+}
+
+.counselor-chip.is-on {
+  border-color: color-mix(in oklch, var(--accent) 50%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.counselor-chip-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--line-strong);
+}
+
+.counselor-colleges {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.counselor-college {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.counselor-college.is-listed {
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+}
+
+.counselor-college-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  padding: 10px 12px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counselor-college-head:hover {
+  background: oklch(1 0 0 / 0.02);
+}
+
+.counselor-band {
+  width: 3px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+}
+
+.counselor-college-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.counselor-college-sub {
+  display: block;
+  margin-top: 1px;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.counselor-odds {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.counselor-odds-n {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.counselor-odds-b {
+  font-size: 10.5px;
+}
+
+.counselor-college-body {
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  padding: 11px 12px 12px;
+  background: var(--sunken);
+}
+
+.counselor-college-summary {
+  margin: 0 0 9px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.counselor-factors {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.counselor-factor {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.counselor-factor-label {
+  width: 108px;
+  flex-shrink: 0;
+  font-weight: 550;
+}
+
+.counselor-factor.is-strong .counselor-factor-label { color: var(--good); }
+.counselor-factor.is-weak .counselor-factor-label { color: var(--bad); }
+.counselor-factor.is-neutral .counselor-factor-label { color: var(--muted); }
+
+.counselor-factor-detail {
+  color: var(--faint);
+}
+
+.counselor-college-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.counselor-majors {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counselor-round-picker {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+/* ---------- counselor: documents ---------- */
+
+.counselor-split {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.counselor-list-pane {
+  display: flex;
+  width: 264px;
+  flex-shrink: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--surface-faint);
+}
+
+.counselor-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 10px;
+}
+
+.counselor-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.counselor-doc-row {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 2px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.counselor-doc-row:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+
+.counselor-doc-row.is-active {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.counselor-doc-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.counselor-doc-meta {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.counselor-detail-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.counselor-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 20px;
+}
+
+.counselor-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.counselor-detail-sub {
+  margin: 1px 0 0;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.counselor-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 48px;
+}
+
+.counselor-detail-scroll .prose {
+  max-width: 680px;
+}
+
+.counselor-doc-editor {
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 14px 16px;
+  background: var(--sunken);
+  outline: none;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.counselor-blank {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+/* ---------- counselor: profile form ---------- */
+
+.counselor-form-intro h2 {
+  margin: 0 0 5px;
+  font-size: 20px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+
+.counselor-form-intro p {
+  margin: 0;
+  max-width: 560px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.counselor-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 7px 6px;
+}
+
+.counselor-field-label {
+  display: flex;
+  width: 190px;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 7px;
+  font-size: 13px;
+}
+
+.counselor-field-hint {
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Capped rather than fluid: a name field the width of the window is harder to
+   read than one sized to what goes in it. */
+.counselor-field-control {
+  flex: 1;
+  min-width: 0;
+  max-width: 440px;
+}
+
+.counselor-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 10px;
+  background: var(--sunken);
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  color-scheme: dark;
+  transition: border-color 0.15s;
+}
+
+.counselor-input:focus {
+  border-color: color-mix(in oklch, var(--accent) 50%, transparent);
+}
+
+.counselor-textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.counselor-segmented {
+  display: inline-flex;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px;
+  background: var(--sunken);
+}
+
+.counselor-segmented button {
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.counselor-segmented button.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.counselor-toggle {
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+  padding: 2px;
+  background: var(--sunken);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.counselor-toggle span {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--muted);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.counselor-toggle.is-on {
+  border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+
+.counselor-toggle.is-on span {
+  background: var(--accent);
+  transform: translateX(16px);
+}
+
+
+.counselor-identity {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px;
+}
+
+.counselor-identity-note {
+  margin: 2px 0 0;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.counselor-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.counselor-tier-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 4px 2px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.counselor-tier-key strong {
+  color: var(--faint);
+  font-weight: 600;
+}
+
+
+/* Whether the practice's own guidance is on this machine. */
+.counselor-library {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 11px 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--dim);
+}
+
+.counselor-library.is-ready {
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  color: var(--accent);
+}
+
+.counselor-library svg {
+  margin-top: 2px;
+}
+
+.counselor-library-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.counselor-library-sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.counselor-import-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-xs);
+  padding: 11px 14px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.counselor-import-open:hover {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  background: oklch(1 0 0 / 0.02);
+  color: var(--text-2);
+}
+
+.counselor-import-hint {
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.counselor-import {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 12px 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.counselor-import-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.counselor-import-ok {
+  color: var(--good);
+  font-size: 12px;
+}
+
+.counselor-import-warn {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--warn);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.counselor-year {
+  display: flex;
+  gap: 14px;
+  padding: 5px 6px;
+}
+
+.counselor-year-label {
+  width: 68px;
+  flex-shrink: 0;
+  padding-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.counselor-year-rows {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.counselor-course {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 3px 4px 3px 10px;
+  background: var(--sunken);
+  font-size: 12px;
+}
+
+.counselor-course-term {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.counselor-course-grade {
+  flex-shrink: 0;
+  min-width: 22px;
+  border-radius: 9999px;
+  padding: 2px 7px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.counselor-score-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  font-size: 13px;
+}
+
+/* ---------- counselor: voice ---------- */
+
+.counselor-voice {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 32px 24px;
+}
+
+.counselor-orb-wrap {
+  position: relative;
+  display: flex;
+  width: 168px;
+  height: 168px;
+  align-items: center;
+  justify-content: center;
+}
+
+.counselor-orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, var(--accent) 0%, transparent 72%);
+  opacity: 0.25;
+  will-change: transform, opacity;
+}
+
+.counselor-orb {
+  position: relative;
+  display: block;
+  width: 104px;
+  height: 104px;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at 34% 30%, oklch(0.92 0.06 300) 0%, transparent 55%),
+    linear-gradient(160deg, oklch(0.72 0.16 300) 0%, oklch(0.5 0.15 285) 100%);
+  box-shadow: 0 12px 40px oklch(0.5 0.15 300 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.25);
+}
+
+.counselor-orb.is-listening {
+  box-shadow: 0 12px 40px oklch(0.5 0.15 300 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.25),
+    0 0 0 3px color-mix(in oklch, var(--good) 45%, transparent);
+}
+
+.counselor-voice-status {
+  text-align: center;
+}
+
+.counselor-voice-status p {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.counselor-voice-error {
+  margin-top: 6px !important;
+  color: var(--bad) !important;
+}
+
+.counselor-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--good);
+  animation: slates-pulse 1.6s ease-in-out infinite;
+}
+
+.counselor-voice-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.counselor-call,
+.counselor-mute,
+.counselor-hangup {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 0 20px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.counselor-call {
+  border-color: transparent;
+  background: var(--accent);
+  color: oklch(0.2 0 0);
+}
+
+.counselor-call:disabled {
+  background: var(--raised);
+  color: var(--dim);
+  cursor: default;
+}
+
+.counselor-mute {
+  background: transparent;
+  color: var(--muted);
+}
+
+.counselor-mute.is-on {
+  border-color: color-mix(in oklch, var(--warn) 45%, transparent);
+  color: var(--warn);
+}
+
+.counselor-hangup {
+  border-color: color-mix(in oklch, var(--bad) 40%, transparent);
+  background: color-mix(in oklch, var(--bad) 10%, transparent);
+  color: var(--bad);
+}
+
+.counselor-voice-gate {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.counselor-linkish {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.counselor-transcript {
+  display: flex;
+  width: 100%;
+  max-width: 620px;
+  max-height: 34vh;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.counselor-line {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.counselor-line.is-user {
+  color: var(--muted);
+}
+
+.counselor-line-who {
+  display: block;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.counselor-line.is-user .counselor-line-who {
+  color: var(--dim);
+}
+
+@media (max-width: 900px) {
+  .counselor-threads:not(.is-closed),
+  .counselor-list-pane {
+    display: none;
+  }
+
+  .counselor-balance {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .counselor-field {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .counselor-field-label {
+    width: auto;
+    padding-top: 0;
+  }
+}
+
+/* ---------- counselor: essays ---------- */
+
+.counselor-essay-title {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-left: -5px;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.counselor-essay-title:focus {
+  background: var(--sunken);
+}
+
+.counselor-essay-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 14px 20px;
+  background: var(--surface-faint);
+}
+
+.counselor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 20px;
+}
+
+.counselor-tab {
+  border: 0;
+  border-radius: 9999px;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.counselor-tab:hover {
+  color: var(--text);
+}
+
+.counselor-tab.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/*
+ * The draft itself. A serif face at a comfortable measure, because this is the
+ * one screen in Slates where the student is reading their own prose as prose
+ * rather than scanning an interface.
+ */
+.counselor-essay-editor {
+  width: 100%;
+  min-height: 55vh;
+  max-width: 680px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 20px 24px;
+  background: var(--sunken);
+  outline: none;
+  color: var(--text);
+  font-family: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.counselor-essay-editor:focus {
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+
+.counselor-essay-prompt {
+  max-width: 680px;
+  margin: 0 0 12px;
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.counselor-essay-foot {
+  display: flex;
+  max-width: 680px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.counselor-essay-hint {
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.counselor-review {
+  display: flex;
+  max-width: 680px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.counselor-review-verdict {
+  margin: 0;
+  border-radius: var(--radius-xs);
+  padding: 12px 14px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.counselor-criterion {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 11px 14px;
+  background: var(--surface);
+}
+
+.counselor-criterion-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.counselor-criterion-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+/* One pip per point, so a 3/5 is legible without reading the number. */
+.counselor-criterion-bar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 3px;
+}
+
+.counselor-criterion-bar span {
+  width: 16px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--line-strong);
+}
+
+.counselor-criterion-score {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counselor-criterion-quote {
+  margin: 8px 0 0;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+  color: var(--text-2);
+  font-family: ui-serif, Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.counselor-criterion-fix {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.counselor-review-block {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 11px 14px;
+  background: var(--surface);
+}
+
+.counselor-review-block.is-cut {
+  border-color: color-mix(in oklch, var(--bad) 25%, transparent);
+}
+
+.counselor-review-block ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.counselor-aiscore {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 14px 18px;
+  background: var(--surface);
+}
+
+.counselor-aiscore-n {
+  flex-shrink: 0;
+  font-size: 40px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.counselor-aiscore-label {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.counselor-aiscore-verdict {
+  margin: 3px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.counselor-signal {
+  margin-top: 10px;
+}
+
+.counselor-signal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.counselor-signal-name {
+  width: 132px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.counselor-signal-track {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--line-strong);
+}
+
+.counselor-signal-track span {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+
+.counselor-signal-detail {
+  margin: 3px 0 0 142px;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.counselor-flagged + .counselor-flagged {
+  margin-top: 10px;
+}
+
+.counselor-aiscore-caveat {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.counselor-version {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.counselor-version-when {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.counselor-version-peek {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .counselor-signal-name {
+    width: 100px;
+  }
+  .counselor-signal-detail {
+    margin-left: 110px;
+  }
+}
+
+/* ---------- add-your-own-work dialog ---------- */
+
+.own-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.5);
+  animation: own-fade 0.14s ease;
+}
+
+.own-dialog {
+  width: 100%;
+  max-width: 560px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: own-rise 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.own-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 13px 16px;
+}
+
+.own-head .card-title {
+  flex: 1;
+}
+
+.own-body {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px;
+}
+
+.own-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.own-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.own-hint {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.own-input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: var(--sunken);
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  color-scheme: dark;
+  transition: border-color 0.15s;
+}
+
+.own-input:focus {
+  border-color: var(--ring);
+}
+
+.own-input:disabled {
+  opacity: 0.45;
+}
+
+.own-textarea {
+  height: auto;
+  resize: vertical;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+/* A number and its unit reading as one control, so "30 min" doesn't need a label. */
+.own-with-suffix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.own-with-suffix span {
+  position: absolute;
+  right: 10px;
+  color: var(--dim);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.own-with-suffix .own-input {
+  padding-right: 34px;
+}
+
+.own-segmented {
+  display: flex;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px;
+  background: var(--sunken);
+}
+
+.own-segmented button {
+  flex: 1;
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.own-segmented button.is-on {
+  background: var(--raised);
+  box-shadow: var(--shadow-raised);
+  color: var(--text);
+}
+
+.own-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+@keyframes own-fade {
+  from { opacity: 0; }
+}
+
+@keyframes own-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+}
+
+@media (max-width: 620px) {
+  .own-row {
+    flex-wrap: wrap;
+  }
+  .own-row .own-field {
+    width: auto !important;
+    flex: 1 1 140px;
+  }
+}

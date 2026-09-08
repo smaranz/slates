@@ -1,0 +1,37 @@
+{
+  "name": "slates-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor shell for the Slates student workspace",
+  "scripts": {
+    "sync": "cap sync",
+    "assets": "capacitor-assets generate --ios --android",
+    "doctor": "cap doctor",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "run:ios": "node scripts/require-server.mjs && cap run ios",
+    "run:android": "node scripts/require-server.mjs && cap run android",
+    "check:server": "node scripts/check-server.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.1",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/app-launcher": "^8.0.1",
+    "@capacitor/core": "8.5.1",
+    "@capacitor/ios": "8.5.1",
+    "@capacitor/keyboard": "^8.0.1",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/network": "^8.0.1",
+    "@capacitor/splash-screen": "8.0.1",
+    "@capacitor/status-bar": "8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.5.1",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

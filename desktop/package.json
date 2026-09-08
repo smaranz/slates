@@ -1,0 +1,64 @@
+{
+  "name": "slates-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "SLATES_ATTACH=1 electron .",
+    "build:web": "npm --prefix ../web run build",
+    "dist": "npm run build:web && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.slates.app",
+    "productName": "Slates",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.mjs",
+      "splash.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/.next/standalone",
+        "to": "web"
+      },
+      {
+        "from": "../web/.next/static",
+        "to": "web/.next/static"
+      },
+      {
+        "from": "../web/public",
+        "to": "web/public"
+      },
+      {
+        "from": "../web/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+        "to": "web/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+      },
+      {
+        "from": "../web/node_modules/@cursor/sdk-darwin-arm64",
+        "to": "web/node_modules/@cursor/sdk-darwin-arm64"
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    }
+  }
+}

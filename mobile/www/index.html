@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#252525" />
+    <title>Connect Slates</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: #252525;
+        color: #e7e7e7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: calc(24px + env(safe-area-inset-top)) 22px calc(24px + env(safe-area-inset-bottom));
+        background: #252525;
+      }
+      main { width: min(100%, 420px); text-align: center; }
+      img { width: 78px; height: 78px; border-radius: 20px; }
+      h1 { margin: 20px 0 8px; font-size: 26px; letter-spacing: -.03em; }
+      p { margin: 0; color: #b6b6b6; font-size: 14px; line-height: 1.55; }
+      section {
+        margin-top: 24px;
+        padding: 17px;
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 20px;
+        background: #2e2e2e;
+        text-align: left;
+      }
+      strong { display: block; margin-bottom: 7px; font-size: 14px; }
+      code { color: #d4d4d4; font-size: 12px; overflow-wrap: anywhere; }
+      ol { margin: 12px 0 0; padding-left: 20px; color: #b6b6b6; font-size: 13px; line-height: 1.65; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="assets/slates-icon.png" alt="" />
+      <h1>Slates needs its host</h1>
+      <p>
+        This native shell is installed correctly, but no Slates server URL was
+        configured. The Schoology browser and AI services run on your trusted host,
+        not directly on this phone.
+      </p>
+      <section>
+        <strong>Connect this build</strong>
+        <code>SLATES_MOBILE_SERVER_URL=http://YOUR-MAC-IP:3000 npm run sync</code>
+        <ol>
+          <li>Start the portal with <code>npm run dev:mobile</code>.</li>
+          <li>Keep the Slates server running on that same computer.</li>
+          <li>Sync and rebuild the native project from <code>mobile/</code>.</li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

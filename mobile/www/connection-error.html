@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#252525" />
+    <title>Slates host unavailable</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        background: #252525;
+        color: #e7e7e7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: calc(24px + env(safe-area-inset-top)) 22px calc(24px + env(safe-area-inset-bottom));
+        background: #252525;
+      }
+      main { width: min(100%, 420px); text-align: center; }
+      img { width: 78px; height: 78px; border-radius: 20px; }
+      h1 { margin: 20px 0 8px; font-size: 26px; letter-spacing: -.03em; }
+      p { margin: 0; color: #b6b6b6; font-size: 14px; line-height: 1.55; }
+      section {
+        margin-top: 24px;
+        padding: 17px;
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 20px;
+        background: #2e2e2e;
+        text-align: left;
+      }
+      strong { display: block; margin-bottom: 7px; font-size: 14px; }
+      ul { margin: 0; padding-left: 20px; color: #b6b6b6; font-size: 13px; line-height: 1.65; }
+      button {
+        min-height: 44px;
+        margin-top: 20px;
+        padding: 0 18px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 999px;
+        background: #3a3a3a;
+        color: #e7e7e7;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="assets/slates-icon.png" alt="" />
+      <h1>The Slates host is offline</h1>
+      <p>The app could not reach the private workspace URL saved in this build.</p>
+      <section>
+        <strong>On the host computer, check that:</strong>
+        <ul>
+          <li>the portal is running with its mobile/LAN script,</li>
+          <li>the computer is awake and on the same trusted network, and</li>
+          <li>its address has not changed since the last native sync.</li>
+        </ul>
+      </section>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>
