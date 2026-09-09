@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useMemo } from "react";
 
 import { useCounselor } from "@/lib/counselor/store";
+import { markDesktopShell } from "@/lib/desktop-shell";
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
 import { Avatar, Icon, ICON } from "./ui";
@@ -24,12 +25,11 @@ export default function Sidebar() {
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
-  // header can move out from under them; in a browser tab there is nothing to
-  // avoid. Done on mount rather than during render to keep SSR markup stable.
+  // header can move out from under them; Windows keeps a normal title bar, so
+  // the same padding is skipped. In a browser tab there is nothing to avoid.
+  // Done on mount rather than during render to keep SSR markup stable.
   useEffect(() => {
-    if (navigator.userAgent.includes("Electron")) {
-      document.documentElement.dataset.desktop = "1";
-    }
+    markDesktopShell();
   }, []);
 
   const navs = useMemo<NavDef[]>(() => {

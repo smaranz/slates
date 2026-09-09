@@ -1,9 +1,15 @@
-import { app, BrowserWindow, shell, dialog } from "electron";
+import { app, BrowserWindow, Menu, shell, dialog } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
+
+// Taskbar grouping and notifications on Windows key off this, not the exe name.
+if (IS_WIN) app.setAppUserModelId("com.slates.app");
 
 /**
  * Slates as a desktop app.
@@ -46,8 +52,12 @@ function readUserEnv() {
   }
 }
 
-/** Set by `npm run dev` so the window points at an already-running dev server. */
-const ATTACH = process.env.SLATES_ATTACH === "1";
+/**
+ * Set by `npm run dev` so the window points at an already-running dev server.
+ * `--attach` is the Windows-safe form: `SLATES_ATTACH=1 electron .` is a unix
+ * env prefix and cmd.exe will not parse it.
+ */
+const ATTACH = process.env.SLATES_ATTACH === "1" || process.argv.includes("--attach");
 
 const children = [];
 let win = null;
@@ -56,6 +66,10 @@ function run(name, command, args, cwd) {
   const child = spawn(command, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
+    // Without this, Windows flashes a console for the portal process.
+    windowsHide: true,
+    // `npm` is npm.cmd on Windows; spawn() will not find it without a shell.
+    shell: IS_WIN && command === "npm",
     env: {
       ...process.env,
       ...readUserEnv(),
@@ -74,6 +88,23 @@ function run(name, command, args, cwd) {
   child.on("exit", (code) => console.log(`[${name}] exited (${code})`));
   children.push(child);
   return child;
+}
+
+/**
+ * The portal is its own process (and on Windows, may have spawned children).
+ * `SIGTERM` only kills the one pid, so the Next server would keep the port.
+ */
+function killChild(child) {
+  if (child.killed || child.exitCode != null) return;
+  const pid = child.pid;
+  if (IS_WIN && pid) {
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    return;
+  }
+  child.kill("SIGTERM");
 }
 
 async function answers(port, timeoutMs = 1500) {
@@ -138,12 +169,16 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    // Keep the traffic lights but drop the OS title bar — the app draws its
-    // own chrome, and a stacked title bar would waste a row above it.
-    titleBarStyle: "hiddenInset",
-    // Centre the lights in the 40px strip the sidebar reserves for them.
-    trafficLightPosition: { x: 16, y: 14 },
     backgroundColor: "#1e1e1e",
+    // macOS: frameless with inset traffic lights. Windows/Linux: a normal
+    // title bar, because hiddenInset has no caption buttons there and the
+    // window would have no way to close besides Alt+F4.
+    ...(IS_MAC
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 14 },
+        }
+      : { autoHideMenuBar: true }),
     webPreferences: {
       // Nothing here needs Node — the window just renders the local portal.
       // Keep the renderer sandboxed.
@@ -154,6 +189,17 @@ function createWindow() {
 
   win.once("ready-to-show", () => win?.show());
   win.on("closed", () => (win = null));
+
+  // Stamp the shell flags before React hydrates, so the CSS that clears
+  // traffic lights (mac) vs. a normal title bar (Windows) applies on first paint.
+  const platform = IS_WIN ? "win" : IS_MAC ? "mac" : "linux";
+  win.webContents.on("dom-ready", () => {
+    win?.webContents
+      .executeJavaScript(
+        `document.documentElement.dataset.desktop="1";document.documentElement.dataset.platform=${JSON.stringify(platform)};`
+      )
+      .catch(() => {});
+  });
 
   // Anything that isn't the portal itself belongs in the real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -167,6 +213,10 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Windows would otherwise draw File/Edit/View under the title bar; the
+  // portal has its own chrome. macOS keeps the app menu for Copy/Paste.
+  if (!IS_MAC) Menu.setApplicationMenu(null);
+
   try {
     createWindow();
     await new Promise((r) => setTimeout(r, 50)); // let the first paint land
@@ -210,7 +260,7 @@ app.whenReady().then(async () => {
     // flash — the whole point of the screen is knowing what happened.
     await new Promise((r) => setTimeout(r, 450));
 
-    if (win && !win.isDestroyed()) await win.loadURL(`http://localhost:${PORTAL}`);
+    if (win && !win.isDestroyed()) await win.loadURL(`http://127.0.0.1:${PORTAL}`);
   } catch (e) {
     const message = String(e instanceof Error ? e.message : e);
     boot("step", "portal", "Couldn't start", "failed");
@@ -230,7 +280,7 @@ app.whenReady().then(async () => {
  */
 function shutdown() {
   for (const child of children.splice(0)) {
-    child.kill("SIGTERM");
+    killChild(child);
   }
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 
 import { useCounselor, type CounselorView } from "@/lib/counselor/store";
 import { GRADE_LABEL, profileReady } from "@/lib/counselor/state";
+import { markDesktopShell } from "@/lib/desktop-shell";
 import { useIdentity } from "@/lib/identity";
 import { useMode } from "@/lib/mode";
 import { Avatar, Icon, ICON } from "../ui";
@@ -81,9 +82,7 @@ function CounselorSidebar() {
   const identity = useIdentity();
 
   useEffect(() => {
-    if (navigator.userAgent.includes("Electron")) {
-      document.documentElement.dataset.desktop = "1";
-    }
+    markDesktopShell();
   }, []);
 
   const navs = useMemo<NavDef[]>(() => {

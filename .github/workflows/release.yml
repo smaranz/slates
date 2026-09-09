@@ -104,8 +104,9 @@ jobs:
             damaged", which is Gatekeeper's wording for "not notarised", not a
             real problem with the download).
 
-            **Windows** — download the `.exe`. SmartScreen will warn on an
-            unsigned installer: More info → Run anyway.
+            **Windows** — download `Slates-Setup-*.exe`. It is a per-user NSIS
+            installer (no administrator). SmartScreen will warn on an unsigned
+            installer: More info → Run anyway.
 
             Both need a Schoology API key before they show anything. Settings
             explains where to generate one.
