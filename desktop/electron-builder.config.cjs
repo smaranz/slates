@@ -85,5 +85,20 @@ module.exports = {
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
+    allowElevation: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: "Slates",
+    uninstallDisplayName: "Slates",
+    installerIcon: "build/icon.ico",
+    uninstallerIcon: "build/icon.ico",
+    installerHeaderIcon: "build/icon.ico",
+    runAfterFinish: true,
+    deleteAppDataOnUninstall: false,
+    include: "build/installer.nsh",
+    license: "../LICENSE",
+    // Default is "Slates Setup 0.1.0.exe"; a single token is easier to
+    // attach to a GitHub release and to download on a school machine.
+    artifactName: "${productName}-Setup-${version}.${ext}",
   },
 };

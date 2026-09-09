@@ -4,6 +4,7 @@ import Image from "next/image";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
+import { markDesktopShell } from "@/lib/desktop-shell";
 import { useMode, type Mode } from "@/lib/mode";
 
 /**
@@ -25,11 +26,9 @@ export default function Launcher() {
   const [hovered, setHovered] = useState<Mode | null>(null);
 
   // The traffic lights sit over the top-left in the desktop shell, and this
-  // screen has no sidebar to hold them off.
+  // screen has no sidebar to hold them off. Windows uses a normal title bar.
   useEffect(() => {
-    if (navigator.userAgent.includes("Electron")) {
-      document.documentElement.dataset.desktop = "1";
-    }
+    markDesktopShell();
   }, []);
 
   return (

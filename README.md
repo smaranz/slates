@@ -223,9 +223,14 @@ read until they do.
 ```bash
 cd desktop
 npm install
-npm run dev    # attaches to the Next server you already started
-npm run dist   # packaged build (macOS arm64)
+npm run dev        # attaches to the Next server you already started
+npm run dist:mac   # Apple Silicon .dmg
+npm run dist:win   # Windows x64 installer (.exe)
 ```
+
+The Windows installer is an NSIS setup — per-user, no administrator, Start
+Menu and desktop shortcuts. Same as the `.dmg`, it is unsigned. GitHub
+Actions builds each on its own runner when you push a `v*` tag.
 
 ### Mobile app
 

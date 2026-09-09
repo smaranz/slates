@@ -955,10 +955,11 @@ button {
 }
 
 /*
- * Desktop shell only. The window is frameless with inset traffic lights, so
- * the brand row has to clear them — otherwise the red/yellow/green sit on top
- * of the paperclip. The strip doubles as the window's drag handle, which a
- * frameless window would otherwise lack entirely.
+ * Desktop shell, macOS only. The window is frameless with inset traffic
+ * lights, so the brand row has to clear them — otherwise the red/yellow/green
+ * sit on top of the paperclip. The strip doubles as the window's drag handle,
+ * which a frameless window would otherwise lack entirely. Windows keeps a
+ * normal title bar, so none of this applies there.
  */
 
 /*
@@ -992,7 +993,7 @@ button {
   opacity: 0.7;
 }
 
-:root[data-desktop="1"] .app-brand {
+:root[data-desktop="1"][data-platform="mac"] .app-brand {
   padding-top: 40px;
   -webkit-app-region: drag;
 }
@@ -1001,8 +1002,9 @@ button {
  * The live Schoology viewer is a full-window overlay, so it covers the sidebar
  * strip that normally keeps the inset traffic lights clear. The bar is the
  * title row — sit the label to the right of the lights (x:16, ~54px wide).
+ * Windows keeps a normal title bar, so this offset would just be a hole.
  */
-:root[data-desktop="1"] .schoology-viewer-bar {
+:root[data-desktop="1"][data-platform="mac"] .schoology-viewer-bar {
   padding-left: 64px;
 }
 

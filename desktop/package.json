@@ -6,7 +6,7 @@
   "main": "main.mjs",
   "scripts": {
     "start": "electron .",
-    "dev": "SLATES_ATTACH=1 electron .",
+    "dev": "electron . --attach",
     "build:web": "npm --prefix ../web run build",
     "dist": "npm run build:web && electron-builder --config electron-builder.config.cjs --publish never",
     "dist:mac": "npm run build:web && electron-builder --mac --config electron-builder.config.cjs --publish never",
