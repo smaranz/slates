@@ -1,0 +1,111 @@
+name: Release
+
+# Push a tag to cut a release:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Each platform builds on its own runner. That is not a preference — an NSIS
+# installer cannot be produced on macOS without Wine, and a .dmg cannot be
+# produced anywhere but macOS, so cross-building is not on the table for
+# either of them.
+on:
+  push:
+    tags: ["v*"]
+  # Lets you produce artifacts without publishing anything, to check a build
+  # before it is attached to a real release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not delete the other's artifact.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS (Apple Silicon)
+            script: dist:mac
+            artifact: "desktop/dist/*.dmg"
+          - os: windows-latest
+            name: Windows (x64)
+            script: dist:win
+            artifact: "desktop/dist/*.exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      # The portal is what actually gets packaged; install it on the runner so
+      # the platform-tagged native SDKs resolve for *this* OS rather than
+      # whichever one the lockfile was last written on.
+      - name: Install portal
+        working-directory: web
+        run: npm ci
+
+      - name: Install desktop shell
+        working-directory: desktop
+        run: npm install
+
+      # Retried because electron-builder downloads the Electron binary from
+      # GitHub's release CDN mid-build, and that download is the one step here
+      # that fails for reasons having nothing to do with this repository
+      # ("connection forcibly closed by the remote host"). Three attempts, and
+      # the cached zip means a retry after a partial download is cheap.
+      - name: Build
+        working-directory: desktop
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run ${{ matrix.script }}; then exit 0; fi
+            echo "::warning::build attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          echo "::error::build failed after 3 attempts"
+          exit 1
+        env:
+          # Unsigned. Without this electron-builder tries to discover a signing
+          # identity and fails the build on a runner that has none.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Deliberately no GH_TOKEN here. Given one, electron-builder decides
+          # it is also the thing publishing the release, and then fails asking
+          # for repository metadata. Attaching the files is the next step's job.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slates-${{ runner.os }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+      # Only a tag publishes. A manual run leaves the artifacts on the run.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
+          draft: true
+          generate_release_notes: true
+          body: |
+            Desktop builds of Slates.
+
+            **macOS** — download the `.dmg`. The app is unsigned, so the first
+            launch needs right-click → Open (double-clicking shows "Slates is
+            damaged", which is Gatekeeper's wording for "not notarised", not a
+            real problem with the download).
+
+            **Windows** — download the `.exe`. SmartScreen will warn on an
+            unsigned installer: More info → Run anyway.
+
+            Both need a Schoology API key before they show anything. Settings
+            explains where to generate one.
