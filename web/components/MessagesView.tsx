@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useStore, type SubmitState } from "@/lib/store";
 import type { Recipient } from "@/lib/types";
+import MathText from "./MathText";
 import { Badge, Dot, Spinner } from "./ui";
 
 /**
@@ -47,7 +48,7 @@ export default function MessagesView() {
   const activeCourse = active ? s.courseById(active.courseId) : null;
 
   return (
-    <div className="messages-view" style={{ flex: 1, minHeight: 0, display: "flex", padding: "0 24px 24px" }}>
+    <div className="messages-view" style={{ flex: 1, minHeight: 0, display: "flex", padding: 0 }}>
       <div className={`messages-layout ${active || s.composing ? "messages-layout--detail" : ""}`} style={{ width: "100%", display: "flex", minHeight: 0 }}>
         <div
           className="messages-list"
@@ -164,7 +165,7 @@ export default function MessagesView() {
                   whiteSpace: "pre-wrap",
                 }}
               >
-                {active.body}
+                <MathText text={active.body} />
               </p>
 
               <ReplyBox key={active.id} threadId={active.id} to={active.from} />

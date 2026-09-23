@@ -1,11 +1,12 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * A course's folders, files, pages and links — read through the local scraper,
  * which holds the Schoology session. `path` asks for the file behind a
  * document instead of a folder listing.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;

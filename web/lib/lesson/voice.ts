@@ -3,6 +3,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { activeApiSecret, hasSecret } from "@/lib/ai-usage/clients";
+import { noteUsage } from "@/lib/ai-usage/note";
+
 const execFileP = promisify(execFile);
 
 /**
@@ -22,14 +25,14 @@ const OUTPUT_FORMAT = "mp3_44100_128";
 export class MissingVoiceKeyError extends Error {
   constructor() {
     super(
-      "ElevenLabs isn't connected. Add ELEVENLABS_API_KEY to ~/.slates/.env and restart Slates."
+      "ElevenLabs isn't connected. Link a key in AI Usage, or add ELEVENLABS_API_KEY to .env and restart."
     );
     this.name = "MissingVoiceKeyError";
   }
 }
 
 export function hasVoiceKey(): boolean {
-  return !!process.env.ELEVENLABS_API_KEY;
+  return hasSecret("elevenlabs");
 }
 
 /**
@@ -40,7 +43,7 @@ export function hasVoiceKey(): boolean {
  * failed" sends the student looking in the wrong place.
  */
 export async function speak(text: string, file: string): Promise<number> {
-  const key = process.env.ELEVENLABS_API_KEY;
+  const key = activeApiSecret("elevenlabs");
   if (!key) throw new MissingVoiceKeyError();
 
   const voice = process.env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE;
@@ -68,6 +71,17 @@ export async function speak(text: string, file: string): Promise<number> {
 
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, Buffer.from(await res.arrayBuffer()));
+
+  noteUsage({
+    agent: "narration",
+    model,
+    backend: "elevenlabs",
+    inputTokens: text.length,
+    outputTokens: 0,
+    unit: "characters",
+    covered: false,
+  });
+
   return audioSeconds(file);
 }
 

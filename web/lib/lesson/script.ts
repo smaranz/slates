@@ -1,4 +1,5 @@
-import { openai } from "@ai-sdk/openai";
+import { openaiModel } from "@/lib/ai-usage/clients";
+import { noteFromUsage } from "@/lib/ai-usage/note";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -150,12 +151,13 @@ export async function writeLessonScript({ topic, context, images }: LessonReques
     .filter(Boolean)
     .join("\n");
 
-  const { object } = await generateObject({
-    model: openai("gpt-5.6-sol"),
+  const { object, usage } = await generateObject({
+    model: openaiModel("gpt-5.6-sol"),
     schema: SCRIPT,
     system,
     prompt: `Write a teaching video that explains: ${topic}`,
   });
+  noteFromUsage("lesson", "gpt-5.6-sol", "openai", usage);
 
   // The model is asked for an empty string rather than an omitted field —
   // optional keys are the thing structured output is least reliable about —

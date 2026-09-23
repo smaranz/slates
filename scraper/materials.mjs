@@ -200,6 +200,9 @@ const INLINE = {
   webp: "image/webp",
   svg: "image/svg+xml",
   txt: "text/plain; charset=utf-8",
+  // Word documents are converted to HTML by /api/materials/docx and drawn by
+  // DocumentViewer. Listed here so the app is told it can show one.
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 
 export function inlineTypeFor(ext) {

@@ -1,3 +1,4 @@
+import { activeApiSecret, hasSecret } from "@/lib/ai-usage/clients";
 import { buildCounselorPrompt } from "@/lib/counselor/prompt";
 import type { CounselorState } from "@/lib/counselor/types";
 
@@ -117,15 +118,23 @@ YOU ARE ON A VOICE CALL. Everything above still holds, with these on top:
 - Say numbers the way people say them: "about a fourteen-eighty", "roughly one in five".
 - If they interrupt you, stop and listen. Don't finish the sentence you were on.
 - Open by getting to the point. No "how can I help you today".
-- You cannot write documents on a call. If one is needed, say you'll write it up and have them switch to the typed conversation.
 - Before answering how to do something — an essay, an ask for a recommendation, a summer plan — search the counseling library. Say what it says in your own words; never read a passage aloud.
 - You cannot search the web on a call. For a deadline, a cost, or a current policy, say you'd rather check it than guess, and offer to look it up in the typed conversation.
 `;
 
 export async function POST(req: Request) {
-  const key = process.env.OPENAI_API_KEY;
+  if (!hasSecret("openai")) {
+    return Response.json(
+      { error: "No OpenAI key. Link one in AI Usage, or add OPENAI_API_KEY to .env and restart." },
+      { status: 500 }
+    );
+  }
+  const key = activeApiSecret("openai");
   if (!key) {
-    return Response.json({ error: "No OPENAI_API_KEY set. Add one to web/.env.local and restart." }, { status: 500 });
+    return Response.json(
+      { error: "No OpenAI key. Link one in AI Usage, or add OPENAI_API_KEY to .env and restart." },
+      { status: 500 }
+    );
   }
 
   let state: CounselorState;

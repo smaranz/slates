@@ -39,7 +39,9 @@ function saveCache(entry) {
   }
 }
 
-const PORT = Number(process.env.SLATES_SCRAPER_PORT || 4000);
+// Slates' block; see web/lib/ports.ts.
+const PORTAL_ORIGIN_PORT = Number(process.env.SLATES_PORT || 7528);
+const PORT = Number(process.env.SLATES_SCRAPER_PORT || 7529);
 
 /** How often to re-scrape in the background so new assignments appear on their own. */
 const POLL_MS = Number(process.env.SLATES_POLL_MS || 5 * 60_000);
@@ -118,9 +120,40 @@ async function refresh(reason) {
       `[${new Date().toLocaleTimeString()}] ${reason}: ${now} items / ${payload.stats.courses} courses${delta}`
     );
   } catch (e) {
-    lastSync = { at: Date.now(), ok: false, error: e.message };
+    lastSync = { at: Date.now(), ok: false, error: readableError(e) };
     console.error(`[${new Date().toLocaleTimeString()}] ${reason} failed: ${e.message}`);
   }
+}
+
+/**
+ * A failure worth showing someone.
+ *
+ * Playwright attaches the full Chrome command line twice — once as "Browser
+ * logs" and again as a "Call log" — so a launch failure arrives as about two
+ * kilobytes of flags with the actual cause buried in the first line. That went
+ * straight into the Settings card and filled it with `--disable-field-trial-
+ * config --disable-background-networking …`.
+ *
+ * The first line is the cause. The rest is for the terminal, which still gets
+ * `e.message` in full above.
+ */
+function readableError(e) {
+  const raw = String(e?.message ?? e ?? "Something went wrong.");
+  const head = raw.split("\nBrowser logs:")[0].split("\nCall log:")[0].split("\n")[0].trim();
+
+  // Playwright's own wording for "the browser went away", which for this
+  // profile almost always means it was killed or crashed mid-run.
+  if (/Target page, context or browser has been closed/i.test(head)) {
+    return "Chrome closed part-way through the sync. Try again — if it keeps happening, quit any other copy of the Slates browser first.";
+  }
+  if (/ProcessSingleton|SingletonLock|profile (is|appears to be) in use/i.test(raw)) {
+    return "Another browser is already using the Slates profile. Close it and sync again.";
+  }
+  if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|net::ERR/i.test(head)) {
+    return `Couldn't reach Schoology — ${head}`;
+  }
+
+  return head.length > 300 ? `${head.slice(0, 300)}…` : head;
 }
 
 setInterval(() => void refresh("auto"), POLL_MS);
@@ -146,7 +179,7 @@ function send(res, status, body) {
     "content-length": Buffer.byteLength(json),
     // Only the local portal may call this. The portal normally reaches the
     // scraper server-side via /api/scrape, so this is belt-and-braces.
-    "access-control-allow-origin": "http://localhost:3000",
+    "access-control-allow-origin": `http://localhost:${PORTAL_ORIGIN_PORT}`,
   });
   res.end(json);
 }
@@ -171,7 +204,7 @@ function progressStream(res, streaming) {
           "content-type": "text/event-stream",
           "cache-control": "no-cache, no-transform",
           connection: "keep-alive",
-          "access-control-allow-origin": "http://localhost:3000",
+          "access-control-allow-origin": `http://localhost:${PORTAL_ORIGIN_PORT}`,
         });
       }
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -423,7 +456,7 @@ const server = http.createServer(async (req, res) => {
         "content-type": file.contentType,
         "content-length": file.body.length,
         "cache-control": "private, max-age=300",
-        "access-control-allow-origin": "http://localhost:3000",
+        "access-control-allow-origin": `http://localhost:${PORTAL_ORIGIN_PORT}`,
       });
       return res.end(file.body);
     } catch (e) {
@@ -484,7 +517,7 @@ const server = http.createServer(async (req, res) => {
       "content-type": "text/event-stream",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
-      "access-control-allow-origin": "http://localhost:3000",
+      "access-control-allow-origin": `http://localhost:${PORTAL_ORIGIN_PORT}`,
     });
     // Frames are base64 JPEG, one SSE message each.
     const unsubscribe = attempt.subscribe((frame) => res.write(`data: ${frame}\n\n`));

@@ -63,6 +63,7 @@ export function Spinner({ size = 14 }: { size?: number }) {
 }
 
 export const ICON = {
+  overview: "M3 3h8v8H3zm10 0h8v5h-8zM3 13h8v8H3zm10-3h8v11h-8z",
   search: "M15.4 15.4 L20.5 20.5",
   assignments:
     "M4 2h16v2H4zm0 18h16v2H4zM4 4h2v16H4zm14 0h2v16h-2zM8 7h8v2H8zm0 4h8v2H8zm0 4h5v2H8z",
@@ -77,6 +78,8 @@ export const ICON = {
     "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-1.6-8h3.2l.4 2.6a7.9 7.9 0 0 1 1.9.8l2.2-1.5 2.3 2.3-1.5 2.2c.4.6.6 1.2.8 1.9l2.6.4v3.2l-2.6.4a7.9 7.9 0 0 1-.8 1.9l1.5 2.2-2.3 2.3-2.2-1.5c-.6.4-1.2.6-1.9.8l-.4 2.6h-3.2l-.4-2.6a7.9 7.9 0 0 1-1.9-.8l-2.2 1.5-2.3-2.3 1.5-2.2a7.9 7.9 0 0 1-.8-1.9l-2.6-.4v-3.2l2.6-.4c.2-.7.4-1.3.8-1.9L3.4 5.7l2.3-2.3 2.2 1.5c.6-.4 1.2-.6 1.9-.8z",
   chevronLeft: "M15 6l-6 6 6 6z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  minus: "M5 11h14v2H5z",
+  alert: "M12 2 1 21h22zm-1 6h2v7h-2zm0 9h2v2h-2z",
   file: "M6 2h9l5 5v15H6zm8 1.5V8h4.5z",
   folder: "M2 4h7l2 2h11v14H2zm2 2v2h16v-.01L10.2 8 8.2 6zm0 4v8h16v-8z",
   sync: "M16 4h2v6h-2zm-2-2h2v2h-2zm0 2h2v8h-2zM4 8H2v5h2z",
@@ -213,6 +216,19 @@ export function CursorLogo({ size = 14, style }: { size?: number; style?: CSSPro
       style={style}
       d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"
     />
+  );
+}
+
+/**
+ * opencode's mark: a tall frame whose window is two-thirds filled. The frame
+ * takes the text colour so it reads on either theme; the fill is its grey.
+ */
+export function OpenCodeLogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden style={{ flexShrink: 0, ...style }}>
+      <path fillRule="evenodd" fill="currentColor" d="M4 2.5h12v15H4zM7 5.5v9h6v-9z" />
+      <rect x="7" y="8.5" width="6" height="6" fill="currentColor" opacity="0.4" />
+    </svg>
   );
 }
 

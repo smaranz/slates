@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+import type { Mention } from "./tutor-mentions";
 import type { Attachment } from "./attachments";
 import type { TutorDocument } from "./tutor-documents";
 import type { TutorGraph } from "./tutor-graph";
@@ -29,11 +30,37 @@ const MAX_CHATS = 40;
 /** Streaming updates land per token; the disk doesn't need to see each one. */
 const WRITE_DELAY_MS = 400;
 
+/** One tool the tutor called while answering. */
+export interface TutorStep {
+  label: string;
+  state: "run" | "ok" | "fail";
+  /** Seconds it took, stamped when it returned. */
+  secs?: number;
+}
+
+export interface TutorWork {
+  /** The model's own reasoning, as it exposed it. Empty for models that don't. */
+  reasoning: string;
+  steps: TutorStep[];
+  /**
+   * How long the whole turn took.
+   *
+   * Deliberately the turn and not the sum of the steps: a provider-executed
+   * tool reports back the instant it is called, so adding the step times up
+   * printed "0.1s" beside an answer that had taken ten seconds to arrive.
+   */
+  secs?: number;
+  /** Whether the reply has finished, so a live panel can stop animating. */
+  done?: boolean;
+}
+
 export interface TutorChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   attachments?: Attachment[];
+  /** What the student pointed at with `@` — see lib/tutor-mentions.ts. */
+  mentions?: Mention[];
   /** Human-readable summaries of any board actions this reply took. */
   actions?: string[];
   /** A practice set the tutor built for this reply, if it built one. */
@@ -42,6 +69,15 @@ export interface TutorChatMessage {
   document?: TutorDocument;
   /** A graph the tutor plotted directly in chat (not inside a document or quiz). */
   graph?: TutorGraph;
+  /**
+   * What the tutor did to produce this reply: its reasoning, and the tools it
+   * called with how long each took.
+   *
+   * Kept with the message rather than thrown away when the stream ends, so
+   * scrolling back to an old answer still shows how it was arrived at — which
+   * is most of the value of showing it at all.
+   */
+  work?: TutorWork;
   /**
    * A teaching video the tutor kicked off. Only the id is kept — the script,
    * narration and MP4 live under ~/.slates/lessons, orders of magnitude too
@@ -221,6 +257,11 @@ function subscribe(onChange: () => void) {
 function getSnapshot(): ChatState {
   if (!state) state = load();
   return state;
+}
+
+/** Live messages for a chat — read at send time so a just-finished turn isn't missed before React re-renders. */
+export function peekTutorMessages(chatId: string): TutorChatMessage[] {
+  return getSnapshot().chats.find((c) => c.id === chatId)?.messages ?? [];
 }
 
 /** The prerender has no storage, so it always renders an empty tutor. */

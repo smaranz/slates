@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { generateText } from "ai";
 import { claudeCode } from "ai-sdk-provider-claude-code";
 
+import { activeApiSecret, hasSecret } from "@/lib/ai-usage/clients";
 import { Agent } from "@/lib/cursor-sdk";
 import type { TutorModelBackend } from "@/lib/tutor-models";
 
@@ -11,6 +12,9 @@ import type { TutorModelBackend } from "@/lib/tutor-models";
  * The tutor's four backends, checked independently of any one model: an API
  * key or a CLI login is shared across every model that backend drives, so
  * "is OpenAI connected" answers it for GPT-5.6 Sol, Terra, and Luna at once.
+ *
+ * A key linked in AI Usage counts as configured and is what Test uses — not
+ * only process.env. Provider Test calls are not recorded as usage.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,7 +33,7 @@ interface ProviderStatus {
   backend: ProviderId;
   label: string;
   powers: string;
-  /** Cheap baseline: an env var is set, or the CLI resolves on PATH. Not proof it works. */
+  /** Cheap baseline: an env var / linked key, or the CLI resolves on PATH. Not proof it works. */
   configured: boolean;
   detail: string;
 }
@@ -54,8 +58,8 @@ export async function GET() {
       backend: "openai",
       label: "OpenAI",
       powers: "GPT-5.6 Sol, Terra, Luna",
-      configured: !!process.env.OPENAI_API_KEY,
-      detail: "Reads OPENAI_API_KEY from the environment.",
+      configured: hasSecret("openai"),
+      detail: "Linked in AI Usage, or OPENAI_API_KEY in the environment.",
     },
     {
       backend: "claude-code",
@@ -67,7 +71,7 @@ export async function GET() {
     {
       backend: "cursor-agent",
       label: "Cursor CLI",
-      powers: "Grok 4.6, Composer 2.5",
+      powers: "Grok 4.7, Composer 2.5",
       configured: cursorInstalled,
       /*
        * Only safe under a plain Node process. `@cursor/sdk` loads a native
@@ -83,15 +87,15 @@ export async function GET() {
       backend: "openrouter",
       label: "OpenRouter",
       powers: "DeepSeek, GLM, Qwen, Gemini, MiniMax",
-      configured: !!process.env.OPENROUTER_API_KEY,
-      detail: "Reads OPENROUTER_API_KEY from the environment.",
+      configured: hasSecret("openrouter"),
+      detail: "Linked in AI Usage, or OPENROUTER_API_KEY in the environment.",
     },
     {
       backend: "elevenlabs",
       label: "ElevenLabs",
       powers: "Narration for teaching videos",
-      configured: !!process.env.ELEVENLABS_API_KEY,
-      detail: "Reads ELEVENLABS_API_KEY from the environment.",
+      configured: hasSecret("elevenlabs"),
+      detail: "Linked in AI Usage, or ELEVENLABS_API_KEY in the environment.",
     },
   ];
 
@@ -103,14 +107,16 @@ export async function GET() {
  * from "actually works". An expired CLI login or a revoked key both still
  * look configured; only a live call catches those, which is why this runs on
  * demand from a Test button rather than automatically on every page load.
+ *
+ * Not recorded in the AI Usage ledger — a Test is not real usage.
  */
 export async function POST(req: Request) {
   const { backend } = (await req.json().catch(() => ({}))) as { backend?: ProviderId };
 
   try {
     if (backend === "openai") {
-      const key = process.env.OPENAI_API_KEY;
-      if (!key) throw new Error("OPENAI_API_KEY is not set.");
+      const key = activeApiSecret("openai");
+      if (!key) throw new Error("No OpenAI key linked or set.");
       const res = await fetch("https://api.openai.com/v1/models", {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(8000),
@@ -120,8 +126,8 @@ export async function POST(req: Request) {
     }
 
     if (backend === "openrouter") {
-      const key = process.env.OPENROUTER_API_KEY;
-      if (!key) throw new Error("OPENROUTER_API_KEY is not set.");
+      const key = activeApiSecret("openrouter");
+      if (!key) throw new Error("No OpenRouter key linked or set.");
       const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(8000),
@@ -131,8 +137,8 @@ export async function POST(req: Request) {
     }
 
     if (backend === "elevenlabs") {
-      const key = process.env.ELEVENLABS_API_KEY;
-      if (!key) throw new Error("ELEVENLABS_API_KEY is not set.");
+      const key = activeApiSecret("elevenlabs");
+      if (!key) throw new Error("No ElevenLabs key linked or set.");
       // Listing voices is the cheapest call that still proves the key works.
       const res = await fetch("https://api.elevenlabs.io/v1/voices", {
         headers: { "xi-api-key": key },

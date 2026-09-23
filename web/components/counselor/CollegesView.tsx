@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 import { BAND_META, BAND_ORDER, computeChance, effectiveSat } from "@/lib/counselor/chances";
 import { COLLEGES } from "@/lib/counselor/colleges";
 import { useCounselor } from "@/lib/counselor/store";
+import { useMode } from "@/lib/mode";
 import { profileReady } from "@/lib/counselor/state";
 import type { ChanceBand, College } from "@/lib/counselor/types";
 import { Icon, ICON } from "../ui";
@@ -24,6 +25,7 @@ type Round = "ED" | "EA" | "RD";
 
 export default function CollegesView() {
   const c = useCounselor();
+  const { openSettings } = useMode();
   const [query, setQuery] = useState("");
   const [band, setBand] = useState<ChanceBand | "all">("all");
   const [round, setRound] = useState<Round>("RD");
@@ -68,7 +70,7 @@ export default function CollegesView() {
         {!ready && (
           <div className="counselor-warn">
             These odds are guesses until your profile has a GPA in it.
-            <button type="button" className="btn btn--quiet" onClick={() => c.setView("profile")}>
+            <button type="button" className="btn btn--quiet" onClick={() => openSettings()}>
               Fill it in
             </button>
           </div>

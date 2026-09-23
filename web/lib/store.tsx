@@ -14,7 +14,8 @@ import {
 import { useIdentity } from "./identity";
 import { estimateAssignments } from "./estimate";
 import { normalizeSnapshot } from "./normalize";
-import { emptyOwnWork, isOwnWork, withOwnWork, type OwnWork } from "./own-work";
+import { htmlToPlainText, looksLikeHtml, sanitizeSubmissionHtml, toSubmissionHtml } from "./submission-html";
+import { emptyOwnWork, isOwnWork, toAssignment, withOwnWork, type OwnWork } from "./own-work";
 import { EMPTY_SNAPSHOT, IMPACT_LABEL } from "./demo";
 import { gradeFor, letterFor } from "./grades";
 import { nowLabel } from "./format";
@@ -37,6 +38,7 @@ export type View =
   | "grades"
   | "calendar"
   | "tutor"
+  | "study"
   | "essays"
   | "messages"
   | "settings";
@@ -99,6 +101,14 @@ interface Marks {
    * the snapshot, because a bad scrape must never delete something you typed.
    */
   ownWork: OwnWork[];
+  /**
+   * Gradebook rows you've switched off while playing with a grade, by item id.
+   *
+   * "What if this quiz hadn't counted" is the other half of "what if I'd
+   * scored better on it", and the answer is often the more useful one — it is
+   * how you find out which single assignment is holding a grade down.
+   */
+  excluded: Record<string, true>;
 }
 
 /**
@@ -138,6 +148,7 @@ const NO_MARKS: Marks = {
   buckets: {},
   archived: {},
   ownWork: [],
+  excluded: {},
   // No sweep recorded yet: start from this week's boundary rather than
   // sweeping a first-run board that hasn't had a week to accumulate anything.
   sweptAt: lastSundayReset(),
@@ -170,6 +181,7 @@ function readMarks(raw: string | null): Marks | null {
       archived: typeof p.archived === "object" && p.archived ? p.archived : {},
       sweptAt: typeof p.sweptAt === "number" ? p.sweptAt : lastSundayReset(),
       ownWork: Array.isArray(p.ownWork) ? p.ownWork : [],
+      excluded: typeof p.excluded === "object" && p.excluded ? p.excluded : {},
     };
   } catch {
     return null;
@@ -297,6 +309,10 @@ interface Store {
   assignmentId: string | null;
   openAssignment: (id: string | null) => void;
 
+  /** Gradebook rows switched off in a what-if, by item id. */
+  excluded: Record<string, true>;
+  toggleExcluded: (id: string) => void;
+
   /** Work you added by hand, newest first. */
   ownWork: OwnWork[];
   /** Adds a blank one for a course and returns it, ready to edit. */
@@ -389,6 +405,8 @@ interface Store {
   timeTotals: Record<string, number>;
   activeTimer: string | null;
   toggleTimer: (id: string) => Promise<void>;
+  /** Back to zero. Stops the clock first if this is the one running. */
+  resetTimer: (id: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -435,6 +453,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const [customScores, setCustomScores] = useState<CustomScore[]>([]);
   const [ownWork, setOwnWork] = useState<OwnWork[]>([]);
+  const [excluded, setExcluded] = useState<Record<string, true>>({});
   const [msgRead, setMsgRead] = useState<Record<string, boolean>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyState, setReplyState] = useState<Record<string, SubmitState>>({});
@@ -489,6 +508,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setTimeTotals(marks.timeTotals);
     setCustomScores(marks.customScores);
     setOwnWork(marks.ownWork);
+    setExcluded(marks.excluded);
     setSubmittedAt(marks.submittedAt);
     setAttempts(marks.attempts);
 
@@ -523,6 +543,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             timeTotals,
             customScores,
             ownWork,
+            excluded,
             submittedAt,
             attempts,
             buckets,
@@ -538,7 +559,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pendingMarksWrite.current = write;
     const t = window.setTimeout(write, 300);
     return () => window.clearTimeout(t);
-  }, [status, timeTotals, customScores, ownWork, submittedAt, attempts, buckets, archived, sweptAt]);
+  }, [status, timeTotals, customScores, ownWork, excluded, submittedAt, attempts, buckets, archived, sweptAt]);
 
   // Cache the snapshot after hydration, so the initial demo state can't
   // overwrite a good saved board on first paint.
@@ -710,9 +731,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [snapshot.courses]
   );
 
+  /**
+   * One assignment, wherever it came from.
+   *
+   * Work you added yourself never reaches the snapshot — it is merged into
+   * `board` further down, which this cannot reference because it is declared
+   * after it. Searching only the snapshot meant opening a custom item found
+   * nothing, and the detail view's `if (!a) return null` turned that into a
+   * blank page: the card was on the board, clicking it showed an empty screen,
+   * and no error was raised anywhere.
+   */
   const assignmentById = useCallback(
-    (id: string) => snapshot.assignments.find((a) => a.id === id),
-    [snapshot.assignments]
+    (id: string): Assignment | undefined => {
+      const synced = snapshot.assignments.find((a) => a.id === id);
+      if (synced) return synced;
+      const own = isOwnWork(id) ? ownWork.find((w) => w.id === id) : undefined;
+      return own ? toAssignment(own) : undefined;
+    },
+    [snapshot.assignments, ownWork]
   );
 
   const statusOf = useCallback(
@@ -723,6 +759,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const setStatus = useCallback((id: string, s: Status) => {
     setStatusMap((prev) => ({ ...prev, [id]: s }));
+
+    /*
+     * Finishing something stops its clock.
+     *
+     * The timer used to keep running after you marked the work done, quietly
+     * adding hours to an assignment you had walked away from — and since the
+     * total is what the estimator learns from, a forgotten timer teaches it
+     * that everything takes forever. Done here rather than at each of the
+     * several buttons that can mark work done, so none of them can forget.
+     */
+    if (s === "done") setActiveTimer((current) => (current === id ? null : current));
   }, []);
 
   /**
@@ -753,7 +800,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!a || a.bucket === "done") return;
 
       if (to === "done") {
-        setStatusMap((prev) => ({ ...prev, [id]: "done" }));
+        // Through `setStatus`, not the map directly — dragging a card into
+        // Turned in has to stop its timer for the same reason the button does.
+        setStatus(id, "done");
         return;
       }
       // Dragging back out of Turned in un-ticks it, or it would land in a
@@ -855,6 +904,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ---- work you added yourself ---- */
 
+  const toggleExcluded = useCallback((id: string) => {
+    setExcluded((prev) => {
+      if (prev[id]) {
+        const { [id]: _gone, ...rest } = prev;
+        void _gone;
+        return rest;
+      }
+      return { ...prev, [id]: true };
+    });
+  }, []);
+
   const addOwnWork = useCallback((courseId = "") => {
     const work = emptyOwnWork(courseId);
     setOwnWork((prev) => [work, ...prev]);
@@ -945,8 +1005,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       const body = (text[id] ?? "").trim();
+      /*
+       * Drafts written in the rich editor are already HTML; ones saved before
+       * it existed are plain text and still convert through markdown. Both end
+       * up going through the same whitelist.
+       */
+      const html = body
+        ? sanitizeSubmissionHtml(looksLikeHtml(body) ? body : toSubmissionHtml(body))
+        : "";
       const picked = rawFiles[id] ?? [];
-      if (!body && !picked.length) {
+      /*
+       * An "empty" rich field is not an empty string — contenteditable leaves
+       * `<p><br></p>` behind — so emptiness is judged on the words, not the
+       * markup, or Slates would cheerfully submit a blank paragraph.
+       */
+      const hasWords = Boolean(htmlToPlainText(html).trim());
+      if (!hasWords && !picked.length) {
         mark(id, { phase: "error", message: "Add a response or a file first." });
         return false;
       }
@@ -958,7 +1032,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const res = await fetch("/api/submit", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: a.url, text: body, files, draft }),
+          /*
+           * Schoology stores a submission as HTML, so the markdown is rendered
+           * here rather than in the scraper: the same function drives the
+           * preview, which makes the preview the submitted string rather than
+           * an impression of it. The plain text still goes along — it is what
+           * an upload's comment field takes, and the fallback if TinyMCE never
+           * loads.
+           */
+          body: JSON.stringify({
+            url: a.url,
+            // Schoology's upload tab has a plain comment field rather than an
+            // editor, so a submission with a file attached needs the words
+            // without the markup.
+            text: htmlToPlainText(html) || body,
+            html,
+            files,
+            draft,
+          }),
         });
 
         const out = await readSubmitStream(res, (event) => {
@@ -1321,6 +1412,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [activeTimer, setStatus]
   );
 
+  const resetTimer = useCallback(
+    (id: string) => {
+      setActiveTimer((current) => (current === id ? null : current));
+      setTimeTotals((prev) => {
+        const { [id]: _gone, ...rest } = prev;
+        void _gone;
+        return rest;
+      });
+    },
+    []
+  );
+
   // Local tick so the running timer advances even in demo mode.
   useEffect(() => {
     if (!activeTimer) return;
@@ -1365,6 +1468,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openCourse,
       assignmentId,
       openAssignment,
+      excluded,
+      toggleExcluded,
       ownWork,
       addOwnWork,
       saveOwnWork,
@@ -1426,6 +1531,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       timeTotals,
       activeTimer,
       toggleTimer,
+      resetTimer,
     }),
     [
       board, demoMode, connected, connecting, syncError, syncStats, resync,
@@ -1441,9 +1547,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       replyDrafts, setReplyDraft, replyState, sendReply,
       composing, openCompose, composeTo, addRecipient, removeRecipient,
       composeSubject, composeBody, findRecipients, composeState, sendNewMessage,
-      ownWork, addOwnWork, saveOwnWork, removeOwnWork,
+      ownWork, addOwnWork, saveOwnWork, removeOwnWork, excluded, toggleExcluded,
       studentName, setStudentName,
-      avatar, setAvatar, timeTotals, activeTimer, toggleTimer,
+      avatar, setAvatar, timeTotals, activeTimer, toggleTimer, resetTimer,
     ]
   );
 

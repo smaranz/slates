@@ -1,0 +1,14 @@
+{
+  "name": "slates",
+  "version": "0.1.0",
+  "description": "Slates — start the local homework portal",
+  "private": true,
+  "bin": {
+    "slates": "./bin/slates.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smaranz/slates.git"
+  },
+  "license": "MIT"
+}

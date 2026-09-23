@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
+import DocumentViewer from "./DocumentViewer";
 import { Badge, ClockIcon, Dot, Icon, ICON, Spinner } from "./ui";
 
 /**
@@ -381,9 +382,8 @@ function KindIcon({ kind, tone }: { kind: string; tone: string }) {
  * A file, drawn in the app.
  *
  * The bytes come back through the scraper because they need the Schoology
- * session — this window has no cookies of its own. Chromium draws PDFs and
- * images natively, so anything it can render is handed straight to it, and
- * anything else says so plainly instead of showing an empty frame.
+ * session — this window has no cookies of its own. Everything past that is
+ * DocumentViewer's problem; this only places it under the breadcrumb.
  */
 function FileViewer({
   file,
@@ -396,8 +396,6 @@ function FileViewer({
   trail: Crumb[];
   onCrumb: (index: number) => void;
 }) {
-  const src = `/api/materials/file?path=${encodeURIComponent(file.file)}`;
-
   return (
     <div
       style={{
@@ -411,51 +409,16 @@ function FileViewer({
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <Trail trail={trail} onCrumb={onCrumb} leaf={file.title} />
-        <span style={{ flex: 1 }} />
-        <a
-          className="btn"
-          href={new URL(file.schoologyUrl, `https://${domain}`).href}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ height: 30, textDecoration: "none" }}
-        >
-          <Icon path={ICON.external} size={13} />
-          Open in Schoology
-        </a>
       </div>
 
-      {file.inlineType ? (
-        <iframe
-          src={src}
-          title={file.title}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            width: "100%",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--surface)",
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            fontSize: 13,
-            color: "var(--muted)",
-          }}
-        >
-          Slates can&apos;t draw this kind of file.
-          <a className="btn" href={src} download style={{ height: 32, textDecoration: "none" }}>
-            Download it
-          </a>
-        </div>
-      )}
+      <DocumentViewer
+        key={file.file}
+        path={file.file}
+        title={file.title}
+        inlineType={file.inlineType}
+        schoologyUrl={file.schoologyUrl}
+        domain={domain}
+      />
     </div>
   );
 }

@@ -13,10 +13,11 @@ import {
 
 import { useIdentity } from "../identity";
 import { importRecord, parseRecord } from "./import";
+import { applyPlanOperation, pushRevision, restoreRevision, revisionOf } from "./plan";
 import { applyPatch, emptyState, loadState, newThread, saveState, uid } from "./state";
 import type {
+  CallRecord,
   ChatMessage,
-  CounselorDoc,
   Essay,
   CounselorProfile,
   CounselorState,
@@ -24,6 +25,7 @@ import type {
   Task,
   Thread,
 } from "./types";
+import type { MasterPlan, PlanOperation } from "./plan-types";
 
 /**
  * The counselor's record, held in the browser and written through on change.
@@ -35,11 +37,12 @@ import type {
  */
 
 export type CounselorView =
+  | "overview"
   | "chat"
   | "voice"
   | "essays"
-  | "documents"
   | "plan"
+  | "applications"
   | "colleges"
   | "profile";
 
@@ -55,6 +58,7 @@ interface CounselorStore extends CounselorState {
   openThread: (id: string | null) => void;
   startThread: () => string;
   deleteThread: (id: string) => void;
+  renameThread: (id: string, title: string) => void;
   setMessages: (threadId: string, next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 
   /** Folds a turn's tool edits into the record. */
@@ -66,19 +70,22 @@ interface CounselorStore extends CounselorState {
   addTask: (title: string, dueDate?: string) => void;
   setTaskStatus: (id: string, status: Task["status"]) => void;
   removeTask: (id: string) => void;
-  saveDoc: (doc: CounselorDoc) => void;
-  saveEssay: (essay: Essay) => void;
+  createEssay: (essay: Essay) => void;
+  updateEssay: (essay: Essay) => void;
   removeEssay: (id: string) => void;
+  /** Keeps a finished voice call so it can be read back. */
+  saveCall: (call: CallRecord) => void;
+  removeCall: (id: string) => void;
   /** The essay open in the studio. */
   essayId: string | null;
   openEssay: (id: string | null) => void;
-  removeDoc: (id: string) => void;
   removeMemory: (id: string) => void;
   toggleList: (collegeId: string, round?: "ED" | "EA" | "RD") => void;
-
-  /** The open document in the side panel, if any. */
-  docId: string | null;
-  openDoc: (id: string | null) => void;
+  setMasterPlan: (plan: MasterPlan) => void;
+  applyPlanChange: (operation: PlanOperation, summary: string) => boolean;
+  resolvePlanProposal: (id: string, approve: boolean) => void;
+  createTaskFromPlanStep: (stepId: string) => void;
+  undoPlan: () => void;
 }
 
 const Ctx = createContext<CounselorStore | null>(null);
@@ -93,9 +100,8 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CounselorState>(emptyState);
   const identity = useIdentity();
   const [ready, setReady] = useState(false);
-  const [view, setView] = useState<CounselorView>("chat");
+  const [view, setView] = useState<CounselorView>("overview");
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [docId, setDocId] = useState<string | null>(null);
   const [essayId, setEssayId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -158,8 +164,20 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteThread = useCallback((id: string) => {
-    setState((prev) => ({ ...prev, threads: prev.threads.filter((t) => t.id !== id) }));
-    setThreadId((current) => (current === id ? null : current));
+    setState((prev) => {
+      const threads = prev.threads.filter((t) => t.id !== id);
+      setThreadId((current) => (current === id ? threads[0]?.id ?? null : current));
+      return { ...prev, threads };
+    });
+  }, []);
+
+  const renameThread = useCallback((id: string, title: string) => {
+    const clean = title.trim().slice(0, 80);
+    if (!clean) return;
+    setState((prev) => ({
+      ...prev,
+      threads: prev.threads.map((thread) => thread.id === id ? { ...thread, title: clean } : thread),
+    }));
   }, []);
 
   const setMessages = useCallback(
@@ -219,32 +237,43 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, tasks: prev.tasks.filter((t) => t.id !== id) }));
   }, []);
 
-  const saveDoc = useCallback((doc: CounselorDoc) => {
+  const createEssay = useCallback((essay: Essay) => {
     setState((prev) => ({
       ...prev,
-      documents: prev.documents.some((d) => d.id === doc.id)
-        ? prev.documents.map((d) => (d.id === doc.id ? doc : d))
-        : [doc, ...prev.documents],
+      essays: prev.essays.some((existing) => existing.id === essay.id)
+        ? prev.essays
+        : [essay, ...prev.essays],
     }));
   }, []);
 
-  const saveEssay = useCallback((essay: Essay) => {
+  const updateEssay = useCallback((essay: Essay) => {
     setState((prev) => ({
       ...prev,
-      essays: prev.essays.some((e) => e.id === essay.id)
-        ? prev.essays.map((e) => (e.id === essay.id ? essay : e))
-        : [essay, ...prev.essays],
+      essays: prev.essays.map((existing) => existing.id === essay.id ? essay : existing),
     }));
+  }, []);
+
+  /**
+   * Newest first, and capped at forty.
+   *
+   * A transcript is a few KB, but this record lives in localStorage next to
+   * everything else, and an unbounded log of calls would eventually be the
+   * reason saving a draft starts failing.
+   */
+  const saveCall = useCallback((call: CallRecord) => {
+    setState((prev) => ({
+      ...prev,
+      calls: [call, ...(prev.calls ?? []).filter((c) => c.id !== call.id)].slice(0, 40),
+    }));
+  }, []);
+
+  const removeCall = useCallback((id: string) => {
+    setState((prev) => ({ ...prev, calls: (prev.calls ?? []).filter((c) => c.id !== id) }));
   }, []);
 
   const removeEssay = useCallback((id: string) => {
     setState((prev) => ({ ...prev, essays: prev.essays.filter((e) => e.id !== id) }));
     setEssayId((current) => (current === id ? null : current));
-  }, []);
-
-  const removeDoc = useCallback((id: string) => {
-    setState((prev) => ({ ...prev, documents: prev.documents.filter((d) => d.id !== id) }));
-    setDocId((current) => (current === id ? null : current));
   }, []);
 
   const removeMemory = useCallback((id: string) => {
@@ -261,6 +290,92 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
         ...prev,
         list: [...prev.list.filter((e) => e.collegeId !== collegeId), { collegeId, round, addedAt: Date.now() }],
       };
+    });
+  }, []);
+
+  const setMasterPlan = useCallback((plan: MasterPlan) => {
+    setState((prev) => ({
+      ...prev,
+      masterPlan: plan,
+      planProposals: [],
+      planRevisions: prev.masterPlan
+        ? pushRevision(prev.planRevisions, revisionOf(prev.masterPlan, "Before plan refresh"))
+        : prev.planRevisions,
+    }));
+  }, []);
+
+  const applyPlanChange = useCallback((operation: PlanOperation, summary: string) => {
+    let applied = false;
+    setState((prev) => {
+      if (!prev.masterPlan) return prev;
+      const next = applyPlanOperation(prev.masterPlan, operation);
+      if (!next) return prev;
+      applied = true;
+      return {
+        ...prev,
+        masterPlan: next,
+        planRevisions: pushRevision(prev.planRevisions, revisionOf(prev.masterPlan, summary)),
+      };
+    });
+    return applied;
+  }, []);
+
+  const resolvePlanProposal = useCallback((id: string, approve: boolean) => {
+    setState((prev) => {
+      const proposal = prev.planProposals.find((item) => item.id === id);
+      if (!proposal || proposal.status !== "pending") return prev;
+      const resolved = prev.planProposals.map((item) =>
+        item.id === id ? { ...item, status: approve ? "approved" as const : "rejected" as const, resolvedAt: Date.now() } : item
+      );
+      if (!approve || !prev.masterPlan || proposal.baseVersion !== prev.masterPlan.version) {
+        return { ...prev, planProposals: resolved };
+      }
+      const next = applyPlanOperation(prev.masterPlan, proposal.operation);
+      if (!next) return { ...prev, planProposals: resolved };
+      return {
+        ...prev,
+        masterPlan: next,
+        planProposals: resolved,
+        planRevisions: pushRevision(prev.planRevisions, revisionOf(prev.masterPlan, proposal.summary)),
+      };
+    });
+  }, []);
+
+  const createTaskFromPlanStep = useCallback((stepId: string) => {
+    setState((prev) => {
+      const plan = prev.masterPlan;
+      const step = plan?.nextSteps.find((item) => item.id === stepId);
+      if (!plan || !step || step.taskId || prev.tasks.some((task) => task.planItemId === stepId)) return prev;
+      const now = Date.now();
+      const task: Task = {
+        id: uid(),
+        title: step.title,
+        detail: step.detail,
+        dueDate: step.targetDate,
+        status: "open",
+        source: "plan",
+        category: step.category,
+        planItemId: step.id,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return {
+        ...prev,
+        tasks: [task, ...prev.tasks],
+        masterPlan: {
+          ...plan,
+          nextSteps: plan.nextSteps.map((item) => item.id === stepId ? { ...item, taskId: task.id } : item),
+          updatedAt: now,
+        },
+      };
+    });
+  }, []);
+
+  const undoPlan = useCallback(() => {
+    setState((prev) => {
+      if (!prev.masterPlan || !prev.planRevisions.length) return prev;
+      const [revision, ...rest] = prev.planRevisions;
+      return { ...prev, masterPlan: restoreRevision(revision), planRevisions: rest };
     });
   }, []);
 
@@ -288,6 +403,7 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
       openThread: setThreadId,
       startThread,
       deleteThread,
+      renameThread,
       setMessages,
       merge,
       importFrom,
@@ -295,21 +411,25 @@ export function CounselorProvider({ children }: { children: ReactNode }) {
       addTask,
       setTaskStatus,
       removeTask,
-      saveDoc,
-      saveEssay,
+      createEssay,
+      updateEssay,
       removeEssay,
+      saveCall,
+      removeCall,
       essayId,
       openEssay: setEssayId,
-      removeDoc,
       removeMemory,
       toggleList,
-      docId,
-      openDoc: setDocId,
+      setMasterPlan,
+      applyPlanChange,
+      resolvePlanProposal,
+      createTaskFromPlanStep,
+      undoPlan,
     }),
     [
-      state, profile, ready, identity.ready, view, threadId, thread, startThread, deleteThread, setMessages, merge, importFrom,
-      setProfile, addTask, setTaskStatus, removeTask, saveDoc, removeDoc, removeMemory,
-      toggleList, docId, saveEssay, removeEssay, essayId,
+      state, profile, ready, identity.ready, view, threadId, thread, startThread, deleteThread, renameThread, setMessages, merge, importFrom,
+      setProfile, addTask, setTaskStatus, removeTask, removeMemory, toggleList, createEssay, updateEssay, removeEssay, saveCall, removeCall, essayId,
+      setMasterPlan, applyPlanChange, resolvePlanProposal, createTaskFromPlanStep, undoPlan,
     ]
   );
 

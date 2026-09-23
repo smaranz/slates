@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo } from "react";
 
+import { inScope } from "@/lib/counselor/essays";
 import { useCounselor } from "@/lib/counselor/store";
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
@@ -19,8 +20,10 @@ export default function Sidebar() {
   const s = useStore();
   // Essays live in the counselor's record but are written on the school side,
   // so the count comes from there.
-  const essayCount = useCounselor().essays.length;
-  const { clear } = useMode();
+  // Scoped, or the badge reads "1" over a list the student is being told is
+  // empty — the two halves keep separate essays.
+  const essayCount = useCounselor().essays.filter(inScope("school")).length;
+  const { clear, openSettings } = useMode();
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
@@ -44,9 +47,9 @@ export default function Sidebar() {
       { label: "Grades", path: ICON.grades, view: "grades", count: 0 },
       { label: "Calendar", path: ICON.calendar, view: "calendar", count: 0 },
       { label: "Tutor", path: ICON.tutor, view: "tutor", count: 0 },
+      { label: "Study", path: ICON.bands, view: "study", count: 0 },
       { label: "Essays", path: ICON.essay, view: "essays", count: essayCount },
       { label: "Messages", path: ICON.messages, view: "messages", count: unread },
-      { label: "Settings", path: ICON.settings, view: "settings", count: 0 },
     ];
   }, [s, essayCount]);
 
@@ -167,8 +170,8 @@ export default function Sidebar() {
       <div style={{ borderTop: "1px solid var(--line)", padding: 8 }}>
         <button
           type="button"
-          onClick={() => s.setNav("Settings", "settings")}
-          aria-label="Open profile settings"
+          onClick={openSettings}
+          aria-label="Open settings"
           style={{
             display: "flex",
             alignItems: "center",

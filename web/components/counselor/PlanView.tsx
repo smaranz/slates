@@ -1,241 +1,246 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { motion } from "motion/react";
+import { useState } from "react";
 
+import { planFingerprint } from "@/lib/counselor/plan";
+import { STRATEGY_AREAS, type MasterPlan, type PlanRecommendation, type StrategyArea } from "@/lib/counselor/plan-types";
+import { profileReady } from "@/lib/counselor/state";
 import { useCounselor } from "@/lib/counselor/store";
-import { daysUntil, useToday } from "@/lib/counselor/today";
-import { APPLICATION_ITEMS, APPLICATION_ITEM_LABEL, type Task } from "@/lib/counselor/types";
-import { Icon, ICON } from "../ui";
+import { useCounselorModel, useCounselorThinking } from "@/lib/use-counselor-model";
+import { Icon, ICON, Spinner } from "../ui";
 
-/**
- * The plan: what's next, what's booked, what the counselor remembers, and
- * where every application stands.
- *
- * All four are records the counselor writes to during a conversation, so this
- * is where you check its work. Everything here is editable by hand — a
- * counselor that can add a task you can't delete is a counselor you stop
- * trusting.
- */
+const TABS = ["overview", "colleges", "roadmap", "strategy", "projects"] as const;
+type PlanTab = (typeof TABS)[number];
+
+const TAB_LABEL: Record<PlanTab, string> = {
+  overview: "Overview",
+  colleges: "Colleges",
+  roadmap: "Roadmap",
+  strategy: "Strategy",
+  projects: "Projects",
+};
+
+const STRATEGY_LABEL: Record<StrategyArea, string> = {
+  courses: "Courses",
+  rigor: "Rigor",
+  testing: "Testing",
+  activities: "Activities",
+  leadership: "Leadership",
+  summer: "Summer",
+  opportunities: "Opportunities",
+  community: "Community impact",
+};
 
 export default function PlanView() {
-  const c = useCounselor();
-  const today = useToday();
-  const [draft, setDraft] = useState("");
-  const [due, setDue] = useState("");
+  const counselor = useCounselor();
+  const [model] = useCounselorModel();
+  const [thinking] = useCounselorThinking();
+  const [tab, setTab] = useState<PlanTab>("overview");
+  const [building, setBuilding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const plan = counselor.masterPlan;
+  const stale = Boolean(plan && plan.generator.dataFingerprint !== planFingerprint(counselor));
+  const pendingProposals = counselor.planProposals.filter((proposal) => proposal.status === "pending");
 
-  const { open, done } = useMemo(() => {
-    const byDue = (a: Task, b: Task) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999");
-    return {
-      open: c.tasks.filter((t) => t.status === "open").sort(byDue),
-      done: c.tasks.filter((t) => t.status !== "open"),
-    };
-  }, [c.tasks]);
-
-  const meetings = c.meetings.filter((m) => m.status === "scheduled");
+  async function buildPlan() {
+    if (building) return;
+    setBuilding(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/counselor/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model,
+          thinking,
+          state: {
+            schemaVersion: 2,
+            profile: counselor.profile,
+            memories: counselor.memories,
+            tasks: counselor.tasks,
+            meetings: counselor.meetings,
+            applications: counselor.applications,
+            list: counselor.list,
+            coursework: counselor.coursework,
+            testing: counselor.testing,
+            awards: counselor.awards,
+            essays: counselor.essays,
+            threads: [],
+            masterPlan: counselor.masterPlan,
+            planProposals: counselor.planProposals,
+            planRevisions: [],
+          },
+        }),
+      });
+      const result = await response.json() as { plan?: MasterPlan; error?: string };
+      if (!response.ok || !result.plan) throw new Error(result.error ?? "The plan could not be built.");
+      counselor.setMasterPlan(result.plan);
+      setTab("overview");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The plan could not be built.");
+    } finally {
+      setBuilding(false);
+    }
+  }
 
   return (
-    <div className="counselor-page">
-      <div className="counselor-page-inner">
-        <Section title="Next steps" count={open.length}>
-          <form
-            className="counselor-add"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const title = draft.trim();
-              if (!title) return;
-              c.addTask(title, due || undefined);
-              setDraft("");
-              setDue("");
-            }}
-          >
-            <input
-              className="bare-field"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Add a step"
-              aria-label="Add a step"
-            />
-            <input
-              className="counselor-date"
-              type="date"
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-              aria-label="Due date"
-            />
-            <button type="submit" className="icon-btn" style={{ width: 28, height: 28 }} aria-label="Add">
-              <Icon path={ICON.plus} size={13} />
+    <div className="master-plan-page">
+      <header className="master-plan-header">
+        <div>
+          <p className="master-plan-eyebrow">Strategic college plan</p>
+          <div className="master-plan-title-row">
+            <h1>{counselor.profile.name ? `${counselor.profile.name.split(" ")[0]}'s plan` : "Your plan"}</h1>
+            {plan && <span className="master-plan-version">v{plan.version}</span>}
+            {stale && <span className="master-plan-status">Profile changed</span>}
+          </div>
+          <p className="master-plan-subtitle">
+            {plan ? `Built from ${plan.generator.basis}.` : "A grade-aware roadmap built from your full Slates record."}
+          </p>
+        </div>
+        <div className="master-plan-actions">
+          {plan && counselor.planRevisions.length > 0 && (
+            <button type="button" className="btn btn--quiet" onClick={counselor.undoPlan}>Undo last plan change</button>
+          )}
+          <button type="button" className="btn master-plan-build" onClick={() => void buildPlan()} disabled={building || !profileReady(counselor.profile)}>
+            {building ? <><Spinner size={12} /> Building plan</> : plan ? "Refresh plan" : "Build my plan"}
+          </button>
+        </div>
+      </header>
+
+      {plan && (
+        <nav className="master-plan-tabs" aria-label="Plan sections">
+          {TABS.map((item) => (
+            <button key={item} type="button" aria-current={tab === item ? "page" : undefined} onClick={() => setTab(item)}>
+              {TAB_LABEL[item]}
             </button>
-          </form>
-
-          {open.length === 0 && <p className="counselor-empty-note">Nothing open.</p>}
-          {open.map((t) => (
-            <TaskRow key={t.id} task={t} today={today} />
           ))}
-
-          {done.length > 0 && (
-            <details className="counselor-done">
-              <summary>{done.length} finished</summary>
-              {done.map((t) => (
-                <TaskRow key={t.id} task={t} today={today} />
-              ))}
-            </details>
-          )}
-        </Section>
-
-        <Section title="Check-ins" count={meetings.length}>
-          {meetings.length === 0 && (
-            <p className="counselor-empty-note">
-              None booked. Ask the counselor to schedule your next one.
-            </p>
-          )}
-          {meetings.map((m) => (
-            <div key={m.id} className="counselor-meeting">
-              <span className="counselor-meeting-when">
-                {new Date(m.scheduledFor).toLocaleString([], {
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <p className="counselor-meeting-topic truncate">{m.topic}</p>
-                {m.agenda && <p className="counselor-meeting-agenda">{m.agenda}</p>}
-              </div>
-              <button
-                type="button"
-                className="btn btn--quiet"
-                onClick={() => c.setView(m.mode === "voice" ? "voice" : "chat")}
-              >
-                <Icon path={m.mode === "voice" ? ICON.mic : ICON.tutor} size={13} />
-                Start
-              </button>
-            </div>
-          ))}
-        </Section>
-
-        <Section title="Applications" count={c.applications.length}>
-          {c.applications.length === 0 && (
-            <p className="counselor-empty-note">
-              Nothing tracked. Tell the counselor which schools you&apos;re committing to and it
-              opens the tracker.
-            </p>
-          )}
-          {c.applications.map((a) => {
-            const outstanding = APPLICATION_ITEMS.filter((k) => (a.items[k] ?? "todo") === "todo");
-            const days = daysUntil(a.deadline, today);
-            return (
-              <div key={a.id} className="counselor-app">
-                <div className="counselor-app-head">
-                  <span className="counselor-app-name truncate">{a.collegeName}</span>
-                  <span className="counselor-tag">{a.round}</span>
-                  {a.deadline && (
-                    <span
-                      className="counselor-tag"
-                      style={days != null && days <= 21 ? { color: "var(--warn)" } : undefined}
-                    >
-                      {days != null && days >= 0 ? `${days}d left` : a.deadline}
-                    </span>
-                  )}
-                  {a.decision !== "pending" && <span className="counselor-tag is-strong">{a.decision}</span>}
-                </div>
-                <div className="counselor-app-items">
-                  {APPLICATION_ITEMS.filter((k) => (a.items[k] ?? "todo") !== "na").map((k) => {
-                    const state = a.items[k] ?? "todo";
-                    return (
-                      <span key={k} className={`counselor-item is-${state}`}>
-                        {state === "done" && <Icon path={ICON.check} size={9} />}
-                        {APPLICATION_ITEM_LABEL[k]}
-                      </span>
-                    );
-                  })}
-                </div>
-                {a.recommenders.length > 0 && (
-                  <p className="counselor-app-recs">
-                    Recommenders:{" "}
-                    {a.recommenders.map((r) => `${r.name}${r.status === "received" ? " ✓" : ""}`).join(", ")}
-                  </p>
-                )}
-                {outstanding.length > 0 && (
-                  <p className="counselor-app-left">{outstanding.length} things still outstanding</p>
-                )}
-              </div>
-            );
-          })}
-        </Section>
-
-        <Section title="What it remembers" count={c.memories.length}>
-          {c.memories.length === 0 && (
-            <p className="counselor-empty-note">
-              Nothing yet. It saves things as it learns them — and you can delete any of them.
-            </p>
-          )}
-          {[...c.memories]
-            .sort((a, b) => b.importance - a.importance || b.updatedAt - a.updatedAt)
-            .map((m) => (
-              <div key={m.id} className="counselor-memory">
-                <span className="counselor-tag">{m.kind}</span>
-                <span style={{ flex: 1, minWidth: 0 }}>{m.content}</span>
-                <button
-                  type="button"
-                  className="counselor-thread-del"
-                  onClick={() => c.removeMemory(m.id)}
-                  aria-label="Forget this"
-                >
-                  <Icon path={ICON.close} size={12} />
-                </button>
-              </div>
-            ))}
-        </Section>
-      </div>
-    </div>
-  );
-}
-
-function TaskRow({ task, today }: { task: Task; today: string }) {
-  const c = useCounselor();
-  const overdue = task.status === "open" && Boolean(task.dueDate) && Boolean(today) && task.dueDate! < today;
-
-  return (
-    <div className={`counselor-task${task.status !== "open" ? " is-done" : ""}`}>
-      <button
-        type="button"
-        className={`counselor-check${task.status === "done" ? " is-on" : ""}`}
-        onClick={() => c.setTaskStatus(task.id, task.status === "done" ? "open" : "done")}
-        aria-label={task.status === "done" ? "Reopen" : "Mark done"}
-      >
-        {task.status === "done" && <Icon path={ICON.check} size={10} />}
-      </button>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <p className="counselor-task-title">{task.title}</p>
-        {task.detail && <p className="counselor-task-detail">{task.detail}</p>}
-      </div>
-      {task.dueDate && (
-        <span className="counselor-tag" style={overdue ? { color: "var(--bad)" } : undefined}>
-          {new Date(`${task.dueDate}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}
-        </span>
+        </nav>
       )}
-      <button
-        type="button"
-        className="counselor-thread-del"
-        onClick={() => c.removeTask(task.id)}
-        aria-label="Delete"
-      >
-        <Icon path={ICON.close} size={12} />
-      </button>
+
+      <main className="master-plan-body">
+        {error && <div className="counselor-error">{error}</div>}
+        {building && <PlanBuilding />}
+        {!building && !plan && <PlanEmpty ready={profileReady(counselor.profile)} onBuild={() => void buildPlan()} />}
+        {!building && plan && (
+          <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
+            {pendingProposals.length > 0 && tab === "overview" && (
+              <ProposalList proposals={pendingProposals} version={plan.version} onResolve={counselor.resolvePlanProposal} />
+            )}
+            {tab === "overview" && <PlanOverview plan={plan} counselor={counselor} />}
+            {tab === "colleges" && <PlanColleges plan={plan} />}
+            {tab === "roadmap" && <PlanRoadmap plan={plan} />}
+            {tab === "strategy" && <PlanStrategy plan={plan} />}
+            {tab === "projects" && <PlanProjects plan={plan} onSelect={(projectId) => counselor.applyPlanChange({ type: "select-project", projectId }, "Changed selected project")} />}
+          </motion.div>
+        )}
+      </main>
     </div>
   );
 }
 
-function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+function PlanBuilding() {
   return (
-    <section className="counselor-section">
-      <div className="counselor-section-head">
-        <span className="section-label">{title}</span>
-        {count != null && count > 0 && <span className="counselor-count">{count}</span>}
-      </div>
-      <div className="counselor-section-body">{children}</div>
+    <section className="master-plan-building" aria-live="polite">
+      <Spinner size={15} />
+      <div><strong>Building the plan from your record</strong><span>The counselor is evaluating timing, positioning, colleges, and next steps.</span></div>
     </section>
   );
+}
+
+function PlanEmpty({ ready, onBuild }: { ready: boolean; onBuild: () => void }) {
+  return (
+    <section className="master-plan-empty">
+      <span className="master-plan-index">01</span>
+      <h2>{ready ? "Turn your record into a strategy." : "Complete the core profile first."}</h2>
+      <p>{ready ? "The plan separates long-term strategy from the work you need to do now, then keeps both connected." : "Add your name and GPA in settings so the first plan has enough evidence to be useful."}</p>
+      <div className="master-plan-empty-grid">
+        <span>Positioning</span><span>College balance</span><span>Year-by-year roadmap</span><span>Activity strategy</span><span>Project direction</span>
+      </div>
+      <button type="button" className="btn master-plan-build" disabled={!ready} onClick={onBuild}>Build my plan</button>
+    </section>
+  );
+}
+
+function PlanOverview({ plan, counselor }: { plan: MasterPlan; counselor: ReturnType<typeof useCounselor> }) {
+  return (
+    <div className="master-plan-stack">
+      <PlanSection number="01" title="Student profile"><p className="master-plan-lede">{plan.evaluation.profileSummary}</p></PlanSection>
+      <PlanSection number="02" title="Where you stand">
+        <div className="master-plan-positions">
+          <Position label="Academic position" position={plan.evaluation.academic} />
+          <Position label="Extracurricular position" position={plan.evaluation.extracurricular} />
+        </div>
+      </PlanSection>
+      <PlanSection number="03" title="Advantages and risks">
+        <div className="master-plan-columns">
+          <BulletList title="Strongest advantages" items={plan.evaluation.advantages} />
+          <BulletList title="Gaps and risks" items={plan.evaluation.risks} tone="warn" />
+        </div>
+      </PlanSection>
+      <PlanSection number="04" title="Admissions narrative">
+        <div className="master-plan-narratives">
+          {plan.evaluation.narrativeThemes.map((theme) => (
+            <article key={theme.id}><h3>{theme.title}</h3><p>{theme.direction}</p><small>{theme.evidence.join(" · ")}</small></article>
+          ))}
+        </div>
+      </PlanSection>
+      <PlanSection number="05" title="Current priorities">
+        <div className="master-plan-next-steps">
+          {plan.nextSteps.map((step) => {
+            const linked = Boolean(step.taskId || counselor.tasks.some((task) => task.planItemId === step.id));
+            return (
+              <article key={step.id}>
+                <div><span>{step.category.replaceAll("-", " ")}</span><h3>{step.title}</h3>{step.detail && <p>{step.detail}</p>}</div>
+                <div className="master-plan-next-action">{step.targetDate && <time>{step.targetDate}</time>}<button type="button" className="btn btn--quiet" disabled={linked} onClick={() => counselor.createTaskFromPlanStep(step.id)}>{linked ? "In tasks" : "Add to tasks"}</button></div>
+              </article>
+            );
+          })}
+        </div>
+      </PlanSection>
+    </div>
+  );
+}
+
+function PlanColleges({ plan }: { plan: MasterPlan }) {
+  return <div className="master-plan-stack">{(["reach", "target", "likely"] as const).map((category, index) => {
+    const colleges = plan.colleges.filter((college) => college.category === category);
+    return <PlanSection key={category} number={`0${index + 1}`} title={`${category[0].toUpperCase()}${category.slice(1)} schools`}><div className="master-plan-colleges">{colleges.length ? colleges.sort((a, b) => b.priority - a.priority).map((college) => <article key={college.id}><header><h3>{college.name}</h3><span>Priority {college.priority}/5</span></header><p>{college.fit}</p><dl><div><dt>Watch</dt><dd>{college.weakness}</dd></div><div><dt>Next</dt><dd>{college.nextAction}</dd></div></dl></article>) : <p className="master-plan-muted">No schools in this category yet.</p>}</div></PlanSection>;
+  })}</div>;
+}
+
+function PlanRoadmap({ plan }: { plan: MasterPlan }) {
+  return <div className="master-plan-stack"><PlanSection number="01" title="Year-by-year plan"><PeriodList periods={plan.roadmap.years} /></PlanSection><PlanSection number="02" title="Term-by-term actions"><PeriodList periods={plan.roadmap.terms} /></PlanSection></div>;
+}
+
+function PeriodList({ periods }: { periods: MasterPlan["roadmap"]["years"] }) {
+  return <div className="master-plan-timeline">{periods.map((period) => <article key={period.id}><div className="master-plan-period"><h3>{period.label}</h3>{period.focus && <p>{period.focus}</p>}</div><div className="master-plan-milestones">{period.milestones.map((milestone) => <div key={milestone.id}><span className={`master-plan-dot is-${milestone.status}`} /><div><strong>{milestone.title}</strong>{milestone.detail !== milestone.title && <p>{milestone.detail}</p>}</div></div>)}</div></article>)}</div>;
+}
+
+function PlanStrategy({ plan }: { plan: MasterPlan }) {
+  return <div className="master-plan-stack">{STRATEGY_AREAS.map((area, index) => <PlanSection key={area} number={String(index + 1).padStart(2, "0")} title={STRATEGY_LABEL[area]}><RecommendationList rows={plan.strategy[area]} /></PlanSection>)}</div>;
+}
+
+function RecommendationList({ rows }: { rows: PlanRecommendation[] }) {
+  return <div className="master-plan-recommendations">{rows.map((row) => <article key={row.id}><h3>{row.title}</h3><p>{row.why}</p><dl><div><dt>Impact</dt><dd>{row.impact}</dd></div><div><dt>Next action</dt><dd>{row.nextAction}</dd></div><div><dt>Timing</dt><dd>{row.timeframe}</dd></div><div><dt>Measure</dt><dd>{row.measure}</dd></div></dl></article>)}</div>;
+}
+
+function PlanProjects({ plan, onSelect }: { plan: MasterPlan; onSelect: (id: string | null) => void }) {
+  return <div className="master-plan-stack"><PlanSection number="01" title="Passion-project direction"><div className="master-plan-projects">{plan.projects.ideas.map((project) => { const selected = project.id === plan.projects.selectedProjectId; return <button key={project.id} type="button" aria-pressed={selected} onClick={() => onSelect(selected ? null : project.id)}><span>{selected ? "Selected" : "Choose project"}</span><h3>{project.title}</h3><p>{project.concept}</p><dl><div><dt>Why it fits</dt><dd>{project.whyItFits}</dd></div><div><dt>First step</dt><dd>{project.firstStep}</dd></div><div><dt>Evidence</dt><dd>{project.evidenceOfImpact}</dd></div></dl></button>; })}</div></PlanSection><PlanSection number="02" title="Essay positioning"><BulletList title="Themes to carry forward" items={plan.projects.essayPositioning} /></PlanSection>{plan.missingInfo.length > 0 && <PlanSection number="03" title="Information still needed"><BulletList title="Resolve these before the next refresh" items={plan.missingInfo} tone="warn" /></PlanSection>}</div>;
+}
+
+function ProposalList({ proposals, version, onResolve }: { proposals: ReturnType<typeof useCounselor>["planProposals"]; version: number; onResolve: (id: string, approve: boolean) => void }) {
+  return <section className="master-plan-proposals"><header><span className="master-plan-index">Review</span><h2>Plan changes awaiting your decision</h2></header>{proposals.map((proposal) => <article key={proposal.id}><div><h3>{proposal.summary}</h3><p>{proposal.reason}</p><small>{proposal.evidence}</small>{proposal.baseVersion !== version && <span className="master-plan-conflict">Plan changed since this was proposed</span>}</div><div><button type="button" className="btn btn--quiet" onClick={() => onResolve(proposal.id, false)}>Reject</button><button type="button" className="btn master-plan-build" disabled={proposal.baseVersion !== version} onClick={() => onResolve(proposal.id, true)}>Approve</button></div></article>)}</section>;
+}
+
+function PlanSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
+  return <section className="master-plan-section"><header><span className="master-plan-index">{number}</span><h2>{title}</h2></header><div className="master-plan-section-body">{children}</div></section>;
+}
+
+function Position({ label, position }: { label: string; position: MasterPlan["evaluation"]["academic"] }) {
+  return <article><span>{label}</span><strong>{position.rating}</strong><p>{position.summary}</p><ul>{position.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul></article>;
+}
+
+function BulletList({ title, items, tone }: { title: string; items: string[]; tone?: "warn" }) {
+  return <div className={`master-plan-bullets${tone ? ` is-${tone}` : ""}`}><h3>{title}</h3><ul>{items.map((item) => <li key={item}><Icon path={ICON.check} size={11} /><span>{item}</span></li>)}</ul></div>;
 }

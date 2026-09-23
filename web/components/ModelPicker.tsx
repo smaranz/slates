@@ -80,7 +80,7 @@ function CreatorLogo({
 function triggerLabel(id: TutorModelId, thinking: ThinkingLevel): string {
   const grok = tutorModelGrok(id);
   if (grok) {
-    return `Grok 4.6 · ${THINKING_LABEL[grok.thinking]}${grok.fast ? " Fast" : ""}`;
+    return `Grok 4.7 · ${THINKING_LABEL[grok.thinking]}${grok.fast ? " Fast" : ""}`;
   }
   const composer = tutorModelComposer(id);
   if (composer) return `Composer 2.5${composer.fast ? " · Fast" : ""}`;
@@ -331,7 +331,7 @@ function GrokRow({
   onHover: (kind: HoverKind, rect: DOMRect) => void;
   onLeave: () => void;
 }) {
-  const selected = tutorModelCreator(value) === "xai";
+  const selected = tutorModelGrok(value) !== undefined;
   const current = tutorModelGrok(value) ?? draft;
 
   return (
@@ -358,9 +358,9 @@ function GrokRow({
         textAlign: "left",
       }}
     >
-      <XaiLogo size={15} style={{ color: "var(--text-2)" }} />
+      <CursorLogo size={15} style={{ color: "var(--text-2)" }} />
       <span style={{ flex: 1, minWidth: 0 }}>
-        Grok 4.6
+        Grok 4.7
         <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>
           {THINKING_LABEL[current.thinking]} thinking{current.fast ? ", fast" : ""}
         </span>
@@ -429,6 +429,7 @@ export default function ModelPicker({
   onThinkingChange,
   placement = "up",
   variant = "outline",
+  allowedModels,
 }: {
   value: TutorModelId;
   onChange: (id: TutorModelId) => void;
@@ -441,6 +442,8 @@ export default function ModelPicker({
   placement?: "up" | "down";
   /** "bare" drops the pill outline — the header wears the model name as a title. */
   variant?: "outline" | "bare";
+  /** Restrict the menu to models whose route supports this product's tools. */
+  allowedModels?: readonly TutorModelId[];
 }) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState<{ kind: HoverKind; rect: DOMRect } | null>(null);
@@ -451,6 +454,10 @@ export default function ModelPicker({
   const [composerDraft, setComposerDraft] = useState<{ fast: boolean }>({ fast: false });
   const wrapRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const models = allowedModels
+    ? TUTOR_MODELS.filter((model) => allowedModels.includes(model.id))
+    : TUTOR_MODELS;
+  const creators = CREATOR_ORDER.filter((creator) => models.some((model) => model.creator === creator));
 
   function clearCloseTimer() {
     if (closeTimer.current) {
@@ -476,8 +483,8 @@ export default function ModelPicker({
     onChange(id);
     // Keep the draft in sync so the flyout reflects the pick even if the
     // student later switches to a different model and comes back to Grok.
-    const parts = /^cursor-grok-4\.6-(low|medium|high|xhigh)(-fast)?$/.exec(id);
-    if (parts) setGrokDraft({ thinking: parts[1] as ThinkingLevel, fast: !!parts[2] });
+    const parts = tutorModelGrok(id);
+    if (parts) setGrokDraft(parts);
   }
   function handleComposerChange(id: TutorModelId) {
     onChange(id);
@@ -572,7 +579,7 @@ export default function ModelPicker({
             padding: 6,
           }}
         >
-          {CREATOR_ORDER.map((creator, i) => (
+          {creators.map((creator, i) => (
             <div key={creator}>
               <div
                 style={{
@@ -586,30 +593,35 @@ export default function ModelPicker({
               >
                 {CREATOR_LABEL[creator]}
               </div>
-              {creator === "xai" ? (
-                <GrokRow
-                  value={value}
-                  draft={grokDraft}
-                  onSelect={() => {
-                    handleGrokChange(grokModelId(grokDraft.thinking, grokDraft.fast) as TutorModelId);
-                    closeMenu();
-                  }}
-                  onHover={handleHover}
-                  onLeave={scheduleClose}
-                />
-              ) : creator === "cursor" ? (
-                <ComposerRow
-                  value={value}
-                  draft={composerDraft}
-                  onSelect={() => {
-                    handleComposerChange(composerModelId(composerDraft.fast) as TutorModelId);
-                    closeMenu();
-                  }}
-                  onHover={handleHover}
-                  onLeave={scheduleClose}
-                />
+              {creator === "cursor" ? (
+                <>
+                  {models.some((m) => tutorModelGrok(m.id)) && (
+                    <GrokRow
+                      value={value}
+                      draft={grokDraft}
+                      onSelect={() => {
+                        handleGrokChange(grokModelId(grokDraft.thinking, grokDraft.fast) as TutorModelId);
+                        closeMenu();
+                      }}
+                      onHover={handleHover}
+                      onLeave={scheduleClose}
+                    />
+                  )}
+                  {models.some((m) => tutorModelComposer(m.id)) && (
+                    <ComposerRow
+                      value={value}
+                      draft={composerDraft}
+                      onSelect={() => {
+                        handleComposerChange(composerModelId(composerDraft.fast) as TutorModelId);
+                        closeMenu();
+                      }}
+                      onHover={handleHover}
+                      onLeave={scheduleClose}
+                    />
+                  )}
+                </>
               ) : (
-                TUTOR_MODELS.filter((m) => m.creator === creator).map((m) => (
+                models.filter((m) => m.creator === creator).map((m) => (
                   <ModelRow
                     key={m.id}
                     id={m.id}

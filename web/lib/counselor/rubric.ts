@@ -1,4 +1,4 @@
-import type { EssayKind } from "./types";
+import type { EssayKind, Rubric } from "./types";
 
 /**
  * What each kind of essay is actually being judged on.
@@ -14,12 +14,8 @@ import type { EssayKind } from "./types";
  * revising is worth more than an exhaustive one they read once.
  */
 
-export interface Rubric {
-  label: string;
-  criteria: { name: string; detail: string }[];
-  /** A closing instruction about what this kind of essay must not do. */
-  note: string;
-}
+// The shape lives in types.ts so an essay can carry one without a cycle.
+export type { Rubric } from "./types";
 
 const PERSONAL: Rubric = {
   label: "Personal statement",

@@ -23,7 +23,7 @@ if (!domain) {
 }
 
 const DEADLINE_MS = 10 * 60_000;
-const SERVICE = `http://127.0.0.1:${process.env.SLATES_SCRAPER_PORT || 4000}`;
+const SERVICE = `http://127.0.0.1:${process.env.SLATES_SCRAPER_PORT || 7529}`;
 
 /**
  * Ask a running sync service to let go of the browser profile.

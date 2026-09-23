@@ -2,6 +2,7 @@
 
 import type { TutorGraph } from "@/lib/tutor-graph";
 import DesmosGraph from "./DesmosGraph";
+import MathText from "./MathText";
 import { Icon, ICON } from "./ui";
 
 /** A graph the tutor plotted, set apart from chat prose the way `QuizCard` and `DocumentCard` are. */
@@ -33,7 +34,7 @@ export default function GraphCard({ graph }: { graph: TutorGraph }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 2px" }}>
           <Icon path={ICON.grades} size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
           <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-            {graph.title}
+            <MathText text={graph.title} />
           </span>
         </div>
       )}

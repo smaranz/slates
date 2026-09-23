@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * Passthrough to the local scraper's attempt endpoints.
@@ -6,7 +7,7 @@ import type { NextRequest } from "next/server";
  * The scraper binds to 127.0.0.1 and holds a logged-in Schoology session, so
  * the browser never talks to it directly — the portal proxies server-side.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 const ACTIONS = new Set(["start", "stop", "status", "input", "stream"]);
 

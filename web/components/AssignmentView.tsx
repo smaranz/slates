@@ -7,8 +7,13 @@ import { fmtBytes, fmtClock, fmtMinutes } from "@/lib/format";
 import type { AssessmentReview, ItemAttachment } from "@/lib/types";
 import { Badge, ClockIcon, Icon, ICON, Spinner } from "./ui";
 import AssessmentPanel from "./AssessmentPanel";
+import DocumentViewer from "./DocumentViewer";
+import FocusTimer from "./FocusTimer";
 import OwnWorkDialog from "./OwnWorkDialog";
+import RichResponseEditor from "./RichResponseEditor";
 import { isOwnWork } from "@/lib/own-work";
+import MathHtml from "./MathHtml";
+import MathText from "./MathText";
 import QuestionReview from "./QuestionReview";
 
 /**
@@ -57,7 +62,31 @@ function SubmitProgress({ state }: { state: SubmitState }) {
 }
 
 /** File types Chromium draws itself. Anything else is handed to the browser. */
-const DRAWABLE = /\.(pdf|png|jpe?g|gif|webp|svg|txt)$/i;
+const DRAWABLE = /\.(pdf|png|jpe?g|gif|webp|svg|txt|docx)$/i;
+
+/**
+ * The media type for an attachment, worked out from its name.
+ *
+ * The materials list gets this from the scraper, which knows the extension it
+ * resolved; an attachment on an assignment carries only a URL, so the name is
+ * all there is to go on. Same table either way — see scraper/materials.mjs.
+ */
+const INLINE_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  txt: "text/plain; charset=utf-8",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+
+function inlineTypeOf(url: string): string | null {
+  const ext = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(url)?.[1]?.toLowerCase();
+  return (ext && INLINE_TYPES[ext]) || null;
+}
 
 /**
  * Handouts and links posted with the item.
@@ -134,16 +163,15 @@ function Attachments({ items, domain }: { items: ItemAttachment[]; domain: strin
             </button>
 
             {showing && (
-              <iframe
-                src={`/api/materials/file?path=${encodeURIComponent(at.url)}`}
-                title={at.title}
-                style={{
-                  height: 620,
-                  width: "100%",
-                  border: "1px solid var(--line)",
-                  borderRadius: "var(--radius-sm)",
-                  background: "var(--surface)",
-                }}
+              <DocumentViewer
+                key={at.url}
+                path={at.url}
+                title={at.filename || at.title}
+                inlineType={inlineTypeOf(at.url)}
+                schoologyUrl={at.url}
+                domain={domain}
+                size={at.size}
+                variant="inline"
               />
             )}
           </div>
@@ -161,6 +189,8 @@ export default function AssignmentView() {
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [editingOwn, setEditingOwn] = useState(false);
+  /** The full-screen timer, opened from the time-tracking card. */
+  const [focusOpen, setFocusOpen] = useState(false);
 
   /*
    * Some graded items aren't tagged `kind === "assessment"` at all — a
@@ -305,15 +335,11 @@ export default function AssignmentView() {
             scraper kept it; otherwise the plain text, whose line breaks are
             the only structure left to preserve. */}
         {a.briefHtml ? (
-          <div
-            className="prose"
-            style={{ maxWidth: "70ch" }}
-            dangerouslySetInnerHTML={{ __html: a.briefHtml }}
-          />
+          <MathHtml className="prose" style={{ maxWidth: "70ch" }} html={a.briefHtml} />
         ) : (
           a.brief && (
             <div className="prose prose--plain" style={{ maxWidth: "70ch" }}>
-              {a.brief}
+              <MathText text={a.brief} />
             </div>
           )
         )}
@@ -341,13 +367,19 @@ export default function AssignmentView() {
               {timing ? "tracking now" : tracked ? "tracked so far" : "no time tracked yet"}
             </span>
             <span style={{ flex: 1 }} />
+            {/* Opens the timer rather than starting it in the corner of a
+                card, which is a thing you forget is running. A fresh start
+                begins counting on the way in; an existing one just reopens. */}
             <button
               type="button"
               className={`btn ${timing ? "btn--quiet" : "btn--primary"}`}
               style={{ height: 36 }}
-              onClick={() => s.toggleTimer(id)}
+              onClick={() => {
+                if (!timing && !tracked) void s.toggleTimer(id);
+                setFocusOpen(true);
+              }}
             >
-              {timing ? "Stop" : "Start timer"}
+              {timing ? "Open timer" : tracked ? "Resume timer" : "Start timer"}
             </button>
           </div>
 
@@ -373,7 +405,7 @@ export default function AssignmentView() {
                 </span>
                 {a.grade.feedback && (
                   <span style={{ marginTop: 2, fontSize: 12, color: "var(--muted)", lineHeight: 1.4 }}>
-                    {a.grade.feedback}
+                    <MathText text={a.grade.feedback} />
                   </span>
                 )}
               </div>
@@ -522,24 +554,11 @@ export default function AssignmentView() {
         ) : (
           <>
             {acceptsText && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <span className="section-label">Written response</span>
-                <div className="ph-field">
-                  <textarea
-                    className="textarea"
-                    style={{ minHeight: 90, opacity: submitted ? 0.6 : 1 }}
-                    value={s.text[id] ?? ""}
-                    onChange={(e) => s.setText(id, e.target.value)}
-                    readOnly={submitted}
-                    aria-label="Type your response here"
-                    placeholder=" "
-                  />
-                  <span className="ph-field__hint" aria-hidden>
-                    Type your response here
-                    <span className="ph-field__dots">...</span>
-                  </span>
-                </div>
-              </div>
+              <RichResponseEditor
+                value={s.text[id] ?? ""}
+                onChange={(next) => s.setText(id, next)}
+                readOnly={submitted}
+              />
             )}
 
             {acceptsFiles && (
@@ -782,7 +801,7 @@ export default function AssignmentView() {
                     <span style={{ fontSize: 11, color: "var(--faint)", flexShrink: 0 }}>{c.time}</span>
                   </div>
                   <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4, color: "var(--text-2)" }}>
-                    {c.text}
+                    <MathText text={c.text} />
                   </p>
                 </div>
               ))}
@@ -819,6 +838,21 @@ export default function AssignmentView() {
       </div>
 
       {editingOwn && ownWork && <OwnWorkDialog editing={ownWork} onClose={() => setEditingOwn(false)} />}
+
+      {focusOpen && (
+        <FocusTimer
+          title={a.title}
+          course={course?.name}
+          briefHtml={a.briefHtml}
+          brief={a.brief}
+          elapsed={tracked}
+          estimateMinutes={a.minutes}
+          running={timing}
+          onToggle={() => void s.toggleTimer(id)}
+          onReset={() => s.resetTimer(id)}
+          onClose={() => setFocusOpen(false)}
+        />
+      )}
     </div>
   );
 }

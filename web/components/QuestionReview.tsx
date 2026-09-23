@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { AssessmentReview, AttemptReview, QuestionResult } from "@/lib/types";
+import MathText from "./MathText";
 import { Dot } from "./ui";
 
 /**
@@ -41,7 +42,7 @@ function Answer({ q, color }: { q: QuestionResult; color: string }) {
     return (
       <span style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>
         <span style={{ color: "var(--muted)" }}>You wrote: </span>
-        {q.written}
+        <MathText text={q.written} />
       </span>
     );
   }
@@ -68,7 +69,7 @@ function Answer({ q, color }: { q: QuestionResult; color: string }) {
               background: o.chosen ? `color-mix(in oklab, ${color} 14%, transparent)` : "transparent",
             }}
           >
-            {o.label}
+            <MathText text={o.label} />
           </span>
         ))}
       </span>
@@ -78,7 +79,14 @@ function Answer({ q, color }: { q: QuestionResult; color: string }) {
   return (
     <span style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.5 }}>
       <span style={{ color: "var(--muted)" }}>You chose: </span>
-      {chosen.join(", ") || "nothing"}
+      {chosen.length
+        ? chosen.map((label, i) => (
+            <span key={`${label}-${i}`}>
+              {i > 0 ? ", " : ""}
+              <MathText text={label} />
+            </span>
+          ))
+        : "nothing"}
     </span>
   );
 }
@@ -110,7 +118,7 @@ function QuestionRow({ q, showKind }: { q: QuestionResult; showKind: boolean }) 
 
       <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0 }}>
         <span style={{ fontSize: 12.5, color: "var(--text)", lineHeight: 1.45 }}>
-          {q.stem || `Question ${q.n}`}
+          {q.stem ? <MathText text={q.stem} /> : `Question ${q.n}`}
         </span>
         <Answer q={q} color={tone.color} />
         {foot && <span style={{ fontSize: 11, color: "var(--muted)" }}>{foot}</span>}

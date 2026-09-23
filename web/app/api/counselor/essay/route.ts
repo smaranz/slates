@@ -1,30 +1,39 @@
-import { openai } from "@ai-sdk/openai";
-import { generateObject } from "ai";
 import { z } from "zod";
 
-import { aiSignals, countWords, verdictFor } from "@/lib/counselor/ai-signals";
-import { RUBRICS } from "@/lib/counselor/rubric";
-import type { AiCheck, EssayFeedback, EssayKind } from "@/lib/counselor/types";
+import { aiSignals } from "@/lib/counselor/ai-signals";
+import { countWords } from "@/lib/counselor/ai-signals";
+import { detect } from "@/lib/counselor/detector";
+import { hasSecret } from "@/lib/ai-usage/clients";
+import { essayObject } from "@/lib/counselor/essay-model";
+import { lineReview, sentenceCheck } from "@/lib/counselor/line-review";
+import { ESSAY_KIND_LABEL, RUBRICS } from "@/lib/counselor/rubric";
+import type { EssayFeedback, EssayKind, EssayReport, Rubric } from "@/lib/counselor/types";
 
 /**
- * Reviewing an essay, and estimating how machine-written it reads.
+ * One pass over a draft, behind one button.
  *
- * Two jobs behind one route because they are asked together and read together.
+ * Three things a student needs about an essay, produced together because they
+ * are read together: a rubric review that has to quote the line it is scoring,
+ * a sentence-by-sentence read where nothing goes unjudged, and an honest
+ * measure of how machine-written the prose sounds. They used to be three
+ * separate actions behind three tabs, which meant the usual outcome was one of
+ * them run and the other two forgotten — and a 17/25 means something different
+ * once you know a paragraph reads as generated.
  *
- * The review scores against a rubric with `generateObject`, so every criterion
- * comes back with a quote from the essay behind it. That constraint is the
- * whole point: feedback that can't cite a line is feedback about essays in
- * general, which the student can get anywhere and can't act on.
- *
- * The AI check is computed locally first (see lib/counselor/ai-signals.ts for
- * why it isn't ten detector sites averaged), then a model pass names the
- * specific sentences that read as generated. Real third-party detectors are
- * blended in only when an API key is configured — never scraped.
+ * The two model passes run on GPT-5.6 Terra (lib/counselor/essay-model.ts).
+ * Detection is a local model, MELD, and makes no network call at all
+ * (lib/counselor/detector.ts) — an unpublished personal statement is not
+ * something to post to a detector website, and the check keeps working when
+ * the writing passes can't.
  */
 
-export const maxDuration = 120;
-
-const MODEL = process.env.SLATES_COUNSELOR_MODEL || "gpt-5.6-sol";
+/*
+ * The three passes run in parallel, so the ceiling is the slowest of them:
+ * ~45s for the rubric review and ~40s for the line read on a full-length
+ * draft, with detection ~1s beside them. The headroom is for a 650-word essay
+ * on a cold Claude Code session.
+ */
+export const maxDuration = 300;
 
 /** A rubric line. The evidence quote is required, which is the point. */
 const SCORE = z.object({
@@ -53,37 +62,46 @@ const FEEDBACK = z.object({
     .describe("The one thing to do next, in two or three sentences. Lead with the instruction."),
 });
 
-const FLAGGED = z.object({
-  flagged: z
-    .array(
-      z.object({
-        quote: z.string().describe("A sentence copied exactly from the essay."),
-        why: z.string().max(160).describe("What makes it read as generated, in one clause."),
-      })
-    )
-    .max(6),
-});
-
 interface Body {
-  action: "feedback" | "ai-check";
+  action: "report" | "sentence";
   content: string;
+  /** Only for "sentence": the one line the student just retyped. */
+  sentence?: string;
+  /** Only for "sentence": their grade, so the guidance is pitched right. */
+  grade?: string;
   kind?: EssayKind;
   prompt?: string;
   wordLimit?: number | null;
   /** So the review can tell whether the essay is actually about this student. */
   studentContext?: string;
+  /** A rubric read off the teacher's handout, replacing the built-in one. */
+  rubric?: Rubric;
 }
 
 export async function POST(req: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json({ error: "No OPENAI_API_KEY set. Add one to web/.env.local and restart." }, { status: 500 });
-  }
-
   let body: Body;
   try {
     body = (await req.json()) as Body;
   } catch {
     return Response.json({ error: "Bad request" }, { status: 400 });
+  }
+
+  // One sentence is its own request — it has no draft to word-count.
+  if (body.action === "sentence") {
+    const sentence = body.sentence?.trim();
+    if (!sentence) return Response.json({ error: "Nothing to check." }, { status: 400 });
+    try {
+      return Response.json(await sentenceCheck(sentence, body.grade));
+    } catch (err) {
+      return Response.json({ error: message(err) }, { status: 502 });
+    }
+  }
+
+  if (!hasSecret("openai")) {
+    return Response.json(
+      { error: "No OpenAI key. Link one in AI Usage, or add OPENAI_API_KEY to .env and restart." },
+      { status: 500 }
+    );
   }
 
   const content = body?.content?.trim();
@@ -93,18 +111,74 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (body.action === "ai-check") return Response.json(await aiCheck(content));
-    return Response.json(await review(content, body));
+    return Response.json(await report(content, body));
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Something went wrong." },
-      { status: 502 }
-    );
+    return Response.json({ error: message(err) }, { status: 502 });
   }
 }
 
+/** The provider's own message is the useful one — quota, schema, or network. */
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : "Something went wrong.";
+}
+
+async function report(content: string, body: Body): Promise<EssayReport> {
+  const words = countWords(content);
+
+  /*
+   * Detection is allowed to fail on its own — a missing local model shouldn't
+   * cost the student their feedback — so it degrades inside `detect()` rather
+   * than rejecting. The two model passes are the report; if one of them fails
+   * the request fails, because a half-written report read as a whole one is
+   * worse than an error.
+   */
+  const [rubric, lines, detection] = await Promise.all([
+    review(content, body),
+    lineReview(content, {
+      prompt: body.prompt,
+      kind: ESSAY_KIND_LABEL[body.kind ?? "other"],
+      wordLimit: body.wordLimit,
+    }).catch((err) => {
+      /*
+       * One pass failing no longer costs the student the other two.
+       *
+       * The rule used to be that a half report is worse than an error, which
+       * is right when the missing half is invisible — but a filtered
+       * line-by-line read took the rubric and the detection down with it and
+       * returned nothing at all. Named as unavailable it is not a half report
+       * pretending to be whole; it is three sections with one marked absent
+       * and the reason on it.
+       */
+      console.error("[essay] line review failed:", err instanceof Error ? err.message : err);
+      return {
+        score: 0,
+        impression: "",
+        categories: [],
+        strengths: [],
+        improvements: [],
+        lines: [],
+        at: Date.now(),
+        words,
+        unavailable:
+          "The sentence-by-sentence read didn't come back this time. The rubric and the detection above are unaffected — try the check again for the line notes.",
+      };
+    }),
+    detect(content).catch(() => {
+      const { signals, score } = aiSignals(content);
+      return { signals, localScore: score, verdict: "", unavailable: "The local detector didn't answer." };
+    }),
+  ]);
+
+  return { at: Date.now(), words, rubric, lines, detection };
+}
+
 async function review(content: string, body: Body): Promise<EssayFeedback> {
-  const rubric = RUBRICS[body.kind ?? "other"] ?? RUBRICS.other;
+  /*
+   * The teacher's own sheet wins when there is one. A school essay graded
+   * against a built-in rubric is being scored on criteria nobody is actually
+   * marking it against.
+   */
+  const rubric = body.rubric ?? RUBRICS[body.kind ?? "other"] ?? RUBRICS.other;
   const words = countWords(content);
   const over = body.wordLimit && words > body.wordLimit;
 
@@ -139,12 +213,7 @@ async function review(content: string, body: Body): Promise<EssayFeedback> {
     .filter(Boolean)
     .join("\n");
 
-  const { object } = await generateObject({
-    model: openai(MODEL),
-    schema: FEEDBACK,
-    system,
-    prompt: `Review this draft.\n\n---\n${content}\n---`,
-  });
+  const object = await essayObject(FEEDBACK, system, `Review this draft.\n\n---\n${content}\n---`);
 
   return {
     scores: object.scores.map((s) => ({ ...s, max: 5 })),
@@ -154,107 +223,4 @@ async function review(content: string, body: Body): Promise<EssayFeedback> {
     at: Date.now(),
     words,
   };
-}
-
-async function aiCheck(content: string): Promise<AiCheck> {
-  const { signals, score } = aiSignals(content);
-  const words = countWords(content);
-
-  // The local pass says how machine-like the prose reads; this says where.
-  // Run in parallel with the detectors so neither waits on the other.
-  const [flagged, external] = await Promise.all([
-    flagPassages(content),
-    externalDetectors(content),
-  ]);
-
-  // A real detector, when one is configured, is worth more than the local
-  // statistics — but not enough to overrule them, since detectors are exactly
-  // as unreliable on polished student prose as the module comment says.
-  const blended = external.length
-    ? Math.round(score * 0.6 + (external.reduce((sum, d) => sum + d.score, 0) / external.length) * 0.4)
-    : score;
-
-  return { score: blended, verdict: verdictFor(blended), signals, flagged, external, at: Date.now(), words };
-}
-
-async function flagPassages(content: string): Promise<{ quote: string; why: string }[]> {
-  try {
-    const { object } = await generateObject({
-      model: openai(MODEL),
-      schema: FLAGGED,
-      system: [
-        "You read student essays and point at the sentences that read as machine-written.",
-        "",
-        "What you are looking for: abstract nouns doing the work a concrete detail should do; a claim",
-        "about growth with nothing behind it; transitions that announce structure ('Moreover',",
-        "'In conclusion'); the even, unvaried rhythm of generated prose; phrasing anyone could have",
-        "written about anyone.",
-        "",
-        "Quote sentences exactly as they appear. Say in one clause what makes each read that way.",
-        "",
-        "Return an empty list when the writing genuinely reads as a person's. Do not manufacture flags to",
-        "look thorough — a false accusation about a student's own sentence is worse than missing one,",
-        "and this is advisory, not evidence.",
-      ].join("\n"),
-      prompt: `Essay:\n\n---\n${content}\n---`,
-    });
-    return object.flagged;
-  } catch {
-    // The statistics stand on their own; a failed model pass shouldn't take
-    // the whole check down with it.
-    return [];
-  }
-}
-
-/**
- * Third-party detectors, when the student has configured one.
- *
- * Only services with a real API and a key the student supplied. Nothing here
- * scrapes a website, and nothing runs unless a key exists — an essay is not
- * posted to a company that never agreed to receive it, by default or by
- * accident.
- */
-async function externalDetectors(content: string): Promise<{ name: string; score: number }[]> {
-  const out: { name: string; score: number }[] = [];
-
-  const gptzero = process.env.SLATES_GPTZERO_API_KEY;
-  if (gptzero) {
-    try {
-      const res = await fetch("https://api.gptzero.me/v2/predict/text", {
-        method: "POST",
-        headers: { "x-api-key": gptzero, "Content-Type": "application/json" },
-        body: JSON.stringify({ document: content }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          documents?: { class_probabilities?: { ai?: number; mixed?: number } }[];
-        };
-        const p = data.documents?.[0]?.class_probabilities;
-        if (p?.ai != null) out.push({ name: "GPTZero", score: Math.round((p.ai + (p.mixed ?? 0) / 2) * 100) });
-      }
-    } catch {
-      // A detector being down is not a reason to fail the check.
-    }
-  }
-
-  const sapling = process.env.SLATES_SAPLING_API_KEY;
-  if (sapling) {
-    try {
-      const res = await fetch("https://api.sapling.ai/api/v1/aidetect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: sapling, text: content }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { score?: number };
-        if (typeof data.score === "number") out.push({ name: "Sapling", score: Math.round(data.score * 100) });
-      }
-    } catch {
-      // Same.
-    }
-  }
-
-  return out;
 }

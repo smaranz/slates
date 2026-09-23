@@ -1,22 +1,42 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 
-import { readAttachment, toTutorMessageParts, type Attachment } from "@/lib/attachments";
+import {
+  filesFromDataTransfer,
+  readAttachment,
+  takePasteFiles,
+  toTutorMessageParts,
+  type Attachment,
+} from "@/lib/attachments";
+import { useCounselor } from "@/lib/counselor/store";
 import { useStore } from "@/lib/store";
 import { describeTutorAction, parseTutorActions, stripTutorActions } from "@/lib/tutor-actions";
 import {
   useTutorChats,
   useTutorRail,
+  peekTutorMessages,
   type TutorChat,
   type TutorChatMessage,
+  type TutorStep,
+  type TutorWork,
 } from "@/lib/tutor-chats";
+import {
+  buildMentionFocus,
+  mentionCandidates,
+  searchMentions,
+  type MaterialHint,
+  type Mention,
+} from "@/lib/tutor-mentions";
 import { buildTutorContext } from "@/lib/tutor-context";
 import { parseTutorDocument, stripTutorDocument } from "@/lib/tutor-documents";
 import { parseTutorGraph, stripTutorGraph } from "@/lib/tutor-graph";
 import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-models";
 import { parseTutorQuiz, stripTutorQuiz, type QuizFRQuestion } from "@/lib/tutor-quiz";
+import { buildTutorStarters } from "@/lib/tutor-starters";
+import { useDictation } from "@/lib/dictation";
+import { createEventParser, tidyReasoning } from "@/lib/tutor-stream";
 import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
 import AITextLoading from "./AITextLoading";
 import ArtifactChip from "./ArtifactChip";
@@ -27,18 +47,14 @@ import GraphCard from "./GraphCard";
 import ModelPicker from "./ModelPicker";
 import LessonCard from "./LessonCard";
 import OutputFiles from "./OutputFiles";
+import MathText from "./MathText";
 import QuizCard from "./QuizCard";
 import TutorMarkdown from "./TutorMarkdown";
-import { Icon, ICON } from "./ui";
+import MentionMenu from "./MentionMenu";
+import { Icon, ICON, Spinner } from "./ui";
 
 const ACCEPTED_FILE_TYPES =
-  "image/*,.pdf,.txt,.md,.markdown,.csv,.json,.log,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.cs,.html,.css,.xml,.yml,.yaml";
-
-const SUGGESTIONS = [
-  "What should I do first tonight?",
-  "Explain series convergence tests",
-  "How do I raise my Calc grade?",
-];
+  "image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.pdf,.txt,.md,.markdown,.csv,.json,.log,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.cs,.html,.css,.xml,.yml,.yaml";
 
 /** Shared so "no chat open" doesn't hand every render a brand-new array. */
 const NO_MESSAGES: TutorChatMessage[] = [];
@@ -49,11 +65,12 @@ export default function TutorView() {
   const messages = chats.active?.messages ?? NO_MESSAGES;
   const [draft, setDraft] = useState("");
   /**
-   * The chat a reply is streaming into, not a boolean: a reply takes seconds,
-   * and switching conversations while one arrives must not show the other
-   * thread as busy or let a stopped-looking chat swallow the typing dots.
+   * Replies currently streaming, keyed per reply so one chat's answer doesn't
+   * lock every other chat. Each reply knows its chat so the drawer can still
+   * say "replying…" on the right conversation.
    */
-  const [busyChatId, setBusyChatId] = useState<string | null>(null);
+  const [streamingReplyIds, setStreamingReplyIds] = useState<Set<string>>(() => new Set());
+  const replyChatRef = useRef(new Map<string, string>());
   /**
    * The chat whose video is still being built. Asking for a video occupies the
    * tutor for the whole build rather than firing it off and carrying on — it's
@@ -77,9 +94,130 @@ export default function TutorView() {
   const [rated, setRated] = useState<Record<string, "up" | "down">>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  /*
+   * `@` mentions.
+   *
+   * `query` is null when the menu is shut. It opens on an `@` that starts a
+   * word and closes on a space, an escape, or a pick — the same rules every
+   * mention box has, because anything else fights muscle memory.
+   */
+  const counselor = useCounselor();
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [materialHints, setMaterialHints] = useState<MaterialHint[]>([]);
+  const [loadingMaterials, setLoadingMaterials] = useState(false);
+  const materialsAsked = useRef(false);
+
+  const candidates = useMemo(
+    () => mentionCandidates(s, counselor.essays, materialHints),
+    [s, counselor.essays, materialHints]
+  );
+
+  const mentionMatches = useMemo(
+    () => (mentionQuery === null ? [] : searchMentions(candidates, mentionQuery)),
+    [candidates, mentionQuery]
+  );
+
+  /*
+   * A query with no space stays open even with nothing to show, because you
+   * are mid-word and the next keystroke may match. Once it contains a space
+   * and still matches nothing, it was never a mention — it was someone
+   * writing an email address or a sentence — so the menu gets out of the way.
+   */
+  const mentionOpen =
+    mentionQuery !== null && (mentionMatches.length > 0 || !mentionQuery.includes(" "));
+
+  /*
+   * Materials aren't in the board snapshot — they're a fetch per course — so
+   * they're pulled in the first time the menu opens and kept for the session.
+   * Doing it on mount would be a burst of requests for a feature most turns
+   * never touch.
+   */
+  useEffect(() => {
+    if (mentionQuery === null || materialsAsked.current) return;
+    materialsAsked.current = true;
+    const courses = s.snapshot.courses;
+    if (!courses.length) return;
+
+    void (async () => {
+      setLoadingMaterials(true);
+      const found: MaterialHint[] = [];
+      for (const course of courses) {
+        try {
+          const res = await fetch(`/api/materials?course=${encodeURIComponent(course.id)}`, {
+            cache: "no-store",
+          });
+          if (!res.ok) continue;
+          const body = (await res.json()) as { items?: { kind: string; title: string; url: string }[] };
+          for (const item of body.items ?? []) {
+            if (item.kind === "folder" || !item.title) continue;
+            found.push({ courseId: course.id, title: item.title, url: item.url, kind: item.kind });
+          }
+        } catch {
+          // A course whose materials won't load just isn't mentionable.
+        }
+      }
+      setMaterialHints(found);
+      setLoadingMaterials(false);
+    })();
+  }, [mentionQuery, s.snapshot.courses]);
+
+  /**
+   * What has been typed since the `@` the caret is sitting after.
+   *
+   * Spaces are allowed, which they have to be: "LOTF Campaign poster" is a
+   * real assignment title and stopping the query at the first space meant it
+   * could never be found by name. The cap keeps a stray `@` mid-sentence from
+   * treating the rest of the paragraph as a search, and a query with a space
+   * that matches nothing closes the menu — see `mentionOpen`.
+   */
+  const readMentionQuery = useCallback((el: HTMLTextAreaElement): string | null => {
+    const upToCaret = el.value.slice(0, el.selectionStart ?? 0);
+    const match = /(?:^|\s)@([^@\n]{0,48})$/.exec(upToCaret);
+    return match ? match[1] : null;
+  }, []);
+
+  const closeMentions = useCallback(() => {
+    setMentionQuery(null);
+    setMentionIndex(0);
+  }, []);
+
+  /** Swaps the half-typed `@query` for the real label and records the mention. */
+  const pickMention = useCallback(
+    (mention: Mention) => {
+      const el = composerRef.current;
+      setMentions((prev) =>
+        prev.some((m) => m.kind === mention.kind && m.id === mention.id) ? prev : [...prev, mention]
+      );
+      closeMentions();
+
+      if (!el) return;
+      const caret = el.selectionStart ?? el.value.length;
+      const before = el.value.slice(0, caret);
+      const start = before.lastIndexOf("@");
+      if (start === -1) return;
+      const token = `@${mention.label} `;
+      const next = before.slice(0, start) + token + el.value.slice(caret);
+      setDraft(next);
+      // Put the caret after the token on the next frame, once React has
+      // written the new value — otherwise it snaps back to the end.
+      const at = start + token.length;
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(at, at);
+      });
+    },
+    [closeMentions]
+  );
+
+  const removeMention = useCallback((mention: Mention) => {
+    setMentions((prev) => prev.filter((m) => !(m.kind === mention.kind && m.id === mention.id)));
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  /** Aborts the reply currently streaming, so the composer can stop it. */
-  const abortRef = useRef<AbortController | null>(null);
+  /** One AbortController per in-flight reply — different chats can each have one. */
+  const liveRef = useRef(new Map<string, { controller: AbortController; chatId: string }>());
 
   /**
    * The quiz or document currently open in the side panel — opened the way
@@ -107,9 +245,21 @@ export default function TutorView() {
    */
   const [imagePendingIds, setImagePendingIds] = useState<Set<string>>(() => new Set());
 
-  // Either kind of work occupies the composer, and both are stoppable.
-  const occupied = busyChatId ?? lessonChatId;
-  const thinking = occupied !== null && occupied === chats.activeId;
+  const busyChatIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const replyId of streamingReplyIds) {
+      const chatId = replyChatRef.current.get(replyId);
+      if (chatId) ids.add(chatId);
+    }
+    return ids;
+  }, [streamingReplyIds]);
+
+  const activeStreaming = busyChatIds.has(chats.activeId);
+  const lessonBusy = lessonChatId !== null && lessonChatId === chats.activeId;
+  /** Streaming dots / work panel on the open chat — not a composer lock. */
+  const thinking = activeStreaming || lessonBusy;
+  /** One turn at a time per chat; a video render owns the composer too — it is the answer. */
+  const composerLocked = activeStreaming || lessonBusy;
 
   const canAttach = tutorModelSupportsAttachments(model);
 
@@ -139,9 +289,55 @@ export default function TutorView() {
     [setModel]
   );
 
+  /*
+   * The thread follows the reply only for someone already watching the end of
+   * it.
+   *
+   * It used to pin to the bottom on every store write, which was survivable
+   * while a write meant "more text arrived" and became unusable once the work
+   * panel started writing on every reasoning chunk too: scrolling up during a
+   * reply was undone within a frame, so the view fought the scroll wheel. If
+   * you have deliberately moved away from the bottom, you get to stay there.
+   */
+  const stick = useRef(true);
+  /** Where this component last put the scroller, to tell its own scrolling apart from yours. */
+  const placedAt = useRef(0);
+
+  /*
+   * Whether you have moved away is decided here, at effect time, and not in
+   * the scroll handler below.
+   *
+   * A scroll event is dispatched asynchronously and coalesced to one per
+   * frame, so during a reply that writes every few milliseconds the handler
+   * always lost the race: you scrolled up, the next chunk arrived and pinned
+   * the view back down, and the single scroll event that finally fired
+   * reported the bottom — leaving the flag set and the wheel apparently
+   * broken. Reading the position here instead is synchronous, and happens
+   * before anything has had a chance to undo it.
+   */
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (Math.abs(el.scrollTop - placedAt.current) > 2) {
+      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    }
+    if (!stick.current) return;
+
+    el.scrollTo({ top: el.scrollHeight });
+    placedAt.current = el.scrollTop;
   }, [messages, thinking]);
+
+  // Still needed for the other direction: scrolling back to the bottom while
+  // nothing is arriving, which produces no effect run to notice it.
+  const onThreadScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+      stick.current = true;
+      placedAt.current = el.scrollTop;
+    }
+  }, []);
 
   /*
    * The composer grows with what's in it and springs back when it's sent.
@@ -157,6 +353,23 @@ export default function TutorView() {
 
   /** Every course, every assignment, every submission and grade — see lib/tutor-context.ts. */
   const buildContext = useCallback(() => buildTutorContext(s), [s]);
+
+  /**
+   * Empty-state chips, rebuilt from the live board. Status and column
+   * overrides are in the callbacks, so finishing something tonight swaps the
+   * chip without a refresh.
+   */
+  const starters = useMemo(
+    () =>
+      buildTutorStarters({
+        courses: s.snapshot.courses,
+        assignments: s.snapshot.assignments,
+        statusOf: s.statusOf,
+        bucketOf: s.bucketOf,
+        onBoard: s.onBoard,
+      }),
+    [s.snapshot, s.statusOf, s.bucketOf, s.onBoard]
+  );
 
   /** Runs a board action the tutor asked for, returning what changed (or null if it couldn't). */
   const applyAction = useCallback(
@@ -196,16 +409,23 @@ export default function TutorView() {
    * part, and that's why you stopped it. Nothing the half-finished reply asked
    * for is acted on: board actions and quizzes are parsed only from a reply
    * that finished, so a tag caught mid-sentence can't fire.
+   *
+   * Stops every turn still streaming into the open chat (and any video render).
    */
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    const chatId = chats.activeId;
+    for (const [replyId, live] of liveRef.current) {
+      if (live.chatId !== chatId) continue;
+      live.controller.abort();
+      liveRef.current.delete(replyId);
+    }
     // A render is six Chrome workers; stopping has to reach the server, not
     // just stop the page from watching.
     const lesson = lessonRef.current;
     if (lesson) {
       void fetch(`/api/lesson?id=${encodeURIComponent(lesson)}`, { method: "DELETE" }).catch(() => {});
     }
-  }, []);
+  }, [chats.activeId]);
 
   /**
    * Hand a requested video to the pipeline and pin it to the reply that asked
@@ -270,11 +490,23 @@ export default function TutorView() {
      * would read the pre-truncation thread — this render's `messages` is a
      * frame behind the store write that dropped the old answer.
      */
-    async (raw?: string, history?: TutorChatMessage[], files?: Attachment[]) => {
+    async (
+      raw?: string,
+      history?: TutorChatMessage[],
+      files?: Attachment[],
+      pointedAt?: Mention[]
+    ) => {
       const text = (raw ?? draft).trim();
       const attachments = files ?? pending;
-      const base = history ?? messages;
-      if ((!text && attachments.length === 0) || thinking) return;
+      const pointed = pointedAt ?? mentions;
+      if (!text && attachments.length === 0) return;
+
+      if (lessonBusy || activeStreaming) return;
+
+      // Asking is a deliberate move to the end of the thread, whatever you
+      // had scrolled back to read.
+      stick.current = true;
+      placedAt.current = scrollRef.current?.scrollTop ?? 0;
 
       /*
        * Everything below writes to this id rather than "the active chat".
@@ -282,6 +514,9 @@ export default function TutorView() {
        * waiting, and the rest of the answer belongs where it was asked.
        */
       const chatId = chats.activeId || chats.startChat();
+      // Read the live thread from the store rather than this render's copy, so
+      // a turn that finished a moment ago is already in it.
+      const base = history ?? peekTutorMessages(chatId);
 
       const next: TutorChatMessage[] = [
         ...base,
@@ -290,19 +525,35 @@ export default function TutorView() {
           role: "user",
           text,
           attachments: attachments.length ? attachments : undefined,
+          mentions: pointed.length ? pointed : undefined,
         },
       ];
-      const replyId = `a${Date.now()}`;
+      const replyId = `a${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       // Files are matched by modification time against this mark, so a reply
       // can only ever show what appeared while it was actually running.
       const turnStartedAt = Date.now();
       const controller = new AbortController();
-      abortRef.current = controller;
       chats.updateMessages(chatId, () => [...next, { id: replyId, role: "assistant", text: "" }]);
       setDraft("");
       setPending([]);
-      setBusyChatId(chatId);
+      setMentions([]);
+      closeMentions();
+      replyChatRef.current.set(replyId, chatId);
+      setStreamingReplyIds((prev) => new Set(prev).add(replyId));
       setError(null);
+
+      liveRef.current.set(replyId, { controller, chatId });
+
+      const clearLive = () => {
+        liveRef.current.delete(replyId);
+        replyChatRef.current.delete(replyId);
+        setStreamingReplyIds((prev) => {
+          if (!prev.has(replyId)) return prev;
+          const nextIds = new Set(prev);
+          nextIds.delete(replyId);
+          return nextIds;
+        });
+      };
 
       try {
         const res = await fetch("/api/tutor", {
@@ -315,6 +566,7 @@ export default function TutorView() {
                 m.role === "user" ? toTutorMessageParts(m.text, m.attachments) : m.text,
             })),
             context: buildContext(),
+            focus: buildMentionFocus(s, counselor.essays, pointed) || undefined,
             studentName: s.studentName || undefined,
             model,
             thinking: effort,
@@ -328,20 +580,76 @@ export default function TutorView() {
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
+        const parse = createEventParser();
         let acc = "";
+        let reasoning = "";
+        let steps: TutorStep[] = [];
+        let streamError: string | null = null;
+        const startedAt = new Map<string, number>();
+        const turnBegan = Date.now();
 
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
+
+          let touchedText = false;
+          for (const event of parse(decoder.decode(value, { stream: true }))) {
+            switch (event.t) {
+              case "delta":
+                acc += event.v;
+                touchedText = true;
+                break;
+              case "reasoning":
+                reasoning += event.v;
+                break;
+              case "tool":
+                startedAt.set(event.label, Date.now());
+                steps = [...steps, { label: event.label, state: "run" }];
+                break;
+              case "tool_done": {
+                const began = startedAt.get(event.label);
+                const secs = began ? (Date.now() - began) / 1000 : undefined;
+                // Close the first still-running step with this label, so a
+                // tool called twice doesn't have both entries resolve at once.
+                let hit = false;
+                steps = steps.map((step) => {
+                  if (hit || step.label !== event.label || step.state !== "run") return step;
+                  hit = true;
+                  return { ...step, state: event.ok ? "ok" : "fail", secs };
+                });
+                break;
+              }
+              case "error":
+                streamError = event.v;
+                break;
+              case "step":
+              case "done":
+                break;
+            }
+          }
+
           // Action, quiz, document, and graph tags are stripped as they stream in so the student never sees the raw syntax.
-          const shown = stripTutorGraph(stripTutorDocument(stripTutorQuiz(stripTutorActions(acc))));
+          const shown = touchedText
+            ? stripTutorGraph(stripTutorDocument(stripTutorQuiz(stripTutorActions(acc))))
+            : null;
           chats.updateMessages(chatId, (prev) =>
-            prev.map((m) => (m.id === replyId ? { ...m, text: shown } : m))
+            prev.map((m) =>
+              m.id === replyId
+                ? {
+                    ...m,
+                    ...(shown === null ? {} : { text: shown }),
+                    work: { reasoning: tidyReasoning(reasoning), steps },
+                  }
+                : m
+            )
           );
         }
 
-        if (!acc.trim()) throw new Error("Empty response from tutor.");
+        // Anything still spinning when the stream ends did finish — the model
+        // moved on, it just never said so.
+        steps = steps.map((step) => (step.state === "run" ? { ...step, state: "ok" as const } : step));
+
+        if (!acc.trim()) throw new Error(streamError ?? "Empty response from tutor.");
 
         const { clean: withoutQuiz, quiz } = parseTutorQuiz(acc);
         const { clean: withoutDoc, document: doc } = parseTutorDocument(withoutQuiz);
@@ -358,6 +666,15 @@ export default function TutorView() {
                   quiz: quiz ?? undefined,
                   document: doc ?? undefined,
                   graph: graph ?? undefined,
+                  work:
+                    reasoning || steps.length
+                      ? {
+                          reasoning: tidyReasoning(reasoning),
+                          steps,
+                          secs: (Date.now() - turnBegan) / 1000,
+                          done: true,
+                        }
+                      : undefined,
                 }
               : m
           )
@@ -366,8 +683,11 @@ export default function TutorView() {
         // Opens the same way Claude surfaces a freshly-made artifact — on
         // screen already, not just a chip waiting to be noticed. A document
         // wins if a reply somehow produced both; only one panel shows at once.
-        if (doc) setOpenArtifact({ kind: "document", messageId: replyId });
-        else if (quiz) setOpenArtifact({ kind: "quiz", messageId: replyId });
+        // Only auto-open when this chat is still the one being watched.
+        if (chats.activeId === chatId) {
+          if (doc) setOpenArtifact({ kind: "document", messageId: replyId });
+          else if (quiz) setOpenArtifact({ kind: "quiz", messageId: replyId });
+        }
 
         // Started after the reply lands rather than awaited inside it: a video
         // takes minutes, and the student should be reading the answer already.
@@ -391,31 +711,34 @@ export default function TutorView() {
 
         const drawing = actions.find((a) => a.kind === "generate_image");
         if (drawing) void beginImage(chatId, replyId, drawing.prompt);
+        clearLive();
       } catch (e) {
         // Stopping is something the student did on purpose, not a failure.
-        if (!(e instanceof DOMException && e.name === "AbortError")) {
-          setError(e instanceof Error ? e.message : "Something went wrong.");
-        }
+        const aborted = e instanceof DOMException && e.name === "AbortError";
+        if (!aborted) setError(e instanceof Error ? e.message : "Something went wrong.");
+        clearLive();
         // Keep whatever arrived; drop the bubble only if nothing did.
         chats.updateMessages(chatId, (prev) => prev.filter((m) => m.id !== replyId || m.text));
       } finally {
-        abortRef.current = null;
-        setBusyChatId(null);
+        if (liveRef.current.has(replyId)) clearLive();
       }
     },
     [
+      activeStreaming,
       applyAction,
       beginImage,
       beginLesson,
       buildContext,
+      closeMentions,
+      counselor.essays,
+      mentions,
+      s,
       chats,
       draft,
       effort,
-      messages,
+      lessonBusy,
       model,
       pending,
-      s.studentName,
-      thinking,
     ]
   );
 
@@ -467,7 +790,7 @@ export default function TutorView() {
    */
   const retry = useCallback(
     (replyId: string) => {
-      if (thinking || !chats.activeId) return;
+      if (composerLocked || !chats.activeId) return;
       const at = messages.findIndex((m) => m.id === replyId);
       if (at < 0) return;
       let ask = at - 1;
@@ -480,7 +803,7 @@ export default function TutorView() {
       chats.updateMessages(chatId, () => history);
       void send(question.text, history, question.attachments ?? []);
     },
-    [chats, messages, send, thinking]
+    [chats, composerLocked, messages, send]
   );
 
   /**
@@ -490,7 +813,7 @@ export default function TutorView() {
    */
   const editAsk = useCallback(
     (messageId: string) => {
-      if (thinking || !chats.activeId) return;
+      if (composerLocked || !chats.activeId) return;
       const at = messages.findIndex((m) => m.id === messageId);
       if (at < 0) return;
       setDraft(messages[at].text);
@@ -498,7 +821,7 @@ export default function TutorView() {
       chats.updateMessages(chats.activeId, () => messages.slice(0, at));
       composerRef.current?.focus();
     },
-    [chats, messages, thinking]
+    [chats, composerLocked, messages]
   );
 
   /** Thumbs toggle rather than latch — a misclick shouldn't be permanent. */
@@ -538,7 +861,7 @@ export default function TutorView() {
       <ChatDrawer
         chats={chats.chats}
         activeId={chats.activeId}
-        busyChatId={busyChatId}
+        busyChatIds={busyChatIds}
         onClose={toggleRail}
         onNew={() => {
           chats.startChat();
@@ -595,7 +918,7 @@ export default function TutorView() {
           </button>
         </header>
 
-        <div className="gpt-thread" ref={scrollRef}>
+        <div className="gpt-thread" ref={scrollRef} onScroll={onThreadScroll}>
           <div className={`gpt-column${empty ? " gpt-column--empty" : ""}`}>
             {empty && (
               <div className="gpt-greeting">
@@ -608,45 +931,73 @@ export default function TutorView() {
                 />
                 <h1>What are you working on?</h1>
                 <div className="gpt-starters">
-                  {SUGGESTIONS.map((q) => (
-                    <button key={q} type="button" className="gpt-starter" onClick={() => send(q)}>
-                      {q}
+                  {starters.map((q) => (
+                    <button
+                      key={q.label}
+                      type="button"
+                      className="gpt-starter"
+                      onClick={() => send(q.ask)}
+                    >
+                      {q.label}
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {messages.map((m, i) => {
+            {messages.map((m) => {
+              // Actions belong to a finished reply. Offering Retry on half an
+              // answer would throw away the half that had already arrived.
+              const streaming = streamingReplyIds.has(m.id);
+
               /*
                * The assistant's message is created empty and filled as the
-               * reply streams in, so for the first moment there is nothing to
-               * draw. Rendering the row anyway left a stray gap above the
-               * typing indicator, which already says the same thing.
+               * reply streams in. It still gets a row from the first frame,
+               * because the work panel's head is what stands in for the old
+               * typing indicator; a message with nothing in it and nothing
+               * coming is the only one skipped.
                */
-              const hasText = !!m.text || !!m.attachments?.length || !!m.actions?.length;
+              const hasText =
+                !!m.text || !!m.attachments?.length || !!m.mentions?.length || !!m.actions?.length;
               const drawingImage = imagePendingIds.has(m.id);
-              if (!hasText && !m.quiz && !m.lesson && !m.document && !m.graph && !m.image && !drawingImage) {
+              const working =
+                streaming || Boolean(m.work && (m.work.reasoning || m.work.steps.length > 0));
+              if (
+                !hasText && !working && !m.quiz && !m.lesson && !m.document && !m.graph && !m.image && !drawingImage
+              ) {
                 return null;
               }
 
-              // Actions belong to a finished reply. Offering Retry on half an
-              // answer would throw away the half that had already arrived.
-              const streaming = thinking && i === messages.length - 1;
               const rating = rated[m.id];
 
               if (m.role === "user") {
                 return (
                   <div key={m.id} className="gpt-turn gpt-turn--user">
                     <div className="gpt-bubble">
-                      {m.attachments && m.attachments.length > 0 && (
+                      {((m.attachments?.length ?? 0) > 0 || (m.mentions?.length ?? 0) > 0) && (
                         <div className="gpt-bubble-files">
-                          {m.attachments.map((a) => (
+                          {/* Kept on the turn so scrolling back shows what the
+                              question was actually about, not just its words. */}
+                          {m.mentions?.map((mention) => (
+                            <span
+                              key={`${mention.kind}:${mention.id}`}
+                              className={`mention-chip is-${mention.kind} is-static`}
+                              style={
+                                mention.color
+                                  ? ({ "--chip": mention.color } as React.CSSProperties)
+                                  : undefined
+                              }
+                              title={mention.detail}
+                            >
+                              <span className="truncate">{mention.label}</span>
+                            </span>
+                          ))}
+                          {m.attachments?.map((a) => (
                             <AttachmentChip key={a.id} attachment={a} />
                           ))}
                         </div>
                       )}
-                      {m.text}
+                      {m.text ? <MathText text={m.text} /> : null}
                     </div>
                     <div className="gpt-actions gpt-actions--user">
                       <ActionButton
@@ -657,7 +1008,7 @@ export default function TutorView() {
                       <ActionButton
                         label="Edit"
                         icon={ICON.pencil}
-                        disabled={thinking}
+                        disabled={composerLocked}
                         onClick={() => editAsk(m.id)}
                       />
                     </div>
@@ -670,6 +1021,12 @@ export default function TutorView() {
                    ChatGPT stopped boxing the assistant once answers got long
                    enough that a box was just a border around a whole screen. */
                 <div key={m.id} className="gpt-turn gpt-turn--assistant">
+                  {working && (
+                    /* Shown from the first frame of the reply, before any
+                       reasoning or tool call has arrived — it is what tells
+                       you the tutor heard you. */
+                    <TutorWorkPanel work={m.work ?? EMPTY_WORK} live={streaming} />
+                  )}
                   {hasText && (
                     <div className="gpt-reply">
                       <TutorMarkdown text={m.text} className="prose--chat" />
@@ -761,7 +1118,7 @@ export default function TutorView() {
                       <ActionButton
                         label="Try again"
                         icon={ICON.retry}
-                        disabled={thinking}
+                        disabled={composerLocked}
                         onClick={() => retry(m.id)}
                       />
                     </div>
@@ -769,14 +1126,6 @@ export default function TutorView() {
                 </div>
               );
             })}
-
-            {thinking && messages[messages.length - 1]?.text === "" && (
-              <div className="gpt-turn gpt-turn--assistant">
-                <div className="gpt-thinking">
-                  <AITextLoading />
-                </div>
-              </div>
-            )}
 
             {error && <div className="gpt-error">{error}</div>}
           </div>
@@ -787,16 +1136,41 @@ export default function TutorView() {
             className="gpt-composer"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!thinking) send();
+              if (!composerLocked) void send();
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              if (canAttach && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+              const files = filesFromDataTransfer(e.dataTransfer);
+              if (canAttach && files.length) addFiles(files);
             }}
           >
-            {pending.length > 0 && (
+            {mentionOpen && (
+              <MentionMenu
+                items={mentionMatches}
+                active={mentionIndex}
+                loading={loadingMaterials}
+                grouped={mentionQuery === ""}
+                onPick={pickMention}
+                onHover={setMentionIndex}
+              />
+            )}
+
+            {(pending.length > 0 || mentions.length > 0) && (
               <div className="gpt-composer-files">
+                {mentions.map((m) => (
+                  <button
+                    key={`${m.kind}:${m.id}`}
+                    type="button"
+                    className={`mention-chip is-${m.kind}`}
+                    style={m.color ? ({ "--chip": m.color } as React.CSSProperties) : undefined}
+                    onClick={() => removeMention(m)}
+                    title={`${m.label}${m.detail ? ` — ${m.detail}` : ""} · click to remove`}
+                  >
+                    <span className="truncate">{m.label}</span>
+                    <Icon path={ICON.close} size={9} />
+                  </button>
+                ))}
                 {pending.map((a) => (
                   <AttachmentChip key={a.id} attachment={a} onRemove={() => removePending(a.id)} />
                 ))}
@@ -806,16 +1180,49 @@ export default function TutorView() {
             <textarea
               ref={composerRef}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                const next = readMentionQuery(e.target);
+                setMentionQuery(next);
+                if (next !== mentionQuery) setMentionIndex(0);
+              }}
+              onClick={(e) => setMentionQuery(readMentionQuery(e.currentTarget))}
+              onBlur={closeMentions}
               onKeyDown={(e) => {
+                /*
+                 * While the menu is open it owns the arrows, tab and enter —
+                 * enter has to pick the highlighted item rather than send a
+                 * half-typed "@lab" as the question.
+                 */
+                if (mentionOpen && mentionMatches.length) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    pickMention(mentionMatches[mentionIndex] ?? mentionMatches[0]);
+                    return;
+                  }
+                }
+                if (e.key === "Escape" && mentionOpen) {
+                  e.preventDefault();
+                  closeMentions();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  send();
+                  if (!composerLocked) void send();
                 }
               }}
               onPaste={(e) => {
-                const files = Array.from(e.clipboardData.files);
-                if (canAttach && files.length) addFiles(files);
+                if (canAttach) takePasteFiles(e, (files) => void addFiles(files));
               }}
               rows={1}
               placeholder="Ask anything"
@@ -851,17 +1258,30 @@ export default function TutorView() {
 
               <span className="gpt-composer-gap" />
 
-              {/* Dictation, only where the browser actually has it. A mic that
-                  does nothing is worse than no mic, and WKWebView has none. */}
+              {/* Dictation. The text arrives a moment after you stop, so the
+                  button holds a spinner through that gap rather than looking
+                  like the recording was thrown away. */}
               {dictation.available && (
                 <button
                   type="button"
-                  className={`gpt-round-btn${dictation.listening ? " is-live" : ""}`}
+                  className={`gpt-round-btn${dictation.recording ? " is-live" : ""}`}
                   onClick={dictation.toggle}
-                  aria-label={dictation.listening ? "Stop dictating" : "Dictate"}
-                  aria-pressed={dictation.listening}
+                  disabled={dictation.transcribing}
+                  aria-label={
+                    dictation.transcribing
+                      ? "Transcribing"
+                      : dictation.recording
+                        ? "Stop dictating"
+                        : "Dictate"
+                  }
+                  aria-pressed={dictation.recording}
+                  title={dictation.error ?? undefined}
                 >
-                  <Icon path={dictation.listening ? ICON.waveform : ICON.mic} size={17} />
+                  {dictation.transcribing ? (
+                    <Spinner size={15} />
+                  ) : (
+                    <Icon path={dictation.recording ? ICON.waveform : ICON.mic} size={17} />
+                  )}
                 </button>
               )}
 
@@ -869,14 +1289,14 @@ export default function TutorView() {
                   a send button greyed out for the whole answer leaves no way
                   to take back a question you'd rather rephrase. */}
               <button
-                type={thinking ? "button" : "submit"}
+                type={composerLocked ? "button" : "submit"}
                 className="gpt-send"
-                onClick={thinking ? stop : undefined}
-                aria-label={thinking ? "Stop" : "Send"}
-                title={thinking ? "Stop generating" : "Send"}
-                disabled={!thinking && !draft.trim() && pending.length === 0}
+                onClick={composerLocked ? stop : undefined}
+                aria-label={composerLocked ? "Stop" : "Send"}
+                title={composerLocked ? "Stop generating" : "Send"}
+                disabled={!composerLocked && !draft.trim() && pending.length === 0}
               >
-                <Icon path={thinking ? ICON.stop : ICON.arrowUp} size={thinking ? 13 : 19} />
+                <Icon path={composerLocked ? ICON.stop : ICON.arrowUp} size={composerLocked ? 13 : 19} />
               </button>
             </div>
           </form>
@@ -898,7 +1318,7 @@ export default function TutorView() {
         >
           <QuizCard
             quiz={openQuiz}
-            busy={thinking}
+            busy={composerLocked}
             onSelect={(questionIndex, choice) => answerQuizChoice(openMessage!.id, questionIndex, choice)}
             onReveal={(questionIndex) => revealQuizSample(openMessage!.id, questionIndex)}
             onRequestFeedback={requestQuizFeedback}
@@ -924,113 +1344,6 @@ export default function TutorView() {
   );
 }
 
-/**
- * Dictation, where the browser has it.
- *
- * ChatGPT puts a mic next to send, so this does too — but only when there is
- * something behind it. `webkitSpeechRecognition` is a Safari/Chrome feature
- * and is absent from the WKWebView the packaged app runs in, so on the phone
- * build the button simply never appears rather than appearing and doing
- * nothing, which is the worse of the two failures.
- */
-interface SpeechLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start(): void;
-  stop(): void;
-  onresult:
-    | ((event: {
-        /** Where the new results start — `results` is cumulative, not a delta. */
-        resultIndex: number;
-        results: ArrayLike<ArrayLike<{ transcript: string }>>;
-      }) => void)
-    | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-
-function speechCtor(): (new () => SpeechLike) | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: new () => SpeechLike;
-    webkitSpeechRecognition?: new () => SpeechLike;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
-
-/** Never changes for the life of the page — there is nothing to subscribe to. */
-function subscribeSpeech(): () => void {
-  return () => {};
-}
-function speechAvailable(): boolean {
-  return speechCtor() !== null;
-}
-function speechAvailableOnServer(): boolean {
-  return false;
-}
-
-function useDictation(onText: (text: string) => void) {
-  /*
-   * Read through `useSyncExternalStore` rather than in an effect: the server
-   * has no `window`, and setting this from an effect would render the button
-   * once without the mic and once with it — a control that pops into the
-   * composer a frame after the view opens.
-   */
-  const available = useSyncExternalStore(subscribeSpeech, speechAvailable, speechAvailableOnServer);
-  const [listening, setListening] = useState(false);
-  const engine = useRef<SpeechLike | null>(null);
-  const sink = useRef(onText);
-
-  // After commit, not during render: the callback closes over this render's
-  // draft, and the recognizer is long-lived enough to outlive several.
-  useEffect(() => {
-    sink.current = onText;
-  });
-
-  useEffect(() => () => engine.current?.stop(), []);
-
-  const toggle = useCallback(() => {
-    if (engine.current) {
-      engine.current.stop();
-      return;
-    }
-    const Ctor = speechCtor();
-    if (!Ctor) return;
-
-    const rec = new Ctor();
-    rec.lang = navigator.language || "en-US";
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.onresult = (event) => {
-      // Only what arrived since the last callback: `results` holds the whole
-      // session, so replaying it from zero would retype every sentence.
-      let heard = "";
-      for (let i = event.resultIndex ?? 0; i < event.results.length; i += 1) {
-        heard += event.results[i][0].transcript;
-      }
-      const trimmed = heard.trim();
-      if (trimmed) sink.current(trimmed);
-    };
-    const finish = () => {
-      engine.current = null;
-      setListening(false);
-    };
-    rec.onend = finish;
-    rec.onerror = finish;
-
-    try {
-      rec.start();
-      engine.current = rec;
-      setListening(true);
-    } catch {
-      // Already running, or permission refused at the OS level.
-      finish();
-    }
-  }, []);
-
-  return { available, listening, toggle };
-}
 
 /** A ghost icon button with its label as a tooltip — the transcript's action bar. */
 function ActionButton({
@@ -1098,7 +1411,7 @@ function band(at: number): string {
 function ChatDrawer({
   chats,
   activeId,
-  busyChatId,
+  busyChatIds,
   onClose,
   onNew,
   onOpen,
@@ -1107,7 +1420,7 @@ function ChatDrawer({
 }: {
   chats: TutorChat[];
   activeId: string;
-  busyChatId: string | null;
+  busyChatIds: ReadonlySet<string>;
   onClose: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
@@ -1215,7 +1528,7 @@ function ChatDrawer({
                   >
                     <span className="truncate">{chat.title || "New chat"}</span>
                     <span className="gpt-drawer-when">
-                      {busyChatId === chat.id ? "replying…" : whenLabel(chat.updatedAt)}
+                      {busyChatIds.has(chat.id) ? "replying…" : whenLabel(chat.updatedAt)}
                     </span>
                   </button>
                   <button
@@ -1315,6 +1628,97 @@ function AttachmentChip({
         >
           <Icon path={ICON.close} size={9} />
         </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the tutor did before it answered.
+ *
+ * Collapsed to one line by default and expandable, because the two states are
+ * asked for at different moments: while it works you want to know that
+ * something is happening and roughly what, and afterwards you occasionally
+ * want to know how it got there. Neither is worth a wall of text in the way
+ * of the answer.
+ *
+ * Reasoning is only shown for models that actually expose it — most don't, and
+ * an empty "Thinking" section on every reply would train you to ignore it.
+ */
+/** Stand-in for a reply that has not reported anything yet. */
+const EMPTY_WORK: TutorWork = { reasoning: "", steps: [] };
+
+function TutorWorkPanel({ work, live }: { work: TutorWork; live: boolean }) {
+  /*
+   * Closed until you ask for it, working or not.
+   *
+   * Opening itself mid-reply put a block of the model's private deliberation
+   * exactly where the answer was about to appear, and then moved the answer
+   * down as the reasoning grew. The one-line summary is enough to see that
+   * something is happening and what.
+   */
+  const [open, setOpen] = useState(false);
+
+  // Nothing to open until the model has exposed something. Most of a short
+  // reply on a model with no reasoning summary is spent in this state.
+  const hasDetail = work.steps.length > 0 || Boolean(work.reasoning);
+
+  const running = work.steps.filter((s) => s.state === "run");
+
+  const summary = live
+    ? (running[0]?.label ?? (work.reasoning ? "Thinking" : "Working"))
+    : work.steps.length > 0
+      ? `Used ${work.steps.length} ${work.steps.length === 1 ? "tool" : "tools"}`
+      : "Thought about it";
+
+  return (
+    <div className={`tutor-work${open && hasDetail ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="tutor-work-head"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!hasDetail}
+      >
+        {live ? <Spinner size={11} /> : <Icon path={ICON.check} size={11} />}
+        <span className="tutor-work-summary">{summary}</span>
+        {!live && work.secs != null && <span className="tutor-work-time">{work.secs.toFixed(1)}s</span>}
+        {hasDetail && (
+          <Icon
+            path={ICON.chevronDown}
+            size={11}
+            style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .18s" }}
+          />
+        )}
+      </button>
+
+      {open && hasDetail && (
+        <div className="tutor-work-body">
+          {work.steps.map((step, i) => (
+            <div key={`${step.label}-${i}`} className={`tutor-step is-${step.state}`}>
+              <span className="tutor-step-dot" />
+              <span className="truncate" style={{ flex: 1 }}>
+                {step.label}
+              </span>
+              {/* A provider-executed tool "returns" the instant it is called,
+                  so anything this fast is an artefact of how it was reported
+                  rather than how long it took. */}
+              {step.secs != null && step.secs >= 0.5 && (
+                <span className="tutor-step-secs">{step.secs.toFixed(1)}s</span>
+              )}
+            </div>
+          ))}
+
+          {/* Only models that expose reasoning have any, so this section is
+              absent rather than empty on the ones that don't. */}
+          {work.reasoning && (
+            <div className="tutor-reasoning">
+              <span className="section-label" style={{ fontSize: 10 }}>
+                Its reasoning
+              </span>
+              <p>{work.reasoning}</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

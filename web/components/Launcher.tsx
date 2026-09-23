@@ -4,7 +4,9 @@ import Image from "next/image";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
+import { useHiddenApps } from "@/lib/app-prefs";
 import { useMode, type Mode } from "@/lib/mode";
+import { Icon, ICON } from "./ui";
 
 /**
  * The first thing you see: two doors, a mark on each, nothing else.
@@ -18,11 +20,16 @@ import { useMode, type Mode } from "@/lib/mode";
 const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolean) => React.ReactNode }[] = [
   { mode: "school", title: "School", accent: "var(--info)", mark: (h) => <ColumnsMark hovered={h} /> },
   { mode: "counselor", title: "Counselor", accent: "oklch(0.8 0.13 300)", mark: (h) => <RingsMark hovered={h} /> },
+  { mode: "ui", title: "UI", accent: "oklch(0.78 0.15 165)", mark: (h) => <StackMark hovered={h} /> },
+  { mode: "usage", title: "AI Usage", accent: "oklch(0.82 0.12 85)", mark: (h) => <MeterMark hovered={h} /> },
 ];
 
 export default function Launcher() {
-  const { choose } = useMode();
+  const { choose, openSettings } = useMode();
   const [hovered, setHovered] = useState<Mode | null>(null);
+  // Apps switched off in Settings › General don't get a door.
+  const [hiddenApps] = useHiddenApps();
+  const doors = DOORS.filter((d) => !hiddenApps.includes(d.mode));
 
   // The traffic lights sit over the top-left in the desktop shell, and this
   // screen has no sidebar to hold them off.
@@ -43,8 +50,14 @@ export default function Launcher() {
         <Image src="/assets/slates-mark.png" alt="Slates" width={30} height={30} priority />
       </motion.span>
 
+      {/* One settings screen for both halves, and this is the way to it. */}
+      <button type="button" className="launcher-settings" onClick={openSettings}>
+        <Icon path={ICON.settings} size={14} />
+        Settings
+      </button>
+
       <div className="launcher-grid">
-        {DOORS.map((door, i) => (
+        {doors.map((door, i) => (
           <motion.button
             key={door.mode}
             type="button"
@@ -105,6 +118,36 @@ function ColumnsMark({ hovered }: { hovered: boolean }) {
 }
 
 /** Three bands, with the student at the centre. */
+/**
+ * Three sheets, offset — a stack of components, which is what the shelf is.
+ * They fan apart on hover rather than scaling, so the mark says "several
+ * things you can take one from" instead of "a button".
+ */
+function StackMark({ hovered }: { hovered: boolean }) {
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <motion.rect
+          key={i}
+          x={11}
+          y={12 + i * 10}
+          width={32}
+          height={13}
+          rx={3.5}
+          stroke={i === 0 ? "var(--accent)" : "currentColor"}
+          strokeWidth={i === 0 ? 1.8 : 1.6}
+          initial={false}
+          animate={{
+            y: hovered ? 12 + i * 12.5 : 12 + i * 10,
+            opacity: i === 0 ? 1 : 0.55 - i * 0.12,
+          }}
+          transition={{ type: "spring", stiffness: 220, damping: 22, delay: i * 0.04 }}
+        />
+      ))}
+    </svg>
+  );
+}
+
 function RingsMark({ hovered }: { hovered: boolean }) {
   return (
     <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
@@ -142,6 +185,43 @@ function RingsMark({ hovered }: { hovered: boolean }) {
         animate={{ scale: hovered ? [1, 1.3, 1] : 1 }}
         transition={{ duration: 1.5, repeat: hovered ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }}
         style={{ transformOrigin: "27px 27px" }}
+      />
+    </svg>
+  );
+}
+
+/** Usage meter — three bars that rise on hover. */
+function MeterMark({ hovered }: { hovered: boolean }) {
+  const heights = hovered ? [22, 34, 28] : [14, 22, 18];
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <motion.rect
+          key={i}
+          x={12 + i * 12}
+          width="8"
+          rx="2.5"
+          stroke={i === 1 ? "var(--accent)" : "currentColor"}
+          strokeWidth={i === 1 ? 1.8 : 1.6}
+          initial={false}
+          animate={{
+            y: 42 - heights[i]!,
+            height: heights[i],
+            opacity: i === 1 ? 1 : 0.45,
+          }}
+          transition={{ type: "spring", stiffness: 260, damping: 22, delay: i * 0.04 }}
+        />
+      ))}
+      <motion.line
+        x1="10"
+        x2="44"
+        y1="44"
+        y2="44"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        initial={false}
+        animate={{ opacity: hovered ? 0.7 : 0.35 }}
       />
     </svg>
   );

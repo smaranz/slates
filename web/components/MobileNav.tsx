@@ -20,9 +20,9 @@ const PRIMARY: Destination[] = [
 ];
 
 const SECONDARY: Destination[] = [
+  { label: "Study", short: "Study", view: "study", path: ICON.bands },
   { label: "Classes", short: "Classes", view: "classes", path: ICON.classes },
   { label: "Messages", short: "Messages", view: "messages", path: ICON.messages },
-  { label: "Settings", short: "Settings", view: "settings", path: ICON.settings },
 ];
 
 /**

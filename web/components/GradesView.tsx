@@ -3,6 +3,7 @@
 import { useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
 import { categoryPct } from "@/lib/normalize";
+import { countsTowardGrade } from "@/lib/grades";
 import { Dot, Meter } from "./ui";
 
 export default function GradesView() {
@@ -123,9 +124,18 @@ export default function GradesView() {
               </button>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 20px 16px" }}>
-                {cats.map((cat) => {
+                {(() => {
+                  const counted = countsTowardGrade(cats);
+                  return cats.map((cat) => {
                   const { pct: raw } = categoryPct(cat);
                   const pct = raw === null ? 0 : Math.round(raw);
+                  /*
+                   * Schoology holds points here but isn't counting them toward
+                   * the course grade. Saying so is what keeps this list adding
+                   * up to the headline above it — a row showing "5/7 · 71%"
+                   * beside a grade that ignores it is just confusing.
+                   */
+                  const heldBack = !counted(cat) && cat.possible > 0;
                   // Nothing scored yet is not the same as scoring zero, and a
                   // category can be graded without exposing points.
                   const points =
@@ -134,12 +144,18 @@ export default function GradesView() {
                     <div
                       className="grade-category-row"
                       key={cat.cat}
+                      title={
+                        heldBack
+                          ? `Schoology isn't counting ${cat.cat} toward your grade yet, so these points don't move it.`
+                          : undefined
+                      }
                       style={{
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         gap: 14,
                         padding: "7px 0",
+                        opacity: heldBack ? 0.55 : 1,
                       }}
                     >
                       <span
@@ -154,7 +170,7 @@ export default function GradesView() {
                       >
                         {cat.weight}%
                       </span>
-                      <Meter pct={pct} color={c.dot} />
+                      <Meter pct={heldBack ? 0 : pct} color={c.dot} />
                       <span
                         className="tabular grade-category-points"
                         style={{
@@ -170,18 +186,20 @@ export default function GradesView() {
                       <span
                         className="tabular grade-category-pct"
                         style={{
-                          flex: "0 0 54px",
+                          flex: "0 0 92px",
                           textAlign: "center",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "var(--text)",
+                          fontSize: heldBack ? 11 : 13,
+                          fontWeight: heldBack ? 400 : 600,
+                          color: heldBack ? "var(--dim)" : "var(--text)",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        {raw === null ? "—" : `${pct}%`}
+                        {heldBack ? "not counted" : raw === null ? "—" : `${pct}%`}
                       </span>
                     </div>
                   );
-                })}
+                  });
+                })()}
               </div>
             </div>
           );

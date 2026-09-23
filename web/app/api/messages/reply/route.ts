@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * Proxies a reply to the local scraper, which types it into Schoology's own
@@ -6,7 +7,7 @@ import type { NextRequest } from "next/server";
  * scraper reports each stage as it happens, so the stream is passed straight
  * through instead of buffered.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 export async function POST(req: NextRequest) {
   try {

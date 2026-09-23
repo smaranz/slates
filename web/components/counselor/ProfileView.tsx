@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { readAvatarFile } from "@/lib/avatar";
-import { useIdentity } from "@/lib/identity";
 
 import { useCounselor } from "@/lib/counselor/store";
 import { GRADE_LABEL } from "@/lib/counselor/state";
 import type { Activity, CounselorProfile, GradeLevel, Rigor } from "@/lib/counselor/types";
-import { Avatar, Icon, ICON } from "../ui";
+import { Icon, ICON } from "../ui";
 
 /**
  * What the counselor knows before you've said anything.
@@ -53,10 +51,11 @@ export default function ProfileView() {
     <div className="counselor-page">
       <div className="counselor-page-inner counselor-form">
         <div className="counselor-form-intro">
-          <h2>Your profile</h2>
+          <h2>Your college record</h2>
           <p>
-            The counselor reads this before every answer, and your odds are computed straight off
-            it. It stays on this machine — Slates has no account to put it in.
+            The counselor reads this before every answer, and your admit odds are computed straight
+            off it. Your name and photo live under Slates; everything here is what a counselor
+            would ask for. It stays on this machine — there is no account to put it in.
           </p>
         </div>
 
@@ -64,7 +63,6 @@ export default function ProfileView() {
         <ImportCard />
 
         <Group title="You">
-          <IdentityRow />
           <Row label="Grade">
             <select
               className="counselor-input"
@@ -453,77 +451,6 @@ function ImportCard() {
 }
 
 /**
- * Name and photo — the same ones the school half shows in its sidebar.
- *
- * Deliberately not a counselor field. Both halves greet the same person, and a
- * student who set a photo in Settings should not have to set it again here.
- */
-function IdentityRow() {
-  const identity = useIdentity();
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div className="counselor-identity">
-      <button
-        type="button"
-        className="pfp-btn"
-        onClick={() => fileRef.current?.click()}
-        aria-label={identity.avatar ? "Change profile photo" : "Add profile photo"}
-        disabled={busy}
-        style={{ cursor: busy ? "wait" : "pointer" }}
-      >
-        <Avatar src={identity.avatar} name={identity.name} size={72} />
-        <span className="pfp-overlay">{busy ? "…" : identity.avatar ? "Change" : "Add"}</span>
-      </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (!file) return;
-          setError(null);
-          setBusy(true);
-          void readAvatarFile(file)
-            .then((data) => identity.setAvatar(data))
-            .catch((err: unknown) => setError(err instanceof Error ? err.message : "Couldn't read that photo."))
-            .finally(() => setBusy(false));
-        }}
-      />
-
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
-        <span className="counselor-field-label" style={{ width: "auto", padding: 0 }}>
-          Name
-        </span>
-        <input
-          className="counselor-input"
-          value={identity.name}
-          onChange={(e) => identity.setName(e.target.value)}
-          placeholder="Your name"
-          style={{ maxWidth: 300 }}
-        />
-        <p className="counselor-identity-note">
-          Shared with the school side of Slates. Stays on this device.
-          {identity.avatar && (
-            <>
-              {" "}
-              <button type="button" className="counselor-linkish" onClick={() => identity.setAvatar(null)}>
-                Remove photo
-              </button>
-            </>
-          )}
-        </p>
-        {error && <p className="counselor-identity-note" style={{ color: "var(--warn)" }}>{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-/**
  * Whether the counseling library is indexed on this machine.
  *
  * Worth surfacing because its absence is invisible otherwise: the counselor
@@ -559,7 +486,7 @@ function LibraryCard() {
         </p>
         <p className="counselor-library-sub">
           {status.ready
-            ? `${status.documents} documents, ${status.chunks.toLocaleString()} passages. The counselor searches these before answering.`
+            ? `${status.documents} source files, ${status.chunks.toLocaleString()} passages. The counselor searches these before answering.`
             : "The counselor is answering from general knowledge. Index your own guides with npm run counselor:ingest -- <folder>."}
         </p>
       </div>

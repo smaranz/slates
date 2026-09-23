@@ -1,3 +1,6 @@
+import type { Attachment } from "../attachments";
+import type { MasterPlan, PlanProposal, PlanRevision, PlanTaskCategory } from "./plan-types";
+
 /**
  * The counselor's world.
  *
@@ -97,6 +100,20 @@ export type EssayKind =
   | "additional-info"
   | "other";
 
+/**
+ * Kinds that only exist because of an application.
+ *
+ * Hidden on the school list, where they are noise: a lab report is never a UC
+ * PIQ. They stay on the counselor side, which is where admissions lives.
+ */
+export const COLLEGE_ONLY_KINDS = new Set<EssayKind>([
+  "personal-statement",
+  "supplement",
+  "uc-piq",
+  "scholarship",
+  "additional-info",
+]);
+
 export const ESSAY_KINDS: EssayKind[] = [
   "personal-statement",
   "supplement",
@@ -148,22 +165,173 @@ export interface AiSignal {
   detail: string;
 }
 
-export interface AiCheck {
-  /** 0-100. Advisory only — see lib/counselor/ai-signals.ts on why. */
+/** Where one sentence of the draft lands. Green, amber, red. */
+export type LineVerdict = "strong" | "okay" | "weak";
+
+/** One sentence of the draft, judged on its own. */
+export interface LineNote {
+  /** The sentence, copied exactly from the draft — that's what makes it findable again. */
+  text: string;
+  verdict: LineVerdict;
+  /** Why it lands there: the praise, the quick tip, or the problem. */
+  note: string;
+  /** Numbered steps to fix it. Present on the ones that need work. */
+  steps: string[];
+}
+
+/**
+ * The line-by-line read of a draft — every sentence categorized, plus the
+ * whole-essay numbers that come out of doing that.
+ *
+ * Separate from `EssayFeedback` on purpose. That one scores four or five
+ * rubric criteria and tells you the single next thing to do; this one is the
+ * pass where nothing in the draft goes unjudged, so a student revising knows
+ * which specific sentences are carrying the essay and which are padding.
+ */
+export interface LineReview {
+  /** 0-100, against college-level writing. */
   score: number;
-  verdict: string;
-  signals: AiSignal[];
-  /** Specific passages that read as generated, quoted with a reason. */
-  flagged: { quote: string; why: string }[];
-  /** Scores from third-party detectors, when API keys are configured. */
-  external: { name: string; score: number }[];
+  impression: string;
+  categories: { name: string; score: number; max: number }[];
+  strengths: { title: string; detail: string }[];
+  improvements: { title: string; detail: string }[];
+  lines: LineNote[];
   at: number;
+  /** Words at the time of the read, so a stale review shows as stale. */
   words: number;
+  /**
+   * Set when the sentence-by-sentence read could not be produced, so the rest
+   * of the report can still be shown rather than the whole request failing.
+   * Mirrors how a missing local detector is reported.
+   */
+  unavailable?: string;
+}
+
+/**
+ * One sentence re-checked on its own, after the student retyped it.
+ *
+ * The example is deliberately about something else. A model that hands back a
+ * fixed version of the student's own sentence has written part of their essay;
+ * one that shows the same technique applied to an unrelated subject has taught
+ * them to do it themselves, and there's nothing to paste in.
+ */
+export interface SentenceCheck {
+  verdict: LineVerdict;
+  summary: string;
+  steps: string[];
+  example?: string;
+}
+
+/**
+ * The AI read of a draft: a local model's verdict, plus the statistics that
+ * say what about the prose reads that way.
+ *
+ * Both halves are advisory. No detector can prove who wrote something, and
+ * they misfire most often on careful, formal writing — which a college essay
+ * is by definition.
+ */
+export interface AiDetection {
+  /** MELD, run locally. Absent when the detector isn't installed or didn't start. */
+  meld?: {
+    /** The raw score. Compared against `threshold`, not read as a percentage. */
+    score: number;
+    /** The score below which 99% of human validation texts fell — a 1% false-positive rate. */
+    threshold: number;
+    flagged: boolean;
+    /** The sigmoid of the score. Shown only as a secondary number: it sits near 0.5 for ordinary human prose. */
+    probability: number;
+    tokensRead: number;
+    /** True when the draft was longer than the 2,048 tokens the model reads. */
+    truncated: boolean;
+    /** Sentences scoring above the document's own flagging line, worst first. */
+    passages: { text: string; score: number }[];
+    /**
+     * Every sentence with its score and where the line for *this* draft sat,
+     * so the AI page can mark each one rather than only naming the worst few.
+     * `over` is the same test `passages` uses — clearing the document
+     * threshold is not enough on its own.
+     */
+    lines?: { text: string; score: number; over: boolean }[];
+    /** The bar a sentence had to clear to be called out, for the same draft. */
+    sentenceCut?: number;
+  };
+  /** Why MELD is missing, when it is. The statistics still stand. */
+  unavailable?: string;
+  signals: AiSignal[];
+  /** 0-100 from the local statistics alone. */
+  localScore: number;
+  verdict: string;
+}
+
+/**
+ * One pass over the draft, and everything it produced.
+ *
+ * Deliberately a single object behind a single button. The three passes used
+ * to be three tabs a student ran separately, which meant the usual outcome was
+ * one of them run and the other two forgotten — and a rubric score means
+ * something different once you know a paragraph reads as machine-written.
+ * They are written together, read together, and downloadable as one document.
+ */
+export interface EssayReport {
+  at: number;
+  /** Words at the time of the run, so a stale report shows as stale. */
+  words: number;
+  rubric: EssayFeedback;
+  lines: LineReview;
+  detection: AiDetection;
+}
+
+/**
+ * Which half of Slates an essay belongs to.
+ *
+ * The two are different jobs. A college essay is one of a set with a deadline
+ * attached, written for a specific application, and it matters how it scores;
+ * a school essay is coursework, tied to an assignment on the board. They were
+ * one undifferentiated list for a while, which meant a personal statement and
+ * a history paper sat next to each other with the same affordances and neither
+ * got the ones it needed.
+ */
+export type EssayScope = "college" | "school";
+
+/**
+ * What an essay is judged on.
+ *
+ * Declared here rather than imported from `rubric.ts` — that module imports
+ * `EssayKind` from this one, and a rubric stored on an essay would close the
+ * cycle. `rubric.ts` re-exports this as its own `Rubric`.
+ */
+export interface Rubric {
+  label: string;
+  criteria: { name: string; detail: string }[];
+  /** A closing instruction about what this kind of essay must not do. */
+  note: string;
+}
+
+/**
+ * A finished voice call, kept so it can be read back.
+ *
+ * The transcript used to live in React state for exactly as long as the call
+ * did: hanging up, or even navigating to another view mid-conversation, took
+ * the whole thing with it. A student who talked through their college list for
+ * twenty minutes had nothing afterwards but whatever the counselor happened to
+ * save as a memory — and no way to check what it actually said.
+ */
+export interface CallRecord {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  /** Connected seconds, so the list can say how long it ran. */
+  seconds: number;
+  turns: { role: "user" | "assistant"; text: string }[];
+  /** Memories the counselor saved during the call. */
+  saved: number;
 }
 
 export interface Essay {
   id: string;
   title: string;
+  /** Absent on essays written before the two halves were split — see essayScope(). */
+  scope?: EssayScope;
   kind: EssayKind;
   /** The prompt as the application prints it. */
   prompt: string;
@@ -175,8 +343,15 @@ export interface Essay {
   /** A Schoology assignment this is being written for, when it's coursework. */
   assignmentId?: string;
   assignmentTitle?: string;
-  feedback?: EssayFeedback;
-  aiCheck?: AiCheck;
+  report?: EssayReport;
+  /**
+   * A rubric read off the teacher's own handout, which replaces the built-in
+   * one for this essay. Stored on the essay rather than globally: two history
+   * papers in the same term are graded on different sheets.
+   */
+  customRubric?: Rubric;
+  /** What it was read from, so the panel can say where it came from. */
+  customRubricSource?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -211,47 +386,9 @@ export interface Task {
   /** YYYY-MM-DD, or absent when the step has no natural deadline. */
   dueDate?: string;
   status: TaskStatus;
-  source: "counselor" | "student";
-  createdAt: number;
-  updatedAt: number;
-}
-
-export type DocumentKind =
-  | "activity-list"
-  | "brag-sheet"
-  | "checklist"
-  | "college-research"
-  | "essay-outline"
-  | "essay-brainstorm"
-  | "letter-draft"
-  | "study-plan"
-  | "timeline"
-  | "summary"
-  | "notes"
-  | "other";
-
-export const DOCUMENT_KINDS: DocumentKind[] = [
-  "activity-list",
-  "brag-sheet",
-  "checklist",
-  "college-research",
-  "essay-outline",
-  "essay-brainstorm",
-  "letter-draft",
-  "study-plan",
-  "timeline",
-  "summary",
-  "notes",
-  "other",
-];
-
-/** A lasting artifact, in Markdown. The counselor writes these instead of walls of chat. */
-export interface CounselorDoc {
-  id: string;
-  kind: DocumentKind;
-  title: string;
-  content: string;
-  source: "counselor" | "student";
+  source: "counselor" | "student" | "plan";
+  category?: PlanTaskCategory;
+  planItemId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -374,6 +511,8 @@ export interface ChanceResult {
 
 /** One line in the counselor's live "working on it" panel. */
 export interface ActivityStep {
+  id?: string;
+  name?: string;
   label: string;
   state: "run" | "ok" | "fail";
   /** Filled in when the step resolves, so the badge shows real elapsed time. */
@@ -402,13 +541,6 @@ export interface AskQuestion {
   multi: boolean;
 }
 
-export interface DocRef {
-  id: string;
-  kind: DocumentKind;
-  title: string;
-  action: "created" | "updated";
-}
-
 export interface MeetingRef {
   id: string;
   topic: string;
@@ -427,7 +559,8 @@ export interface ChatMessage {
   steps?: ActivityStep[];
   /** Set when an activity panel's work has finished, so it can collapse. */
   done?: boolean;
-  documents?: DocRef[];
+  reasoning?: string;
+  attachments?: Attachment[];
   meetings?: MeetingRef[];
   sources?: Source[];
   /** Set when this turn ended by asking the student a structured question set. */
@@ -444,10 +577,10 @@ export interface Thread {
 
 /** Everything the counselor knows, in one object. */
 export interface CounselorState {
+  schemaVersion: 2;
   profile: CounselorProfile;
   memories: Memory[];
   tasks: Task[];
-  documents: CounselorDoc[];
   meetings: Meeting[];
   applications: Application[];
   list: ListEntry[];
@@ -456,7 +589,12 @@ export interface CounselorState {
   testing: TestScore[];
   awards: Award[];
   essays: Essay[];
+  /** Finished voice calls, newest first. */
+  calls: CallRecord[];
   threads: Thread[];
+  masterPlan: MasterPlan | null;
+  planProposals: PlanProposal[];
+  planRevisions: PlanRevision[];
 }
 
 /* ─────────────────────────── wire protocol ─────────────────────────── */
@@ -472,7 +610,6 @@ export interface StatePatch {
   profile?: CounselorProfile;
   memories?: Memory[];
   tasks?: Task[];
-  documents?: CounselorDoc[];
   meetings?: Meeting[];
   applications?: Application[];
   list?: ListEntry[];
@@ -480,14 +617,17 @@ export interface StatePatch {
   testing?: TestScore[];
   awards?: Award[];
   essays?: Essay[];
+  masterPlan?: MasterPlan | null;
+  planProposals?: PlanProposal[];
+  planRevisions?: PlanRevision[];
 }
 
 /** One NDJSON frame from /api/counselor/chat. */
 export type CounselorEvent =
   | { t: "delta"; v: string }
-  | { t: "tool"; label: string }
-  | { t: "tool_done"; label: string; ok: boolean }
-  | { t: "documents"; v: DocRef[] }
+  | { t: "reasoning"; v: string }
+  | { t: "tool"; id: string; name: string; label: string }
+  | { t: "tool_done"; id: string; name: string; label: string; ok: boolean }
   | { t: "meetings"; v: MeetingRef[] }
   | { t: "sources"; v: Source[] }
   | { t: "ask"; v: AskQuestion[] }

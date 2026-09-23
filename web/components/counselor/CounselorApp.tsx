@@ -3,17 +3,21 @@
 import Image from "next/image";
 import { useEffect, useMemo } from "react";
 
+import { inScope } from "@/lib/counselor/essays";
 import { useCounselor, type CounselorView } from "@/lib/counselor/store";
 import { GRADE_LABEL, profileReady } from "@/lib/counselor/state";
 import { useIdentity } from "@/lib/identity";
 import { useMode } from "@/lib/mode";
 import { Avatar, Icon, ICON } from "../ui";
+import MobileRuntimeProvider from "../MobileRuntime";
 
+import ApplicationsView from "./ApplicationsView";
 import ChatView from "./ChatView";
 import CollegesView from "./CollegesView";
-import DocumentsView from "./DocumentsView";
+import CounselorMobileNav from "./CounselorMobileNav";
+import CollegeEssaysView from "./CollegeEssaysView";
+import OverviewView from "./OverviewView";
 import PlanView from "./PlanView";
-import ProfileView from "./ProfileView";
 import VoiceView from "./VoiceView";
 
 /**
@@ -26,7 +30,11 @@ import VoiceView from "./VoiceView";
  */
 
 export default function CounselorApp() {
-  return <Shell />;
+  return (
+    <MobileRuntimeProvider>
+      <Shell />
+    </MobileRuntimeProvider>
+  );
 }
 
 interface NavDef {
@@ -39,36 +47,39 @@ interface NavDef {
 function Shell() {
   const c = useCounselor();
 
-  // Nothing the counselor says means anything without a name and a GPA, so a
-  // blank record opens on the profile rather than on an empty chat that would
-  // have to ask for all of it in prose.
-  useEffect(() => {
-    if (c.ready && !profileReady(c.profile)) c.setView("profile");
-    // Only on the transition into ready — re-running would trap the student on
-    // the profile every time they navigated away with it still incomplete.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c.ready]);
+  /*
+   * An incomplete record is pointed out rather than forced.
+   *
+   * This used to jump straight to the profile tab, which was fine while that
+   * was a tab. Settings is now a screen that takes over the window, and
+   * sending someone there on mount looped: closing it remounted the counselor,
+   * which sent them back. The chat's own "Fill in your profile" button and the
+   * warning on the college list say the same thing without hijacking anyone.
+   */
 
   return (
     <div className="shell counselor">
       <CounselorSidebar />
       <div className="main">{c.ready ? <Pane view={c.view} /> : null}</div>
+      <CounselorMobileNav />
     </div>
   );
 }
 
 function Pane({ view }: { view: CounselorView }) {
   switch (view) {
+    case "overview":
+      return <OverviewView />;
     case "voice":
       return <VoiceView />;
-    case "documents":
-      return <DocumentsView />;
+    case "essays":
+      return <CollegeEssaysView />;
     case "plan":
       return <PlanView />;
+    case "applications":
+      return <ApplicationsView />;
     case "colleges":
       return <CollegesView />;
-    case "profile":
-      return <ProfileView />;
     case "chat":
     default:
       return <ChatView />;
@@ -77,7 +88,9 @@ function Pane({ view }: { view: CounselorView }) {
 
 function CounselorSidebar() {
   const c = useCounselor();
-  const { clear } = useMode();
+  /** Only the application essays — coursework lives on the school side. */
+  const collegeEssays = c.essays.filter(inScope("college")).length;
+  const { clear, openSettings } = useMode();
   const identity = useIdentity();
 
   useEffect(() => {
@@ -89,16 +102,14 @@ function CounselorSidebar() {
   const navs = useMemo<NavDef[]>(() => {
     const openTasks = c.tasks.filter((t) => t.status === "open").length;
     return [
+      { label: "Overview", view: "overview", path: ICON.overview },
       { label: "Counselor", view: "chat", path: ICON.tutor },
-      { label: "Call", view: "voice", path: ICON.mic },
       { label: "Plan", view: "plan", path: ICON.checklist, count: openTasks },
-      { label: "Documents", view: "documents", path: ICON.file, count: c.documents.length },
-      { label: "Colleges", view: "colleges", path: ICON.bands, count: c.list.length },
-      { label: "Profile", view: "profile", path: ICON.settings },
+      { label: "Applications", view: "applications", path: ICON.assignments, count: c.applications.length },
+      { label: "Essays", view: "essays", path: ICON.essay, count: collegeEssays },
+      { label: "Call", view: "voice", path: ICON.mic },
     ];
-  }, [c.tasks, c.documents.length, c.list.length]);
-
-  const incomplete = c.ready && !profileReady(c.profile);
+  }, [c.tasks, c.applications.length, collegeEssays]);
 
   return (
     <aside className="counselor-rail">
@@ -130,9 +141,7 @@ function CounselorSidebar() {
               <span className="truncate" style={{ flex: 1 }}>
                 {n.label}
               </span>
-              {n.view === "profile" && incomplete ? (
-                <span className="counselor-dot" aria-label="Incomplete" />
-              ) : n.count ? (
+              {n.count ? (
                 <span className="counselor-count">{n.count}</span>
               ) : null}
             </button>
@@ -146,8 +155,8 @@ function CounselorSidebar() {
         <button
           type="button"
           className="counselor-me"
-          onClick={() => c.setView("profile")}
-          aria-label="Open your profile"
+          onClick={openSettings}
+          aria-label="Open settings"
         >
           <Avatar src={identity.avatar} name={identity.name} size={28} />
           <div style={{ minWidth: 0, flex: 1 }}>

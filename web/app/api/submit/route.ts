@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * Proxies a real submission to the local scraper, which drives Schoology's own
@@ -10,7 +11,7 @@ import type { NextRequest } from "next/server";
  * before answering would throw away exactly the progress the portal wants to
  * show.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 export async function POST(req: NextRequest) {
   try {

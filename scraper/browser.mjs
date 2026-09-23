@@ -28,8 +28,48 @@ export function writeConfig(patch) {
   fs.writeFileSync(CONFIG, JSON.stringify({ ...readConfig(), ...patch }, null, 2));
 }
 
+/**
+ * Clear a lock left behind by a browser that died without tidying up.
+ *
+ * Chrome claims a profile with a `SingletonLock` symlink pointing at
+ * `<host>-<pid>`. A clean exit removes it; a SIGKILL, a crash or a power cut
+ * does not, and every later launch then fails against a process that no longer
+ * exists. The profile is ours alone and only one browser ever uses it, so a
+ * lock naming a dead pid is always stale and never a second live session.
+ */
+function clearStaleProfileLock() {
+  let target;
+  try {
+    target = fs.readlinkSync(path.join(PROFILE, "SingletonLock"));
+  } catch {
+    return; // No lock, or not a symlink. Nothing to do.
+  }
+
+  const pid = Number(/-(\d+)$/.exec(target)?.[1]);
+  if (Number.isFinite(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0); // Signal 0 only tests for existence.
+      return; // Still running — leave it alone.
+    } catch (err) {
+      // ESRCH means no such process; EPERM means it exists but isn't ours,
+      // which is still a live process and not ours to clear.
+      if (err?.code === "EPERM") return;
+    }
+  }
+
+  for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    try {
+      fs.unlinkSync(path.join(PROFILE, name));
+    } catch {
+      // Already gone.
+    }
+  }
+  console.log(`[browser] cleared a stale profile lock from pid ${pid || "?"}`);
+}
+
 export async function launch({ headless = true } = {}) {
   fs.mkdirSync(PROFILE, { recursive: true });
+  clearStaleProfileLock();
   return chromium.launchPersistentContext(PROFILE, {
     channel: "chrome", // use the installed Chrome; no browser download
     headless,

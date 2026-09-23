@@ -1,11 +1,12 @@
 "use client";
 
-import "katex/dist/katex.min.css";
-
+import { Children, isValidElement, type ComponentProps, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+
+import { renderKatexHtml } from "@/lib/katex-html";
+import { prepareMathMarkdown } from "@/lib/math-text";
 
 /**
  * Renders the tutor's reply through the same `.prose` rules a teacher's own
@@ -13,26 +14,64 @@ import remarkMath from "remark-math";
  * same voice everywhere in Slates instead of a second, slightly different
  * markdown look showing up just for the tutor.
  *
- * Maths goes through KaTeX. A tutor that answers in fractions and exponents
- * was writing them as flat text — "(2 + (−4))/2", "3cos(2(x − π/4)) − 1" —
- * which is the notation a student has to decode rather than the one their
- * textbook uses. `$…$` renders inline, `$$…$$` on its own line.
+ * Maths is parsed by remark-math (before GFM, so `_` in `$C_L$` is a
+ * subscript, not italic) and typeset with the same KaTeX as `MathText`.
  */
 export default function TutorMarkdown({ text, className }: { text: string; className?: string }) {
   return (
     <div className={["prose", className].filter(Boolean).join(" ")}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        /*
-         * `strict: false` keeps one bad expression from throwing: the model
-         * occasionally emits a command KaTeX doesn't know, and a whole reply
-         * failing to render over one stray macro is far worse than that macro
-         * showing in red.
-         */
-        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
+        remarkPlugins={[remarkMath, remarkGfm]}
+        components={{
+          code: MarkdownCode,
+          pre: MarkdownPre,
+        }}
       >
-        {text}
+        {prepareMathMarkdown(text)}
       </ReactMarkdown>
     </div>
   );
+}
+
+function mathKind(className?: string): "inline" | "display" | null {
+  if (!className?.includes("language-math")) return null;
+  return className.includes("math-display") ? "display" : "inline";
+}
+
+function MarkdownCode({
+  className,
+  children,
+  ...props
+}: ComponentProps<"code">) {
+  const kind = mathKind(className);
+  if (kind) {
+    const tex = String(children ?? "").replace(/\n$/, "");
+    return (
+      <span
+        className={kind === "display" ? "katex-display" : undefined}
+        aria-label={tex}
+        dangerouslySetInnerHTML={{ __html: renderKatexHtml(tex, kind === "display") }}
+      />
+    );
+  }
+  return (
+    <code className={className} {...props}>
+      {children}
+    </code>
+  );
+}
+
+/** remark-math wraps display maths in `<pre><code class="language-math">`. */
+function MarkdownPre({ children, ...props }: ComponentProps<"pre">) {
+  const only = onlyChild(children);
+  if (only && mathKind(only.props.className) === "display") {
+    return <>{only}</>;
+  }
+  return <pre {...props}>{children}</pre>;
+}
+
+function onlyChild(children: ReactNode) {
+  const list = Children.toArray(children);
+  const first = list[0];
+  return list.length === 1 && isValidElement<{ className?: string }>(first) ? first : null;
 }

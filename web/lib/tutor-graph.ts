@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { escapeBareLatexInJson } from "./math-text";
+
 /**
  * A graph the tutor plotted with Desmos — asked for directly in chat, folded
  * into a study guide, or attached to a graphing question in a quiz. One shape
@@ -42,7 +44,7 @@ const TRAILING_OPEN_RE = /\[\[graph(?:\s+title="[^"]*")?\]\][\s\S]*$/;
 
 function toGraph(title: string | undefined, raw: string): TutorGraph | null {
   try {
-    const parsed = TutorGraphSchema.parse(JSON.parse(raw));
+    const parsed = TutorGraphSchema.parse(JSON.parse(escapeBareLatexInJson(raw)));
     return { ...parsed, title: parsed.title ?? title?.trim() };
   } catch {
     return null;

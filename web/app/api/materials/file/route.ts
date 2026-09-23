@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * The bytes of one Schoology attachment, proxied straight through.
@@ -7,7 +8,7 @@ import type { NextRequest } from "next/server";
  * the point is that the viewer can start drawing the first page while the
  * rest is still arriving. The scraper is what actually authenticates.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 export async function GET(req: NextRequest) {
   const path = req.nextUrl.searchParams.get("path") ?? "";

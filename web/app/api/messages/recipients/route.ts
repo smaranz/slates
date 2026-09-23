@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { SCRAPER_URL } from "@/lib/ports";
 
 /**
  * Looks a name up in Schoology's own directory, through the local scraper —
@@ -6,7 +7,7 @@ import type { NextRequest } from "next/server";
  *
  * A plain read, so this answers as JSON rather than a stream.
  */
-const SCRAPER = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const SCRAPER = SCRAPER_URL;
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q") ?? "";

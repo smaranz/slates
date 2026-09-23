@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { escapeBareLatexInJson } from "./math-text";
 import { TutorGraphSchema, type TutorGraph } from "./tutor-graph";
 
 /**
@@ -57,7 +58,7 @@ const QuizQuestionSchema = z.union([
   }),
 ]);
 
-const QuizSchema = z.object({
+export const QuizSchema = z.object({
   title: z.string().optional(),
   questions: z.array(QuizQuestionSchema).min(1).max(20),
 });
@@ -77,12 +78,15 @@ describe its syntax):
   [[/quiz]]
 Requirements: valid JSON, no comments or trailing commas. "answer" is the
 zero-based index of the correct choice. Write plausible wrong choices, not
-throwaway ones. A rubric is what you'd grade against, not the answer itself —
-never restate the sampleAnswer inside it. Keep any reply text outside the
-block to one short sentence introducing the set; the questions themselves
-carry the substance. A question about reading, sketching, or comparing a
-graph gets its own "graph" field instead of describing the graph in the
-prompt: {"type":"mcq","prompt":"...","graph":{"expressions":["y=x^2-4"]},
+throwaway ones. Prompts, choices, explanations, rubrics and sample answers
+use the same $LaTeX$ as a chat reply — it is rendered, so write
+$\\triangle ABC$ and $40^\\circ$, not "triangle ABC" or "40 degrees". A
+rubric is what you'd grade against, not the answer itself — never restate
+the sampleAnswer inside it. Keep any reply text outside the block to one
+short sentence introducing the set; the questions themselves carry the
+substance. A question about reading, sketching, or comparing a graph gets
+its own "graph" field instead of describing the graph in the prompt:
+{"type":"mcq","prompt":"...","graph":{"expressions":["y=x^2-4"]},
 "choices":[...],"answer":0} — same {"expressions":[...]} shape as a
 standalone [[graph]] block. Only include "graph" on a question that is
 actually about a graph; leave the field off entirely otherwise; never send
@@ -130,7 +134,7 @@ export function parseTutorQuiz(text: string): { clean: string; quiz: Quiz | null
   if (!match) return { clean: text, quiz: null };
 
   try {
-    const parsed = QuizSchema.parse(dropInvalidGraphs(JSON.parse(match[1])));
+    const parsed = QuizSchema.parse(dropInvalidGraphs(JSON.parse(escapeBareLatexInJson(match[1]))));
     return { clean: (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim(), quiz: parsed };
   } catch {
     return { clean: text, quiz: null };

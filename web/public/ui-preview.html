@@ -1,0 +1,539 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<!--
+  The preview sandbox.
+
+  A registry hands over TSX source, not a rendered component, so seeing what a
+  component looks like means compiling it here: Babel turns the file into JS,
+  every import is rewritten to something this page can actually load, and the
+  result is imported as a module and mounted. Nothing is installed and no build
+  step runs — it all happens in this frame, in the time it takes to fetch.
+
+  It lives in its own file rather than a srcdoc string so it can be sandboxed
+  without `allow-same-origin`. Registry code is somebody else's JavaScript; it
+  runs in an opaque origin where it cannot read the app's storage, its cookies,
+  or the DOM of the window around it.
+-->
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script>
+  /*
+   * Registry components are written against shadcn's token names — `bg-card`,
+   * `text-muted-foreground`, `rounded-lg` — which are project conventions, not
+   * Tailwind defaults. Without them every component renders as transparent
+   * boxes with black text, which would say nothing about how it looks.
+   */
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          border: "hsl(var(--border))",
+          input: "hsl(var(--input))",
+          ring: "hsl(var(--ring))",
+          background: "hsl(var(--background))",
+          foreground: "hsl(var(--foreground))",
+          primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
+          secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
+          destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+          muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
+          accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+          popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
+          card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+        },
+        borderRadius: {
+          lg: "var(--radius)",
+          md: "calc(var(--radius) - 2px)",
+          sm: "calc(var(--radius) - 4px)",
+        },
+        keyframes: {
+          "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
+          "accordion-up": { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
+        },
+        animation: {
+          "accordion-down": "accordion-down 0.2s ease-out",
+          "accordion-up": "accordion-up 0.2s ease-out",
+        },
+      },
+    },
+  };
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.1.0",
+    "react/jsx-runtime": "https://esm.sh/react@19.1.0/jsx-runtime",
+    "react/jsx-dev-runtime": "https://esm.sh/react@19.1.0/jsx-dev-runtime",
+    "react-dom": "https://esm.sh/react-dom@19.1.0?external=react",
+    "react-dom/client": "https://esm.sh/react-dom@19.1.0/client?external=react"
+  }
+}
+</script>
+<style>
+  /* shadcn's default palette, both themes, so tokens resolve to real colors. */
+  :root {
+    --background: 0 0% 100%; --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%; --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%; --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%; --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%; --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%; --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%; --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%; --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%; --input: 240 5.9% 90%; --ring: 240 10% 3.9%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 240 10% 3.9%; --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%; --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%; --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%; --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%; --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%; --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%; --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%; --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%; --input: 240 3.7% 15.9%; --ring: 240 4.9% 83.9%;
+  }
+  html, body { margin: 0; }
+  body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 28px 20px;
+    box-sizing: border-box;
+  }
+  #root { width: 100%; max-width: 760px; }
+  /* A component given no props can legitimately render nothing; centring keeps
+     whatever it does render from hugging the corner. */
+  #root > * { margin-inline: auto; }
+  .frame-note {
+    font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    color: hsl(var(--muted-foreground));
+    text-align: center;
+    max-width: 46ch;
+    margin: 0 auto;
+  }
+  .frame-note.bad {
+    color: hsl(var(--destructive));
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: none;
+    font-size: 11.5px;
+  }
+  .frame-stub {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border: 1px dashed hsl(var(--border));
+    border-radius: 6px; font: 11px ui-monospace, Menlo, monospace;
+    color: hsl(var(--muted-foreground));
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import * as React from "react";
+import { createRoot } from "react-dom/client";
+
+const root = createRoot(document.getElementById("root"));
+const CDN = "https://esm.sh";
+
+/** React must be one copy, or hooks throw the moment a dependency renders. */
+const EXTERNAL = "?external=react,react-dom";
+
+function note(text, bad) {
+  root.render(React.createElement("p", { className: "frame-note" + (bad ? " bad" : "") }, text));
+}
+
+/*
+ * Imports a registry file can make that no CDN can satisfy.
+ *
+ * `@/lib/utils` is shadcn's own two-line helper — every component imports it,
+ * and it exists in the user's project, not in any package. The `next/*` ones
+ * are framework modules that only mean something inside a Next build. Each
+ * gets a real, working stand-in rather than a placeholder, because a component
+ * whose className merging silently does nothing looks broken in a way that
+ * would be blamed on the component.
+ */
+const SHIMS = {
+  "@/lib/utils": `
+    import { clsx } from "${CDN}/clsx@2.1.1";
+    import { twMerge } from "${CDN}/tailwind-merge@2.5.4";
+    export function cn(...i) { return twMerge(clsx(i)); }
+    export default { cn };
+  `,
+  "next/image": `
+    import React from "react";
+    export default function Image({ src, alt = "", fill, priority, quality, loader, placeholder, blurDataURL, unoptimized, ...rest }) {
+      const url = typeof src === "object" && src ? (src.src ?? "") : src;
+      const style = fill
+        ? { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", ...(rest.style || {}) }
+        : rest.style;
+      return React.createElement("img", { ...rest, style, src: url, alt });
+    }
+  `,
+  "next/link": `
+    import React from "react";
+    export default React.forwardRef(function Link({ href, prefetch, replace, scroll, shallow, locale, ...rest }, ref) {
+      // Inert on purpose: a preview should never navigate the frame away.
+      return React.createElement("a", { ...rest, ref, href: "#", onClick: (e) => e.preventDefault() });
+    });
+  `,
+  "next-themes": `
+    export const useTheme = () => ({
+      theme: document.documentElement.classList.contains("dark") ? "dark" : "light",
+      resolvedTheme: document.documentElement.classList.contains("dark") ? "dark" : "light",
+      systemTheme: "light",
+      themes: ["light", "dark"],
+      setTheme: () => {},
+    });
+    export const ThemeProvider = ({ children }) => children;
+  `,
+  "next/navigation": `
+    const noop = () => {};
+    export const useRouter = () => ({ push: noop, replace: noop, back: noop, forward: noop, refresh: noop, prefetch: noop });
+    export const usePathname = () => "/";
+    export const useSearchParams = () => new URLSearchParams();
+    export const useParams = () => ({});
+    export const redirect = noop;
+    export const notFound = noop;
+  `,
+};
+
+/**
+ * Stands in for an import that could not be resolved.
+ *
+ * Rather than failing the whole preview because one sub-component wasn't
+ * published alongside its parent, the missing piece renders as a labelled
+ * dashed box. You still see the component's real layout, and the box says
+ * plainly which part isn't the real thing.
+ */
+window.__stub = (spec) => {
+  const label = spec.split("/").pop();
+  const make = (name) => {
+    /*
+     * A plain function, deliberately. These stand in for both components and
+     * hooks — a registry imports `useTheme` from its own theme file exactly
+     * the way it imports a component — and a function satisfies both callers:
+     * React renders it, and a hook call returns an element whose fields read
+     * as undefined instead of throwing.
+     */
+    function Stub(props) {
+      return React.createElement("span", { className: "frame-stub" }, (props && props.children) ?? `${name} · ${label}`);
+    }
+    Stub.displayName = name;
+    return Stub;
+  };
+  const cache = new Map();
+  return new Proxy(function () {}, {
+    get(_t, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "__esModule") return true;
+      if (!cache.has(prop)) cache.set(prop, make(prop));
+      return cache.get(prop);
+    },
+    apply: () => null,
+  });
+};
+
+/**
+ * Finds the file a specifier refers to.
+ *
+ * Registries publish paths from whatever tree they build from — one ships
+ * `registry/new-york/ui/button.tsx`, another `components/ui/button.tsx` —
+ * while the import inside the file says `@/components/ui/button`. Matching on
+ * the tail of the path is what survives both conventions.
+ */
+function findFile(spec, files) {
+  const wanted = spec.replace(/^[./]+/, "").replace(/^@\//, "").replace(/\.(tsx?|jsx?)$/, "");
+  const tail = wanted.split("/").pop();
+  if (!tail) return null;
+
+  const candidates = [...files.keys()].filter((p) => {
+    const bare = p.replace(/\.(tsx?|jsx?|css)$/, "");
+    return bare === wanted || bare.endsWith("/" + wanted) || bare.endsWith("/" + tail) || bare === tail;
+  });
+  // Longest match wins, so `ui/button` beats a stray `button` elsewhere.
+  candidates.sort((a, b) => b.length - a.length);
+  const exact = candidates.find((p) => p.replace(/\.(tsx?|jsx?|css)$/, "").endsWith("/" + wanted));
+  return exact ?? candidates[0] ?? null;
+}
+
+/*
+ * Packages that have shipped a breaking rename since the components using them
+ * were published. The CDN serves `latest`, so shadcn's resizable — still
+ * written against `PanelGroup`, which react-resizable-panels renamed to
+ * `Group` in v3 — renders as an undefined element type. Pinning the major the
+ * component was written against is the difference between seeing it and
+ * seeing a React error about something the component never did wrong.
+ */
+const PINS = { "react-resizable-panels": "^2" };
+
+/** A bare package name → a CDN module URL, with React kept external. */
+function cdnUrl(spec) {
+  const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
+  const pin = PINS[pkg];
+  const pinned = pin ? spec.replace(pkg, `${pkg}@${pin}`) : spec;
+  return `${CDN}/${pinned}${EXTERNAL}`;
+}
+
+/**
+ * Compiles one file and returns a URL its dependents can import.
+ *
+ * The rewriting happens as a Babel plugin rather than by patching text: import
+ * statements are easy to match by eye and hard to match by regex, and a string
+ * in the file body that merely looks like an import would otherwise be
+ * rewritten too.
+ */
+async function compile(path, files, built, stack) {
+  if (built.has(path)) return built.get(path);
+  if (stack.has(path)) return built.get(path) ?? "data:text/javascript,export default null";
+  stack.add(path);
+
+  const source = files.get(path) ?? "";
+
+  if (path.endsWith(".css")) {
+    const style = document.createElement("style");
+    style.textContent = source;
+    document.head.appendChild(style);
+    const url = URL.createObjectURL(new Blob(["export default null"], { type: "text/javascript" }));
+    built.set(path, url);
+    return url;
+  }
+
+  // Resolve every dependency first; the plugin below has to run synchronously.
+  const specs = [...source.matchAll(/(?:^|[\s;])(?:import|export)[\s\S]{0,400}?from\s*["']([^"']+)["']/g)]
+    .map((m) => m[1])
+    .concat([...source.matchAll(/(?:^|[\s;])import\s*["']([^"']+)["']/g)].map((m) => m[1]));
+
+  /*
+   * Only sibling files need resolving up front, because compiling them is
+   * async and the plugin below is not. Everything else is decided inline by
+   * resolveSpec — which matters more than it looks: the JSX transform injects
+   * its own `react/jsx-runtime` import as it runs, long after this scan, and a
+   * specifier the plugin doesn't recognise gets stubbed. Stubbing the JSX
+   * runtime replaces `jsx()` with a component object, and every render dies on
+   * "_jsx is not a function".
+   */
+  const internal = new Map();
+  for (const spec of new Set(specs)) {
+    if (spec.startsWith("@/") || spec.startsWith(".")) {
+      const hit = findFile(spec, files);
+      if (hit) internal.set(spec, await compile(hit, files, built, stack));
+    }
+  }
+
+  const isReact = (spec) => spec === "react" || spec.startsWith("react/") || spec.startsWith("react-dom");
+
+  const resolveSpec = (spec) => {
+    if (isReact(spec)) return spec; // the import map already points at one copy
+    if (spec.startsWith("@/") || spec.startsWith(".")) {
+      // A real file beats a shim: a library shipping its own utils may export
+      // more than `cn`, and the shim would satisfy none of it.
+      return internal.get(spec) ?? (SHIMS[spec] ? shimUrl(spec) : null);
+    }
+    if (SHIMS[spec]) return shimUrl(spec);
+    return cdnUrl(spec);
+  };
+
+  const rewrite = ({ types: t }) => ({
+    visitor: {
+      "ImportDeclaration|ExportNamedDeclaration|ExportAllDeclaration"(p) {
+        const node = p.node.source;
+        if (!node) return;
+        const target = resolveSpec(node.value);
+
+        if (target) {
+          node.value = target;
+          return;
+        }
+        if (p.node.type !== "ImportDeclaration") {
+          p.remove();
+          return;
+        }
+
+        /*
+         * Unresolved: turn the import into a destructure off the stub. It has
+         * to become a runtime read, because ESM checks named imports against
+         * the real exports of a module at link time and a proxy has none.
+         */
+        const call = t.callExpression(t.identifier("__stub"), [t.stringLiteral(node.value)]);
+        const decls = [];
+        for (const s of p.node.specifiers) {
+          if (s.type === "ImportDefaultSpecifier") {
+            decls.push(t.variableDeclarator(t.identifier(s.local.name), t.memberExpression(call, t.identifier("default"))));
+          } else if (s.type === "ImportNamespaceSpecifier") {
+            decls.push(t.variableDeclarator(t.identifier(s.local.name), call));
+          } else {
+            const imported = s.imported.name ?? s.imported.value;
+            decls.push(
+              t.variableDeclarator(t.identifier(s.local.name), t.memberExpression(call, t.stringLiteral(imported), true))
+            );
+          }
+        }
+        if (!decls.length) p.remove();
+        else p.replaceWith(t.variableDeclaration("const", decls));
+      },
+    },
+  });
+
+  const { code } = Babel.transform(source, {
+    filename: path,
+    presets: [
+      ["react", { runtime: "automatic" }],
+      ["typescript", { isTSX: true, allExtensions: true, onlyRemoveTypeImports: false }],
+    ],
+    plugins: [rewrite],
+    sourceType: "module",
+  });
+
+  const url = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  built.set(path, url);
+  stack.delete(path);
+  return url;
+}
+
+const shimCache = new Map();
+function shimUrl(spec) {
+  if (!shimCache.has(spec)) {
+    shimCache.set(spec, URL.createObjectURL(new Blob([SHIMS[spec]], { type: "text/javascript" })));
+  }
+  return shimCache.get(spec);
+}
+
+/**
+ * Picks what to put on screen out of a module's exports.
+ *
+ * A registry file usually exports a family — `Card`, `CardHeader`,
+ * `CardFooter` — and rendering the wrong member shows an empty div. The
+ * component named after the file is the one worth showing; failing that, the
+ * shortest capitalised export, which is reliably the parent rather than one of
+ * its parts.
+ */
+function pickComponent(mod, name) {
+  const wanted = name.replace(/[-_](\w)/g, (_, c) => c.toUpperCase()).replace(/^\w/, (c) => c.toUpperCase());
+
+  if (typeof mod.default === "function" || (mod.default && typeof mod.default === "object")) return mod.default;
+
+  const exported = Object.entries(mod).filter(
+    ([k, v]) => /^[A-Z]/.test(k) && (typeof v === "function" || (v && typeof v === "object" && ("render" in v || "$$typeof" in v)))
+  );
+  if (!exported.length) return null;
+
+  const exact = exported.find(([k]) => k === wanted) ?? exported.find(([k]) => k.toLowerCase() === wanted.toLowerCase());
+  if (exact) return exact[1];
+
+  exported.sort((a, b) => a[0].length - b[0].length);
+  return exported[0][1];
+}
+
+/**
+ * Reports a failure in the terms that actually explain it.
+ *
+ * The most common one by far isn't a broken component or a broken compile: it
+ * is a component that needs data, rendered with none, throwing on the array it
+ * expected. The library published no demo to supply it, so the honest answer
+ * points at the source rather than showing a stack trace.
+ */
+function fail(err) {
+  const message = String(err && err.message ? err.message : err);
+  const needsProps =
+    /Cannot read propert|Cannot convert undefined|undefined is not|of undefined|of null|reading '/.test(message);
+
+  if (needsProps) {
+    note("This one needs data passed in, and the library publishes no demo to supply it. The full source is on the Code tab.");
+  } else {
+    note(`Couldn't run this one.\n\n${message}`, true);
+  }
+  parent.postMessage({ type: "preview", ok: false, reason: message }, "*");
+}
+
+/** Keeps one component's failure from blanking the frame. */
+class Boundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) {
+      // Same reasoning as fail(): a missing prop is not a broken component.
+      const m = this.state.err.message ?? "";
+      if (/Cannot read propert|Cannot convert undefined|undefined is not|of undefined|of null|reading '/.test(m)) {
+        return React.createElement(
+          "p",
+          { className: "frame-note" },
+          "This one needs data passed in, and the library publishes no demo to supply it. The full source is on the Code tab."
+        );
+      }
+      return React.createElement("p", { className: "frame-note bad" }, `Render failed\n\n${m}`);
+    }
+    return this.props.children;
+  }
+}
+
+let Babel = null;
+
+async function render({ files: list, entry, name, theme }) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  note("Compiling…");
+
+  try {
+    if (!Babel) {
+      Babel = await import(`${CDN}/@babel/standalone@7.26.4`);
+      if (Babel.default && !Babel.transform) Babel = Babel.default;
+    }
+
+    const files = new Map(list.map((f) => [f.path, f.content]));
+    const entryPath = files.has(entry) ? entry : findFile(entry, files) ?? [...files.keys()].find((p) => !p.endsWith(".css"));
+    if (!entryPath) throw new Error("Nothing to compile.");
+
+    const url = await compile(entryPath, files, new Map(), new Set());
+    const mod = await import(url);
+    const Component = pickComponent(mod, name || entryPath.split("/").pop().replace(/\.\w+$/, ""));
+
+    if (!Component) {
+      note("That file exports no component to render — the code is on the other tab.");
+      parent.postMessage({ type: "preview", ok: false, reason: "no-component" }, "*");
+      return;
+    }
+
+    root.render(React.createElement(Boundary, null, React.createElement(Component, null)));
+
+    /*
+     * A component that needs props can legitimately draw nothing at all, which
+     * is worth saying — but only once React has actually committed. An
+     * animation frame fires before the commit, so checking there replaced
+     * perfectly good components with a note claiming they drew nothing.
+     */
+    setTimeout(() => {
+      const box = document.getElementById("root");
+      /*
+       * Measured, not counted. A wrapper that expects children renders a real
+       * element of zero height, so having children proves nothing about
+       * whether anything is visible — and the note is appended rather than
+       * rendered over the top, so it can never displace a working component.
+       */
+      const empty = box.getBoundingClientRect().height < 4;
+      if (empty && !box.querySelector(".frame-note")) {
+        const p = document.createElement("p");
+        p.className = "frame-note";
+        p.textContent = "This one wraps content you pass in, so there's nothing to draw on its own. The source is on the Code tab.";
+        box.appendChild(p);
+      }
+      parent.postMessage({ type: "preview", ok: !empty }, "*");
+    }, 450);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+addEventListener("message", (e) => {
+  if (e.data && e.data.type === "render") void render(e.data);
+});
+
+parent.postMessage({ type: "ready" }, "*");
+</script>
+</body>
+</html>

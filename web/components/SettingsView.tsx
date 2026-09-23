@@ -50,8 +50,18 @@ const PROVIDER_ICON: Record<ProviderInfo["backend"], ReactNode> = {
   ),
 };
 
-export default function SettingsView() {
+/**
+ * `section` splits this screen between the settings tabs.
+ *
+ * "slates" is what belongs to the person — their name, their photo, and the
+ * button that wipes local data. "school" is what belongs to the school half:
+ * the Schoology connection, assignment reminders, and the tutor. Rendering the
+ * whole thing in both places would have put the same Profile card under two
+ * tabs, which is the duplication this reorganisation exists to remove.
+ */
+export default function SettingsView({ section = "all" }: { section?: "all" | "slates" | "school" }) {
   const s = useStore();
+  const shows = (which: "slates" | "school") => section === "all" || section === which;
   const [tutorModel, setTutorModel] = useTutorModel();
   const [tutorThinking, setTutorThinking] = useTutorThinking();
 
@@ -157,7 +167,8 @@ export default function SettingsView() {
             server-backed tutor features. Cached board data remains on this device.
           </p>
         </div>
-        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: shows("slates") && shows("school") ? "1fr 1fr" : "1fr", gap: 16 }}>
+        {shows("slates") && (
         <div className="card" style={{ padding: "20px 22px" }}>
           <span className="card-title">Profile</span>
           <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14 }}>
@@ -226,10 +237,13 @@ export default function SettingsView() {
           </div>
         </div>
 
-        <NotificationSettingsCard />
+        )}
+
+        {shows("school") && <NotificationSettingsCard />}
         </div>
 
         {/* The only sync path: a dedicated logged-in browser, driven locally. */}
+        {shows("school") && (
         <div className="card" style={{ padding: "20px 22px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span
@@ -278,7 +292,13 @@ export default function SettingsView() {
           {scraper?.running ? (
             scraper.ok === false ? (
               <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
-                Running, but the last sync failed — {scraper.error ?? "unknown error"}
+                {/* Capped as well as summarized at the source: a stack trace
+                    or a browser command line should never be able to push the
+                    rest of this screen off the page. */}
+                Running, but the last sync failed —{" "}
+                <span style={{ display: "inline-block", maxHeight: "4.5em", overflow: "hidden", verticalAlign: "bottom" }}>
+                  {(scraper.error ?? "unknown error").slice(0, 300)}
+                </span>
                 <br />
                 Your board is showing the last good copy, so nothing new will appear
                 until this is fixed.
@@ -328,7 +348,9 @@ npm run serve      # leave this running`}
             </div>
           )}
         </div>
+        )}
 
+        {shows("school") && (
         <div className="card" style={{ padding: "20px 22px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span className="card-title">AI Tutor providers</span>
@@ -432,8 +454,10 @@ npm run serve      # leave this running`}
             )}
           </div>
         </div>
+        )}
 
-        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="settings-grid" style={{ display: "grid", gridTemplateColumns: shows("slates") && shows("school") ? "1fr 1fr" : "1fr", gap: 16 }}>
+          {shows("school") && (
           <div className="card" style={{ padding: "20px 22px" }}>
             <span className="card-title">Tutor defaults</span>
             <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -450,6 +474,9 @@ npm run serve      # leave this running`}
             </div>
           </div>
 
+          )}
+
+          {shows("slates") && (
           <div className="card" style={{ padding: "20px 22px" }}>
             <span className="card-title">Data</span>
             <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -470,6 +497,7 @@ npm run serve      # leave this running`}
               Disconnect Schoology
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useHiddenApps } from "@/lib/app-prefs";
 import { useMode } from "@/lib/mode";
 import { useStore } from "@/lib/store";
 
@@ -12,25 +13,35 @@ import GradesView from "@/components/GradesView";
 import CourseView from "@/components/CourseView";
 import CalendarView from "@/components/CalendarView";
 import TutorView from "@/components/TutorView";
+import StudyView from "@/components/StudyView";
 import EssaysView from "@/components/counselor/EssaysView";
 import MessagesView from "@/components/MessagesView";
-import SettingsView from "@/components/SettingsView";
 import AssignmentView from "@/components/AssignmentView";
 import ClassesView from "@/components/ClassesView";
 import CommandPalette from "@/components/CommandPalette";
 import MobileNav from "@/components/MobileNav";
 import MobileRuntimeProvider from "@/components/MobileRuntime";
 import Launcher from "@/components/Launcher";
+import UnifiedSettings from "@/components/UnifiedSettings";
 import CounselorApp from "@/components/counselor/CounselorApp";
+import UiApp from "@/components/UiApp";
+import UsageApp from "@/components/usage/UsageApp";
 
 export default function Page() {
-  const { mode, ready } = useMode();
+  const { mode, ready, settingsOpen } = useMode();
+  const [hiddenApps] = useHiddenApps();
 
   // Nothing renders until the saved choice has been read. A frame of the
   // launcher before jumping into School would be a flash of the wrong app.
   if (!ready) return <div className="shell" />;
-  if (!mode) return <Launcher />;
+  // Settings sits above both halves rather than inside either, so it takes
+  // over the window from wherever it was opened.
+  if (settingsOpen) return <UnifiedSettings />;
+  // A remembered app that has since been hidden lands on the launcher instead.
+  if (!mode || hiddenApps.includes(mode)) return <Launcher />;
   if (mode === "counselor") return <CounselorApp />;
+  if (mode === "ui") return <UiApp />;
+  if (mode === "usage") return <UsageApp />;
   return <School />;
 }
 
@@ -54,12 +65,12 @@ function School() {
         return <CalendarView />;
       case "tutor":
         return <TutorView />;
+      case "study":
+        return <StudyView />;
       case "essays":
-        return <EssaysView />;
+        return <EssaysView scope="school" />;
       case "messages":
         return <MessagesView />;
-      case "settings":
-        return <SettingsView />;
       case "list":
         return nothingSynced ? <EmptyState /> : <ListView />;
       case "board":

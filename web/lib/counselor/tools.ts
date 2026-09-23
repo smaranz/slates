@@ -6,19 +6,19 @@ import { formatHits, libraryStatus, searchLibrary } from "./knowledge/store";
 import type { SchoolRecord } from "./school";
 import { KNOWLEDGE_TOPICS } from "./knowledge/text";
 import { COLLEGES, getCollege } from "./colleges";
+import { applyPlanOperation, dropActivity, pushRevision, revisionOf } from "./plan";
 import { uid } from "./state";
 import {
   APPLICATION_ITEMS,
-  DOCUMENT_KINDS,
   type Application,
   type ChanceBand,
   type CounselorState,
-  type DocRef,
   type AskQuestion,
   type MeetingRef,
   type Source,
   type StatePatch,
 } from "./types";
+import { PLAN_TASK_CATEGORIES, STRATEGY_AREAS, type PlanOperation } from "./plan-types";
 
 /**
  * The counselor's hands.
@@ -38,8 +38,6 @@ export interface ToolContext {
   state: CounselorState;
   /** Collections that changed this turn. */
   touched: Set<keyof StatePatch>;
-  /** Documents written this turn, surfaced as cards under the reply. */
-  docs: DocRef[];
   /** Meetings booked or moved this turn. */
   meetings: MeetingRef[];
   /** Where this turn's claims came from, shown under the reply. */
@@ -59,7 +57,6 @@ export function newToolContext(state: CounselorState, school?: SchoolRecord | nu
   return {
     state,
     touched: new Set(),
-    docs: [],
     meetings: [],
     sources: [],
     ask: null,
@@ -75,19 +72,61 @@ export function patchOf(ctx: ToolContext): StatePatch {
       case "profile": patch.profile = ctx.state.profile; break;
       case "memories": patch.memories = ctx.state.memories; break;
       case "tasks": patch.tasks = ctx.state.tasks; break;
-      case "documents": patch.documents = ctx.state.documents; break;
       case "meetings": patch.meetings = ctx.state.meetings; break;
       case "applications": patch.applications = ctx.state.applications; break;
       case "list": patch.list = ctx.state.list; break;
       case "coursework": patch.coursework = ctx.state.coursework; break;
       case "testing": patch.testing = ctx.state.testing; break;
       case "awards": patch.awards = ctx.state.awards; break;
+      case "masterPlan": patch.masterPlan = ctx.state.masterPlan; break;
+      case "planProposals": patch.planProposals = ctx.state.planProposals; break;
+      case "planRevisions": patch.planRevisions = ctx.state.planRevisions; break;
     }
   }
   return patch;
 }
 
 const ROUNDS = ["ED", "EA", "RD"] as const;
+
+const PlanOperationInputSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("update-recommendation"),
+    area: z.enum(STRATEGY_AREAS),
+    recommendationId: z.string(),
+    changes: z.object({
+      title: z.string().min(1).optional(),
+      why: z.string().min(1).optional(),
+      impact: z.string().min(1).optional(),
+      nextAction: z.string().min(1).optional(),
+      timeframe: z.string().min(1).optional(),
+      measure: z.string().min(1).optional(),
+    }),
+  }),
+  z.object({ type: z.literal("select-project"), projectId: z.string().nullable() }),
+  z.object({ type: z.literal("remove-college"), collegeId: z.string() }),
+  z.object({ type: z.literal("remove-next-step"), stepId: z.string() }),
+  z.object({
+    type: z.literal("drop-activity"),
+    name: z
+      .string()
+      .min(3)
+      .describe(
+        "The activity the student has stopped doing, named as the plan names it. Clears it out of advantages, risks, evidence, milestones, strategy, projects, essay angles and next steps in one pass."
+      ),
+  }),
+  z.object({
+    type: z.literal("revise-text"),
+    find: z.string().min(12).describe("The exact sentence as it currently appears in the plan."),
+    replace: z.string().describe("Its replacement. Empty string deletes the sentence."),
+  }),
+  z.object({
+    type: z.literal("revise-evaluation"),
+    profileSummary: z.string().min(1).optional(),
+    competitivenessReadout: z.string().min(1).optional(),
+    academicSummary: z.string().min(1).optional(),
+    extracurricularSummary: z.string().min(1).optional(),
+  }),
+]);
 
 /** A college by id, name, or something close enough to a name. */
 function resolveCollege(nameOrId: string) {
@@ -283,66 +322,160 @@ export function counselorTools(ctx: ToolContext) {
       },
     }),
 
-    /* ──────────────────────────── documents ─────────────────────────── */
+    /* ─────────────────────────── master plan ────────────────────────── */
 
-    list_documents: tool({
-      description: "Every document you've written with this student. Check here before creating one so you revise instead of duplicating.",
+    get_master_plan: tool({
+      description: "Read the student's strategic master plan before giving plan-level advice or changing it.",
       inputSchema: z.object({}),
-      execute: async () =>
-        s.documents.map((d) => ({ id: d.id, kind: d.kind, title: d.title, updatedAt: new Date(d.updatedAt).toISOString() })),
+      execute: async () => s.masterPlan ?? { missing: true },
     }),
 
-    get_document: tool({
-      description: "Read one document in full before revising it.",
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => {
-        const doc = s.documents.find((d) => d.id === id);
-        return doc ? { id: doc.id, title: doc.title, kind: doc.kind, content: doc.content } : { error: "Not found." };
+    edit_master_plan: tool({
+      description:
+        "Apply a plan correction the student directly requested. When they say they have stopped doing an activity, use `drop-activity` once — it clears every list that names it — and then `revise-evaluation` to rewrite any assessment paragraph that still describes them as doing it. Removing it one item at a time leaves most of the plan assuming it. Use a proposal for a college removal, narrative pivot, or other major strategic change.",
+      inputSchema: z.object({
+        summary: z.string().min(4),
+        operation: PlanOperationInputSchema,
+      }),
+      execute: async ({ summary, operation }) => {
+        if (!s.masterPlan) return { error: "The student has not built a master plan yet." };
+
+        /*
+         * A drop reports what it could not remove.
+         *
+         * The lines that name this activity alongside others are still in the
+         * plan afterwards, and saying only "updated: true" is what let the
+         * counselor tell a student their plan no longer mentioned something it
+         * mentioned twenty-odd times. The leftovers come back as text so the
+         * next turn has to deal with them.
+         */
+        if (operation.type === "drop-activity") {
+          const result = dropActivity(s.masterPlan, operation.name);
+          if (!result || result.removed === 0) {
+            return {
+              updated: false,
+              error: `Nothing in the plan is only about "${operation.name}".`,
+              stillMentions: result?.remaining ?? [],
+            };
+          }
+          s.planRevisions = pushRevision(s.planRevisions, revisionOf(s.masterPlan, summary));
+          s.masterPlan = { ...result.plan, version: s.masterPlan.version + 1, updatedAt: Date.now() };
+          touch("masterPlan");
+          touch("planRevisions");
+          return {
+            updated: true,
+            removed: result.removed,
+            version: s.masterPlan.version,
+            stillMentions: result.remaining,
+            note:
+              result.remaining.length > 0
+                ? `${result.remaining.length} entries name "${operation.name}" alongside other things and were kept. Rewrite each one with revise-text (exact sentence in, replacement out), or revise-evaluation for the assessment paragraphs, and do not tell the student it is gone from the plan until you have.`
+                : undefined,
+          };
+        }
+
+        const next = applyPlanOperation(s.masterPlan, operation as PlanOperation);
+        if (!next) return { error: "That plan item no longer exists or the change had no effect." };
+        s.planRevisions = pushRevision(s.planRevisions, revisionOf(s.masterPlan, summary));
+        s.masterPlan = next;
+        touch("masterPlan");
+        touch("planRevisions");
+        return { updated: true, version: next.version };
       },
     }),
 
-    create_document: tool({
+    get_plan_proposals: tool({
+      description: "Read pending and recently resolved strategic plan proposals.",
+      inputSchema: z.object({ status: z.enum(["pending", "approved", "rejected", "all"]).default("pending") }),
+      execute: async ({ status }) => s.planProposals.filter((proposal) => status === "all" || proposal.status === status),
+    }),
+
+    propose_plan_change: tool({
       description:
-        "Write a lasting artifact instead of a wall of chat: an activity list, brag sheet, deadline checklist, college research summary, essay OUTLINE or brainstorm, study plan, timeline, or a draft of an email they will send. Clean Markdown. Never their finished personal statement.",
+        "Propose a consequential strategic change for the student to approve or reject. Use this for removing a college, changing the chosen project, or a significant strategy revision.",
       inputSchema: z.object({
-        kind: z.enum(DOCUMENT_KINDS as [string, ...string[]]),
-        title: z.string().min(3).describe("Specific, e.g. 'UC activities list — draft 1'."),
-        content: z.string().min(20).describe("The full body in Markdown: headings, lists, tables where they help."),
+        summary: z.string().min(4),
+        reason: z.string().min(8),
+        evidence: z.string().min(4),
+        downside: z.string().optional(),
+        operation: PlanOperationInputSchema,
       }),
-      execute: async ({ kind, title, content }) => {
-        const now = Date.now();
-        const doc = {
+      execute: async ({ summary, reason, evidence, downside, operation }) => {
+        if (!s.masterPlan) return { error: "The student has not built a master plan yet." };
+        const proposal = {
           id: uid(),
-          kind: kind as (typeof DOCUMENT_KINDS)[number],
-          title: title.trim(),
-          content,
-          source: "counselor" as const,
+          baseVersion: s.masterPlan.version,
+          status: "pending" as const,
+          summary,
+          reason,
+          evidence,
+          downside,
+          operation: operation as PlanOperation,
+          createdAt: Date.now(),
+        };
+        s.planProposals = [proposal, ...s.planProposals].slice(0, 20);
+        touch("planProposals");
+        return { proposed: proposal.id, baseVersion: proposal.baseVersion };
+      },
+    }),
+
+    resolve_plan_proposal: tool({
+      description: "Approve or reject a pending plan proposal only after the student explicitly tells you to do so.",
+      inputSchema: z.object({ id: z.string(), decision: z.enum(["approve", "reject"]) }),
+      execute: async ({ id, decision }) => {
+        const proposal = s.planProposals.find((item) => item.id === id);
+        if (!proposal || proposal.status !== "pending") return { error: "No pending proposal with that id." };
+        if (decision === "approve") {
+          if (!s.masterPlan || proposal.baseVersion !== s.masterPlan.version) {
+            return { error: "The plan changed after this proposal was made. Review it again before approving." };
+          }
+          const next = applyPlanOperation(s.masterPlan, proposal.operation);
+          if (!next) return { error: "The proposed item no longer exists." };
+          s.planRevisions = pushRevision(s.planRevisions, revisionOf(s.masterPlan, proposal.summary));
+          s.masterPlan = next;
+          touch("masterPlan");
+          touch("planRevisions");
+        }
+        s.planProposals = s.planProposals.map((item) =>
+          item.id === id
+            ? { ...item, status: decision === "approve" ? "approved" as const : "rejected" as const, resolvedAt: Date.now() }
+            : item
+        );
+        touch("planProposals");
+        return { resolved: id, decision, version: s.masterPlan?.version };
+      },
+    }),
+
+    create_task_from_plan_step: tool({
+      description: "Turn one active master-plan next step into a trackable task. It is idempotent and will not duplicate a linked task.",
+      inputSchema: z.object({ stepId: z.string() }),
+      execute: async ({ stepId }) => {
+        const step = s.masterPlan?.nextSteps.find((item) => item.id === stepId);
+        if (!s.masterPlan || !step) return { error: "No plan step with that id." };
+        const existing = s.tasks.find((task) => task.planItemId === stepId);
+        if (existing) return { task: existing.id, existing: true };
+        const now = Date.now();
+        const task = {
+          id: uid(),
+          title: step.title,
+          detail: step.detail,
+          dueDate: step.targetDate,
+          status: "open" as const,
+          source: "plan" as const,
+          category: PLAN_TASK_CATEGORIES.includes(step.category) ? step.category : "personal" as const,
+          planItemId: step.id,
           createdAt: now,
           updatedAt: now,
         };
-        s.documents = [doc, ...s.documents];
-        touch("documents");
-        ctx.docs.push({ id: doc.id, kind: doc.kind, title: doc.title, action: "created" });
-        return { created: doc.id, title: doc.title };
-      },
-    }),
-
-    update_document: tool({
-      description: "Replace a document's body (and optionally its title). Read it with get_document first.",
-      inputSchema: z.object({
-        id: z.string(),
-        title: z.string().optional(),
-        content: z.string().min(20).describe("The full replacement Markdown body."),
-      }),
-      execute: async ({ id, title, content }) => {
-        const found = s.documents.find((d) => d.id === id);
-        if (!found) return { error: "No document with that id." };
-        s.documents = s.documents.map((d) =>
-          d.id === id ? { ...d, title: title ?? d.title, content, updatedAt: Date.now() } : d
-        );
-        touch("documents");
-        ctx.docs.push({ id, kind: found.kind, title: title ?? found.title, action: "updated" });
-        return { updated: id };
+        s.tasks = [task, ...s.tasks];
+        s.masterPlan = {
+          ...s.masterPlan,
+          nextSteps: s.masterPlan.nextSteps.map((item) => item.id === stepId ? { ...item, taskId: task.id } : item),
+          updatedAt: now,
+        };
+        touch("tasks");
+        touch("masterPlan");
+        return { task: task.id, existing: false };
       },
     }),
 
@@ -734,7 +867,7 @@ export function counselorTools(ctx: ToolContext) {
           prompt: e.prompt || undefined,
           words: (e.content.trim().match(/\S+/g) ?? []).length,
           word_limit: e.wordLimit,
-          reviewed: Boolean(e.feedback),
+          checked: Boolean(e.report),
           drafts_saved: e.versions.length,
         })),
     }),
@@ -752,8 +885,14 @@ export function counselorTools(ctx: ToolContext) {
           prompt: essay.prompt || undefined,
           word_limit: essay.wordLimit,
           content: essay.content,
-          last_review: essay.feedback
-            ? { verdict: essay.feedback.verdict, scores: essay.feedback.scores, at: new Date(essay.feedback.at).toISOString() }
+          last_report: essay.report
+            ? {
+                verdict: essay.report.rubric.verdict,
+                scores: essay.report.rubric.scores,
+                line_score: essay.report.lines.score,
+                reads_as_machine_written: essay.report.detection.meld?.flagged ?? null,
+                at: new Date(essay.report.at).toISOString(),
+              }
             : undefined,
         };
       },
@@ -974,10 +1113,12 @@ export const TOOL_LABEL: Record<string, string> = {
   get_tasks: "Reading your next steps",
   create_task: "Adding a next step",
   update_task: "Updating a next step",
-  list_documents: "Looking through your documents",
-  get_document: "Reading a document",
-  create_document: "Writing a document",
-  update_document: "Revising a document",
+  get_master_plan: "Reading your master plan",
+  edit_master_plan: "Updating your master plan",
+  get_plan_proposals: "Checking plan proposals",
+  propose_plan_change: "Preparing a plan proposal",
+  resolve_plan_proposal: "Resolving a plan proposal",
+  create_task_from_plan_step: "Adding a plan step to your tasks",
   list_meetings: "Checking your calendar",
   schedule_meeting: "Booking a check-in",
   reschedule_meeting: "Moving a check-in",

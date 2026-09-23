@@ -42,3 +42,17 @@ desktop/*.log
 mobile/.env
 mobile/node_modules/
 !mobile/.env.example
+
+# The Slates CLI is a fork of opencode with its own git history and the
+# upstream remote intact, so it can pull updates. Tracking it here would
+# embed a repo inside a repo; clone it separately or push it as its own fork.
+cli/
+
+# Local-only: a Google Cloud SDK install, Supabase CLI caches, config backups,
+# scratch files, and screenshots of real school data (this repo is public).
+/y/
+**/supabase/.temp/
+/opencode.json.*
+/*.png
+web/body.json
+web/tooltest-tmp.mts

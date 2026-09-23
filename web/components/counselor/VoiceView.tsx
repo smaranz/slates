@@ -8,8 +8,11 @@ import { getCollege } from "@/lib/counselor/colleges";
 import { buildSchoolContext } from "@/lib/counselor/school";
 import { profileReady, uid } from "@/lib/counselor/state";
 import { useCounselor } from "@/lib/counselor/store";
+import type { CallRecord } from "@/lib/counselor/types";
+import { useMode } from "@/lib/mode";
 import type { CounselorProfile, StatePatch } from "@/lib/counselor/types";
 import { useStore } from "@/lib/store";
+import { LiveOrb } from "../LiveOrb";
 import { Icon, ICON, Spinner } from "../ui";
 
 /**
@@ -38,10 +41,29 @@ const MAX_SECONDS = 30 * 60;
 export default function VoiceView() {
   const c = useCounselor();
   const school = useStore();
+  const { openSettings } = useMode();
 
   const [phase, setPhase] = useState<Phase>("idle");
+  /*
+   * hangUp runs on unmount with an empty dependency list, so it cannot read
+   * `turns` or `elapsed` from state without catching a stale copy. These
+   * mirrors are what actually gets written to the record.
+   */
+  const turnsRef = useRef<Turn[]>([]);
+  const startedAtRef = useRef<number | null>(null);
+  const savedCountRef = useRef(0);
+  const wroteRef = useRef(false);
+  /** hangUp must not depend on the store, so it reaches the saver through a ref. */
+  const saveCallRef = useRef<((call: CallRecord) => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
+
+  useEffect(() => {
+    saveCallRef.current = c.saveCall;
+  }, [c.saveCall]);
   const [muted, setMuted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [speaking, setSpeaking] = useState<"you" | "counselor" | null>(null);
@@ -86,6 +108,28 @@ export default function VoiceView() {
     rafRef.current = null;
     if (wasLive) setPhase((p) => (p === "error" ? p : "ended"));
     setSpeaking(null);
+
+    /*
+     * Keep what was said. Guarded twice over: a call nobody spoke in is not
+     * worth a row, and hangUp legitimately runs more than once (explicitly,
+     * then again on unmount), which would otherwise file the same call twice.
+     */
+    if (wasLive && !wroteRef.current) {
+      const spoken = turnsRef.current.filter((t) => t.text.trim());
+      const startedAt = startedAtRef.current;
+      if (spoken.length && startedAt) {
+        wroteRef.current = true;
+        saveCallRef.current?.({
+          id: uid(),
+          startedAt,
+          endedAt: Date.now(),
+          seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+          turns: spoken.map((t) => ({ role: t.role, text: t.text.trim() })),
+          saved: savedCountRef.current,
+        });
+      }
+    }
+    startedAtRef.current = null;
   }, []);
 
   // A call must not outlive the view. Without this, navigating to Documents
@@ -123,6 +167,7 @@ export default function VoiceView() {
         }
       }
       case "save_memory": {
+        savedCountRef.current += 1;
         const content = String(args.content ?? "").trim();
         if (!content) return { error: "Nothing to save." };
         const patch: StatePatch = {
@@ -196,14 +241,21 @@ export default function VoiceView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           state: {
+            schemaVersion: 2,
             profile: store.profile,
             memories: store.memories,
             tasks: store.tasks,
-            documents: store.documents,
             meetings: store.meetings,
             applications: store.applications,
             list: store.list,
+            coursework: store.coursework,
+            testing: store.testing,
+            awards: store.awards,
+            essays: store.essays,
             threads: [],
+            masterPlan: store.masterPlan,
+            planProposals: store.planProposals,
+            planRevisions: [],
           },
           schoolContext: buildSchoolContext(school) || undefined,
         }),
@@ -245,6 +297,9 @@ export default function VoiceView() {
 
       await pc.setRemoteDescription({ type: "answer", sdp: await answer.text() });
       setPhase("live");
+      startedAtRef.current = Date.now();
+      savedCountRef.current = 0;
+      wroteRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't start a call.");
       setPhase("error");
@@ -306,9 +361,28 @@ export default function VoiceView() {
           setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, text: String(event.transcript ?? t.text), final: true } : t)));
           break;
         }
-        case "response.done":
+        case "response.done": {
           setSpeaking(null);
+          const response = event.response as
+            | { usage?: { input_tokens?: number; output_tokens?: number } }
+            | undefined;
+          const inputTokens = response?.usage?.input_tokens ?? 0;
+          const outputTokens = response?.usage?.output_tokens ?? 0;
+          if (inputTokens || outputTokens) {
+            void fetch("/api/usage", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "record",
+                agent: "voice",
+                model: "gpt-realtime-2.1-mini",
+                inputTokens,
+                outputTokens,
+              }),
+            }).catch(() => {});
+          }
           break;
+        }
         case "response.function_call_arguments.done": {
           const name = String(event.name ?? "");
           const callId = String(event.call_id ?? "");
@@ -397,7 +471,7 @@ export default function VoiceView() {
       {!ready && (
         <p className="counselor-voice-gate">
           Fill in your profile first — a call with a blank record is a call with a stranger.{" "}
-          <button type="button" className="counselor-linkish" onClick={() => c.setView("profile")}>
+          <button type="button" className="counselor-linkish" onClick={() => openSettings()}>
             Open profile
           </button>
         </p>
@@ -413,8 +487,108 @@ export default function VoiceView() {
           ))}
         </div>
       )}
+
+      {/* Only when this call isn't the one on screen — mid-call, the transcript above is the point. */}
+      {phase !== "live" && <CallHistory calls={c.calls ?? []} onRemove={c.removeCall} />}
     </div>
   );
+}
+
+/**
+ * Calls already had.
+ *
+ * Collapsed to one line each, because the useful view of a past call is when
+ * it was and how long it ran; the transcript is what you open when you want to
+ * check what was actually said. Newest first, which is the order they get
+ * asked about.
+ */
+function CallHistory({ calls, onRemove }: { calls: CallRecord[]; onRemove: (id: string) => void }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  if (!calls.length) return null;
+
+  return (
+    <div className="counselor-calls">
+      <span className="section-label">Earlier calls</span>
+
+      {calls.map((call) => {
+        const open = openId === call.id;
+        return (
+          <div key={call.id} className={`counselor-call-row${open ? " is-open" : ""}`}>
+            <div className="counselor-call-head">
+              <button
+                type="button"
+                className="counselor-call-toggle"
+                onClick={() => setOpenId(open ? null : call.id)}
+                aria-expanded={open}
+              >
+                {/* One chevron, rotated — a disclosure that points left when
+                    closed reads as "go back", not "expand". */}
+                <span className="counselor-call-caret" aria-hidden="true">
+                  <Icon path={ICON.chevronDown} size={11} />
+                </span>
+                <span className="counselor-call-when">{callWhen(call.startedAt)}</span>
+                <span className="counselor-call-meta">
+                  {formatLength(call.seconds)} · {call.turns.length}{" "}
+                  {call.turns.length === 1 ? "turn" : "turns"}
+                  {call.saved ? ` · ${call.saved} saved` : ""}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                style={{ width: 24, height: 24 }}
+                onClick={() => onRemove(call.id)}
+                aria-label="Delete this call"
+              >
+                <Icon path={ICON.trash} size={11} />
+              </button>
+            </div>
+
+            {open && (
+              <div className="counselor-call-transcript">
+                {call.turns.map((t, i) => (
+                  <p key={i} className={`counselor-line${t.role === "user" ? " is-user" : ""}`}>
+                    <span className="counselor-line-who">{t.role === "user" ? "You" : "Counselor"}</span>
+                    {t.text}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** "Today at 3:04pm" for something recent, a date once it isn't. */
+function callWhen(at: number): string {
+  const when = new Date(at);
+  const today = new Date();
+  const sameDay =
+    when.getFullYear() === today.getFullYear() &&
+    when.getMonth() === today.getMonth() &&
+    when.getDate() === today.getDate();
+
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `Today at ${time}`;
+
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const wasYesterday =
+    when.getFullYear() === yesterday.getFullYear() &&
+    when.getMonth() === yesterday.getMonth() &&
+    when.getDate() === yesterday.getDate();
+  if (wasYesterday) return `Yesterday at ${time}`;
+
+  return `${when.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
+}
+
+function formatLength(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${mins}m ${rest}s` : `${mins}m`;
 }
 
 /**
@@ -454,11 +628,17 @@ function Orb({
 
   const idle = phase !== "live";
 
+  /*
+   * The eyes track the pointer while the call is live and hold still
+   * otherwise, so an idle orb doesn't follow you around the screen when there
+   * is nobody on the line. Blinking stays on throughout — it is what keeps a
+   * connecting orb from reading as a frozen image.
+   */
   return (
     <div className="counselor-orb-wrap">
       <span ref={ringRef} className="counselor-orb-ring" />
-      <motion.span
-        className={`counselor-orb${speaking === "you" ? " is-listening" : ""}`}
+      <motion.div
+        className="counselor-orb-body"
         animate={
           idle
             ? { scale: 1, opacity: phase === "connecting" ? [0.6, 1, 0.6] : 0.85 }
@@ -469,7 +649,22 @@ function Orb({
             ? { duration: 1.6, repeat: phase === "connecting" ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }
             : { duration: 3.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }
         }
-      />
+      >
+        <LiveOrb
+          size={112}
+          variant="custom"
+          /*
+           * Colour carries whose turn it is, which the old orb showed with an
+           * `is-listening` ring and would otherwise have been lost: the accent
+           * while the counselor holds the floor, a cooler green while it is
+           * listening to you, and muted before the call connects.
+           */
+          color={idle ? "#4A4A52" : speaking === "you" ? "#4FB286" : "#8B7CF6"}
+          eyeColor="#0E0E10"
+          interactive={!idle}
+          blink
+        />
+      </motion.div>
     </div>
   );
 }

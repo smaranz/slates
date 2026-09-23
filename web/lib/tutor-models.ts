@@ -90,14 +90,16 @@ export function tutorModelSupportsAttachments(id: TutorModelId): boolean {
 }
 
 export function grokModelId(thinking: ThinkingLevel, fast: boolean): string {
-  return `cursor-grok-4.6-${thinking}${fast ? "-fast" : ""}`;
+  return `cursor-grok-4.7-${thinking}${fast ? "-fast" : ""}`;
 }
 
 const GROK_MODELS: TutorModelDef[] = THINKING_LEVELS.flatMap(({ id: thinking }) =>
   [false, true].map((fast) => ({
     id: grokModelId(thinking, fast),
-    label: "Grok 4.6",
-    creator: "xai" as const,
+    label: "Grok 4.7",
+    // Reached through the Cursor CLI, so the picker groups it with Composer
+    // under CURSOR — not under an xAI maker section.
+    creator: "cursor" as const,
     backend: "cursor-agent" as const,
     grok: { thinking, fast },
   }))
@@ -178,6 +180,18 @@ export const DEFAULT_TUTOR_MODEL: TutorModelId = "gpt-5.6-sol";
 
 export function isTutorModel(value: unknown): value is TutorModelId {
   return TUTOR_MODELS.some((m) => m.id === value);
+}
+
+/**
+ * Map a persisted catalog id onto today's catalog. Grok 4.6 picks become the
+ * matching 4.7 variant so a stored choice still resolves after the upgrade.
+ */
+export function migrateTutorModelId(value: unknown): TutorModelId | null {
+  if (isTutorModel(value)) return value;
+  if (typeof value !== "string") return null;
+  const grok46 = /^cursor-grok-4\.6-(low|medium|high|xhigh)(-fast)?$/.exec(value);
+  if (grok46) return grokModelId(grok46[1] as ThinkingLevel, !!grok46[2]) as TutorModelId;
+  return null;
 }
 
 function findModel(id: TutorModelId): TutorModelDef {

@@ -1,9 +1,27 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import {
+  filesFromDataTransfer,
+  readAttachment,
+  takePasteFiles,
+  toTutorMessageParts,
+  type Attachment,
+} from "@/lib/attachments";
+import { COUNSELOR_MODELS, isCounselorModel } from "@/lib/counselor/models";
+import { useDictation } from "@/lib/dictation";
 import { useCounselor } from "@/lib/counselor/store";
+import { useCounselorModel, useCounselorThinking } from "@/lib/use-counselor-model";
+import { useMode } from "@/lib/mode";
+import {
+  consumeMultitaskCommand,
+  finishMultitaskTask,
+  startMultitaskTask,
+  titleFromPrompt,
+  useMultitaskEnabled,
+} from "@/lib/multitask";
 import { buildSchoolContext, buildSchoolRecord } from "@/lib/counselor/school";
 import { profileReady, uid } from "@/lib/counselor/state";
 import type {
@@ -11,11 +29,14 @@ import type {
   AskQuestion,
   ChatMessage,
   CounselorEvent,
-  DocRef,
   MeetingRef,
   Source,
 } from "@/lib/counselor/types";
 import { useStore } from "@/lib/store";
+import { createEventParser, tidyReasoning } from "@/lib/tutor-stream";
+import MathText from "../MathText";
+import ModelPicker from "../ModelPicker";
+import { MultitaskStrip, MultitaskToggle } from "../Multitask";
 import TutorMarkdown from "../TutorMarkdown";
 import { Icon, ICON, Spinner } from "../ui";
 
@@ -39,20 +60,77 @@ const OPENERS = [
   "What should I be doing this month?",
 ];
 
+const ACCEPTED_FILE_TYPES =
+  "image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.pdf,.txt,.md,.markdown,.csv,.json,.js,.jsx,.ts,.tsx,.py,.html,.css,.xml,.yml,.yaml";
+
 export default function ChatView() {
   const c = useCounselor();
   const school = useStore();
+  const { openSettings } = useMode();
+  const [model, setModel] = useCounselorModel();
+  const [effort, setEffort] = useCounselorThinking();
 
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [streamingReplyIds, setStreamingReplyIds] = useState<Set<string>>(() => new Set());
+  const replyThreadRef = useRef(new Map<string, string>());
   const [error, setError] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [reading, setReading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const multitask = useMultitaskEnabled();
 
-  const abortRef = useRef<AbortController | null>(null);
+  const liveRef = useRef(
+    new Map<string, { controller: AbortController; threadId: string; taskId: string | null }>()
+  );
+  /** Latest messages per thread — Multitask needs this when two sends race a React render. */
+  const threadMessagesRef = useRef(new Map<string, ChatMessage[]>());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const messages = c.thread?.messages ?? [];
   const ready = profileReady(c.profile);
+
+  useEffect(() => {
+    if (!c.threadId || !c.thread) return;
+    threadMessagesRef.current.set(c.threadId, c.thread.messages);
+  }, [c.threadId, c.thread]);
+
+  const busyThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const replyId of streamingReplyIds) {
+      const threadId = replyThreadRef.current.get(replyId);
+      if (threadId) ids.add(threadId);
+    }
+    return ids;
+  }, [streamingReplyIds]);
+
+  const activeBusy = c.threadId ? busyThreadIds.has(c.threadId) : false;
+  /** Composer lock — Multitask keeps the input free while replies run. */
+  const composerLocked = !multitask.enabled && activeBusy;
+
+  const dictation = useDictation((text) => {
+    setDraft((value) => `${value}${value.trim() ? " " : ""}${text}`);
+  });
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("slates.counselorDrawer");
+      if (saved != null) setRailOpen(saved !== "closed");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem("slates.counselorDrawer", railOpen ? "open" : "closed"); } catch {}
+  }, [railOpen]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    composer.style.height = `${Math.min(composer.scrollHeight, 180)}px`;
+  }, [draft]);
 
   // Follow the stream, but only while the student is already at the bottom —
   // yanking them back down mid-scroll is worse than a reply they have to
@@ -71,44 +149,129 @@ export default function ChatView() {
   }, []);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setBusy(false);
+    const threadId = c.threadId;
+    if (!threadId) return;
+    for (const [replyId, live] of liveRef.current) {
+      if (live.threadId !== threadId) continue;
+      live.controller.abort();
+      if (live.taskId) finishMultitaskTask(live.taskId, "stopped");
+      liveRef.current.delete(replyId);
+    }
+  }, [c.threadId]);
+
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    setReading(true);
+    setError(null);
+    try {
+      const next = await Promise.all(Array.from(files).slice(0, 6).map(readAttachment));
+      setPending((current) => [...current, ...next].slice(0, 6));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't read that file.");
+    } finally {
+      setReading(false);
+    }
   }, []);
 
-  const send = useCallback(async (override?: string) => {
-    const text = (override ?? draft).trim();
-    if (!text || busy) return;
+  const copyMessage = useCallback(async (message: ChatMessage) => {
+    await navigator.clipboard.writeText(message.content);
+    setCopiedId(message.id);
+    window.setTimeout(() => setCopiedId((id) => id === message.id ? null : id), 1200);
+  }, []);
+
+  const editMessage = useCallback((message: ChatMessage) => {
+    if (composerLocked || !c.threadId) return;
+    setDraft(message.content);
+    setPending(message.attachments ?? []);
+    c.setMessages(c.threadId, (current) => current.slice(0, current.findIndex((item) => item.id === message.id)));
+    composerRef.current?.focus();
+  }, [composerLocked, c]);
+
+  const send = useCallback(async (override?: string, attachmentsOverride?: Attachment[]) => {
+    let text = (override ?? draft).trim();
+    const attachments = attachmentsOverride ?? pending;
+    if (!text && !attachments.length) return;
+
+    const commanded = consumeMultitaskCommand(text, multitask.setEnabled);
+    text = commanded.text;
+    if (commanded.forced && !text && !attachments.length) {
+      setDraft("");
+      return;
+    }
+
+    const runInBackground = multitask.enabled || commanded.forced;
+    if (!runInBackground && activeBusy) return;
 
     const threadId = c.threadId ?? c.startThread();
-    if (!override) setDraft("");
+    if (!override) {
+      setDraft("");
+      setPending([]);
+    }
     setError(null);
     pinned.current = true;
 
-    const userMsg: ChatMessage = { id: uid(), role: "user", content: text, ts: Date.now() };
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: "user",
+      content: text,
+      ts: Date.now(),
+      attachments: attachments.length ? attachments : undefined,
+    };
     const activityId = uid();
     const replyId = uid();
 
+    const prior = threadMessagesRef.current.get(threadId) ?? c.thread?.messages ?? [];
     // The history sent is the thread *before* the activity panel and the empty
     // reply are appended — neither is something the model said.
-    const history = [...(c.thread?.messages ?? []), userMsg]
-      .filter((m) => m.kind !== "activity" && m.content.trim())
-      .map((m) => ({ role: m.role, content: m.content }));
+    const history = [...prior, userMsg]
+      .filter((m) => m.kind !== "activity" && (m.content.trim() || m.attachments?.length))
+      .map((m) => ({
+        role: m.role,
+        content: m.role === "user" ? toTutorMessageParts(m.content, m.attachments) : m.content,
+      }));
 
-    c.setMessages(threadId, (prev) => [
-      ...prev,
+    const seeded: ChatMessage[] = [
+      ...prior,
       userMsg,
       { id: activityId, role: "assistant", content: "", ts: Date.now(), kind: "activity", steps: [] },
       { id: replyId, role: "assistant", content: "", ts: Date.now() },
-    ]);
+    ];
+    threadMessagesRef.current.set(threadId, seeded);
+    c.setMessages(threadId, () => threadMessagesRef.current.get(threadId) ?? seeded);
 
     const controller = new AbortController();
-    abortRef.current = controller;
-    setBusy(true);
+    replyThreadRef.current.set(replyId, threadId);
+    setStreamingReplyIds((prev) => new Set(prev).add(replyId));
+
+    const taskId = runInBackground
+      ? startMultitaskTask({
+          title: titleFromPrompt(text, attachments.length ? "Attachment" : "Task"),
+          surface: "counselor",
+          chatId: threadId,
+          replyId,
+          controller,
+        })
+      : null;
+    liveRef.current.set(replyId, { controller, threadId, taskId });
+
+    const clearLive = (status: "done" | "error" | "stopped", err?: string) => {
+      liveRef.current.delete(replyId);
+      replyThreadRef.current.delete(replyId);
+      setStreamingReplyIds((prev) => {
+        if (!prev.has(replyId)) return prev;
+        const next = new Set(prev);
+        next.delete(replyId);
+        return next;
+      });
+      if (taskId) finishMultitaskTask(taskId, status, err);
+    };
 
     /** Mutating one message in place, without rewriting the whole thread. */
     const patchMessage = (id: string, fn: (m: ChatMessage) => ChatMessage) =>
-      c.setMessages(threadId, (prev) => prev.map((m) => (m.id === id ? fn(m) : m)));
+      c.setMessages(threadId, (prev) => {
+        const next = prev.map((m) => (m.id === id ? fn(m) : m));
+        threadMessagesRef.current.set(threadId, next);
+        return next;
+      });
 
     const startedAt = new Map<string, number>();
 
@@ -120,15 +283,24 @@ export default function ChatView() {
         body: JSON.stringify({
           messages: history,
           state: {
+            schemaVersion: 2,
             profile: c.profile,
             memories: c.memories,
             tasks: c.tasks,
-            documents: c.documents,
             meetings: c.meetings,
             applications: c.applications,
             list: c.list,
+            coursework: c.coursework,
+            testing: c.testing,
+            awards: c.awards,
+            essays: c.essays,
             threads: [],
+            masterPlan: c.masterPlan,
+            planProposals: c.planProposals,
+            planRevisions: [],
           },
+          model,
+          thinking: effort,
           schoolContext: buildSchoolContext(school) || undefined,
           school: buildSchoolRecord(school),
         }),
@@ -138,55 +310,42 @@ export default function ChatView() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
       let text0 = "";
-      let docs: DocRef[] = [];
       let meetings: MeetingRef[] = [];
       let sources: Source[] = [];
       let ask: AskQuestion[] | undefined;
+      let reasoning = "";
+      const parseEvents = createEventParser<CounselorEvent>();
 
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // NDJSON: a chunk can end mid-line, so the tail is held back.
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let event: CounselorEvent;
-          try {
-            event = JSON.parse(line) as CounselorEvent;
-          } catch {
-            continue;
-          }
-
+        for (const event of parseEvents(decoder.decode(value, { stream: true }))) {
           switch (event.t) {
             case "delta":
               text0 += event.v;
               patchMessage(replyId, (m) => ({ ...m, content: text0 }));
               break;
+            case "reasoning":
+              reasoning += event.v;
+              patchMessage(activityId, (message) => ({ ...message, reasoning: tidyReasoning(reasoning) }));
+              break;
             case "tool":
-              startedAt.set(event.label, Date.now());
+              startedAt.set(event.id, Date.now());
               patchMessage(activityId, (m) => ({
                 ...m,
-                steps: [...(m.steps ?? []), { label: event.label, state: "run" }],
+                steps: [...(m.steps ?? []), { id: event.id, name: event.name, label: event.label, state: "run" }],
               }));
               break;
             case "tool_done": {
-              const began = startedAt.get(event.label);
+              const began = startedAt.get(event.id);
               const secs = began ? (Date.now() - began) / 1000 : undefined;
               patchMessage(activityId, (m) => ({
                 ...m,
-                steps: markDone(m.steps ?? [], event.label, event.ok, secs),
+                steps: markDone(m.steps ?? [], event.id, event.ok, secs),
               }));
               break;
             }
-            case "documents":
-              docs = event.v;
-              break;
             case "meetings":
               meetings = event.v;
               break;
@@ -208,36 +367,61 @@ export default function ChatView() {
         }
       }
 
-      c.setMessages(threadId, (prev) =>
-        prev
+      c.setMessages(threadId, (prev) => {
+        const next = prev
           .map((m) => {
             if (m.id === activityId) return { ...m, done: true, steps: settle(m.steps ?? []) };
-            if (m.id === replyId) return { ...m, content: text0, documents: docs, meetings, sources, ask };
+            if (m.id === replyId) return { ...m, content: text0, meetings, sources, ask };
             return m;
           })
           // A turn that produced no prose and no tools leaves two empty
           // bubbles behind; drop whichever of them has nothing in it.
           .filter((m) => {
-            if (m.id === replyId) return Boolean(text0.trim() || docs.length || meetings.length || ask?.length);
-            if (m.id === activityId) return Boolean(m.steps?.length);
+            if (m.id === replyId) return Boolean(text0.trim() || meetings.length || ask?.length);
+            if (m.id === activityId) return Boolean(m.steps?.length || m.reasoning);
             return true;
-          })
-      );
+          });
+        threadMessagesRef.current.set(threadId, next);
+        return next;
+      });
+      clearLive("done");
     } catch (err) {
       const aborted = err instanceof DOMException && err.name === "AbortError";
-      if (!aborted) setError(err instanceof Error ? err.message : "Something went wrong.");
-      c.setMessages(threadId, (prev) =>
-        prev.filter((m) => {
-          if (m.id === replyId) return Boolean(m.content.trim());
-          if (m.id === activityId) return Boolean(m.steps?.length);
-          return true;
-        })
-      );
+      if (!aborted) {
+        const message = err instanceof Error ? err.message : "Something went wrong.";
+        setError(message);
+        clearLive("error", message);
+      } else {
+        clearLive("stopped");
+      }
+      c.setMessages(threadId, (prev) => {
+        const next = prev
+          .map((message) => message.id === activityId
+            ? { ...message, done: true, steps: settle(message.steps ?? []) }
+            : message)
+          .filter((message) => {
+            if (message.id === replyId) return Boolean(message.content.trim());
+            if (message.id === activityId) return Boolean(message.steps?.length || message.reasoning);
+            return true;
+          });
+        threadMessagesRef.current.set(threadId, next);
+        return next;
+      });
     } finally {
-      abortRef.current = null;
-      setBusy(false);
+      if (liveRef.current.has(replyId)) clearLive("done");
     }
-  }, [draft, busy, c, school]);
+  }, [activeBusy, draft, pending, c, school, model, effort, multitask.enabled, multitask.setEnabled]);
+
+  const retryMessage = useCallback((message: ChatMessage) => {
+    if (composerLocked || !c.thread) return;
+    const index = c.thread.messages.findIndex((item) => item.id === message.id);
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = c.thread.messages[cursor];
+      if (previous.role !== "user") continue;
+      void send(previous.content, previous.attachments ?? []);
+      return;
+    }
+  }, [composerLocked, c.thread, send]);
 
   // Only the most recent question set is still live. Leaving every past one
   // clickable would let a student answer a question the counselor asked four
@@ -250,34 +434,67 @@ export default function ChatView() {
   }, [messages]);
 
   return (
-    <div className="counselor-chat">
-      <ThreadRail open={railOpen} onToggle={() => setRailOpen((v) => !v)} busy={busy} />
+    <div className="gpt counselor-gpt" data-drawer={railOpen ? "open" : "closed"}>
+      <ThreadRail open={railOpen} onToggle={() => setRailOpen((value) => !value)} busyThreadIds={busyThreadIds} />
+      <button type="button" className="gpt-scrim" onClick={() => setRailOpen(false)} aria-label="Close conversations" />
 
-      <div className="counselor-chat-main">
-        <div className="counselor-scroll" ref={scrollRef} onScroll={onScroll}>
-          <div className="counselor-thread">
+      <div className="gpt-main">
+        <header className="gpt-header">
+          <button type="button" className="gpt-icon-btn" onClick={() => setRailOpen((value) => !value)} aria-label={railOpen ? "Hide conversations" : "Show conversations"}>
+            <Icon path={ICON.sidebar} size={19} />
+          </button>
+          <ModelPicker
+            value={model}
+            onChange={(next) => { if (isCounselorModel(next)) setModel(next); }}
+            thinking={effort}
+            onThinkingChange={setEffort}
+            placement="down"
+            variant="bare"
+            allowedModels={COUNSELOR_MODELS}
+          />
+          <MultitaskToggle />
+          <span className="gpt-header-gap" />
+          <button
+            type="button"
+            className="gpt-icon-btn"
+            onClick={() => {
+              c.startThread();
+              setError(null);
+              setDraft("");
+              setPending([]);
+            }}
+            aria-label="New conversation"
+            title="New conversation"
+          >
+            <Icon path={ICON.compose} size={19} />
+          </button>
+        </header>
+
+        <div className="gpt-thread" ref={scrollRef} onScroll={onScroll}>
+          <div className={`gpt-column${messages.length === 0 ? " gpt-column--empty" : ""}`}>
             {messages.length === 0 ? (
               <Welcome
                 name={c.profile.name}
                 ready={ready}
                 onPick={(q) => setDraft(q)}
-                onProfile={() => c.setView("profile")}
+                onProfile={() => openSettings()}
               />
             ) : (
               messages.map((m, i) =>
                 m.kind === "activity" ? (
-                  <ActivityPanel key={m.id} steps={m.steps ?? []} done={Boolean(m.done)} />
+                  <ActivityPanel key={m.id} steps={m.steps ?? []} reasoning={m.reasoning ?? ""} done={Boolean(m.done)} />
                 ) : (
                   <Bubble
                     key={m.id}
                     message={m}
                     grouped={grouped(m, messages[i - 1])}
-                    onOpenDoc={(id) => {
-                      c.openDoc(id);
-                      c.setView("documents");
-                    }}
-                    answerable={!busy && m.id === lastAskId}
+                    answerable={!composerLocked && m.id === lastAskId}
                     onAnswer={(answers) => void send(answers)}
+                    copied={copiedId === m.id}
+                    onCopy={() => void copyMessage(m)}
+                    onEdit={() => editMessage(m)}
+                    onRetry={() => retryMessage(m)}
+                    busy={composerLocked}
                   />
                 )
               )
@@ -286,37 +503,120 @@ export default function ChatView() {
           </div>
         </div>
 
-        <div className="counselor-composer">
-          <div className="counselor-composer-shell">
+        <div className="gpt-composer-dock">
+          <MultitaskStrip
+            surface="counselor"
+            onOpen={(task) => {
+              c.openThread(task.chatId);
+              setError(null);
+              pinned.current = true;
+            }}
+          />
+          <form
+            className="gpt-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!composerLocked) void send();
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const files = filesFromDataTransfer(event.dataTransfer);
+              if (files.length) void addFiles(files);
+            }}
+          >
+            {pending.length > 0 && (
+              <div className="gpt-composer-files">
+                {pending.map((attachment) => (
+                  <AttachmentChip
+                    key={attachment.id}
+                    attachment={attachment}
+                    onRemove={() => setPending((current) => current.filter((item) => item.id !== attachment.id))}
+                  />
+                ))}
+              </div>
+            )}
             <textarea
+              ref={composerRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  void send();
+                  if (!composerLocked) void send();
                 }
               }}
+              onPaste={(event) => {
+                takePasteFiles(event, (files) => void addFiles(files));
+              }}
               rows={1}
-              placeholder={ready ? "Ask your counselor" : "Fill in your profile first — it's how the advice gets personal"}
+              placeholder={
+                !ready
+                  ? "Complete your profile for personal advice"
+                  : multitask.enabled
+                    ? "Ask your counselor · Multitask on"
+                    : "Ask your counselor"
+              }
               aria-label="Ask your counselor"
-              className="bare-field bare-field--chat"
+              className="gpt-input"
             />
-            <div className="counselor-composer-row">
-              <span className="counselor-hint">
-                Remembers you between conversations · Edits your plan, list, and documents
-              </span>
+            <div className="gpt-composer-row">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_FILE_TYPES}
+                onChange={(event) => {
+                  if (event.target.files?.length) void addFiles(event.target.files);
+                  event.target.value = "";
+                }}
+                style={{ display: "none" }}
+              />
               <button
                 type="button"
-                className="counselor-send"
-                onClick={() => (busy ? stop() : void send())}
-                disabled={!busy && !draft.trim()}
-                aria-label={busy ? "Stop" : "Send"}
+                className="gpt-round-btn"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Add photos or files"
+                disabled={reading || composerLocked}
               >
-                <Icon path={busy ? ICON.stop : ICON.send} size={15} />
+                <Icon path={ICON.plus} size={17} />
+              </button>
+              <span className="gpt-composer-gap" />
+                            {dictation.available && (
+                <button
+                  type="button"
+                  className={`gpt-round-btn${dictation.recording ? " is-live" : ""}`}
+                  onClick={dictation.toggle}
+                  disabled={dictation.transcribing}
+                  aria-label={
+                    dictation.transcribing
+                      ? "Transcribing"
+                      : dictation.recording
+                        ? "Stop dictating"
+                        : "Dictate"
+                  }
+                  aria-pressed={dictation.recording}
+                  title={dictation.error ?? undefined}
+                >
+                  {dictation.transcribing ? (
+                    <Spinner size={15} />
+                  ) : (
+                    <Icon path={dictation.recording ? ICON.waveform : ICON.mic} size={17} />
+                  )}
+                </button>
+              )}
+              <button
+                type={composerLocked ? "button" : "submit"}
+                className="gpt-send"
+                onClick={composerLocked ? stop : undefined}
+                disabled={!composerLocked && !draft.trim() && pending.length === 0}
+                aria-label={composerLocked ? "Stop" : "Send"}
+              >
+                <Icon path={composerLocked ? ICON.stop : ICON.arrowUp} size={composerLocked ? 13 : 19} />
               </button>
             </div>
-          </div>
+          </form>
+          <p className="gpt-disclaimer">Slates can make mistakes. Check deadlines and policies that matter.</p>
         </div>
       </div>
     </div>
@@ -328,11 +628,11 @@ function grouped(m: ChatMessage, prev: ChatMessage | undefined): boolean {
   return prev.role === m.role && m.ts - prev.ts < 5 * 60_000;
 }
 
-/** Marks the first still-running step with this label as finished. */
-function markDone(steps: ActivityStep[], label: string, ok: boolean, secs?: number): ActivityStep[] {
+/** Marks the exact tool call as finished, even when the same tool overlaps. */
+function markDone(steps: ActivityStep[], id: string, ok: boolean, secs?: number): ActivityStep[] {
   let hit = false;
   return steps.map((s) => {
-    if (hit || s.label !== label || s.state !== "run") return s;
+    if (hit || (s.id ?? s.label) !== id || s.state !== "run") return s;
     hit = true;
     return { ...s, state: ok ? "ok" : "fail", secs };
   });
@@ -346,77 +646,86 @@ function settle(steps: ActivityStep[]): ActivityStep[] {
 function Bubble({
   message,
   grouped,
-  onOpenDoc,
   onAnswer,
   answerable,
+  copied,
+  onCopy,
+  onEdit,
+  onRetry,
+  busy,
 }: {
   message: ChatMessage;
   grouped: boolean;
-  onOpenDoc: (id: string) => void;
   onAnswer: (text: string) => void;
-  /** Only the newest ask is still open; older ones read as answered. */
   answerable: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  onEdit: () => void;
+  onRetry: () => void;
+  busy: boolean;
 }) {
   const isUser = message.role === "user";
   return (
-    <div className={`counselor-row${isUser ? " is-user" : ""}${grouped ? " is-grouped" : ""}`}>
-      {!isUser && !grouped && <span className="counselor-who">Counselor</span>}
-      <div className={`counselor-bubble${isUser ? " is-user" : ""}`}>
-        {isUser ? message.content : <TutorMarkdown text={message.content} className="prose--chat" />}
-      </div>
-
-      {message.documents && message.documents.length > 0 && (
-        <div className="counselor-cards">
-          {message.documents.map((d) => (
-            <button key={d.id} type="button" className="counselor-card-chip" onClick={() => onOpenDoc(d.id)}>
-              <Icon path={ICON.file} size={13} />
-              <span className="truncate">{d.title}</span>
-              <span className="counselor-chip-tag">{d.action}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {message.meetings && message.meetings.length > 0 && (
-        <div className="counselor-cards">
-          {message.meetings.map((m) => (
-            <span key={m.id} className="counselor-card-chip is-static">
-              <Icon path={ICON.calendar} size={13} />
-              <span className="truncate">{m.topic}</span>
-              <span className="counselor-chip-tag">
-                {m.action === "cancelled" ? "cancelled" : whenLabel(m.scheduledFor)}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {message.sources && message.sources.length > 0 && (
-        <div className="counselor-sources">
-          <span className="counselor-sources-label">Sources</span>
-          {message.sources.map((source, i) =>
-            source.origin === "web" && source.url ? (
-              <a
-                key={i}
-                className="counselor-source"
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={source.url}
-              >
-                {source.title}
-              </a>
-            ) : (
-              <span key={i} className="counselor-source is-library" title="From the counseling library">
-                {source.title}
-              </span>
-            )
+    <div className={`gpt-turn ${isUser ? "gpt-turn--user" : "gpt-turn--assistant"}${grouped ? " is-grouped" : ""}`}>
+      {isUser ? (
+        <>
+          <div className="gpt-bubble">
+            {message.attachments && message.attachments.length > 0 && (
+              <div className="gpt-bubble-files">
+                {message.attachments.map((attachment) => <AttachmentChip key={attachment.id} attachment={attachment} />)}
+              </div>
+            )}
+            {message.content ? <MathText text={message.content} /> : null}
+          </div>
+          <div className="gpt-actions gpt-actions--user">
+            <ActionButton label={copied ? "Copied" : "Copy"} icon={copied ? ICON.check : ICON.copy} onClick={onCopy} />
+            <ActionButton label="Edit" icon={ICON.pencil} onClick={onEdit} disabled={busy} />
+          </div>
+        </>
+      ) : (
+        <>
+          {message.content && (
+            <div className="gpt-reply">
+              <TutorMarkdown text={message.content} className="prose--chat" />
+            </div>
           )}
-        </div>
-      )}
 
-      {message.ask && message.ask.length > 0 && (
-        <AskForm questions={message.ask} open={answerable} onSubmit={onAnswer} />
+          {message.meetings && message.meetings.length > 0 && (
+            <div className="counselor-cards">
+              {message.meetings.map((meeting) => (
+                <span key={meeting.id} className="counselor-card-chip is-static">
+                  <Icon path={ICON.calendar} size={13} />
+                  <span className="truncate">{meeting.topic}</span>
+                  <span className="counselor-chip-tag">
+                    {meeting.action === "cancelled" ? "cancelled" : whenLabel(meeting.scheduledFor)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {message.sources && message.sources.length > 0 && (
+            <div className="counselor-sources">
+              <span className="counselor-sources-label">Sources</span>
+              {message.sources.map((source, index) => source.origin === "web" && source.url ? (
+                <a key={index} className="counselor-source" href={source.url} target="_blank" rel="noopener noreferrer" title={source.url}>
+                  {source.title}
+                </a>
+              ) : (
+                <span key={index} className="counselor-source is-library" title="From the counseling library">{source.title}</span>
+              ))}
+            </div>
+          )}
+
+          {message.ask && message.ask.length > 0 && <AskForm questions={message.ask} open={answerable} onSubmit={onAnswer} />}
+
+          {message.content && (
+            <div className="gpt-actions">
+              <ActionButton label={copied ? "Copied" : "Copy"} icon={copied ? ICON.check : ICON.copy} onClick={onCopy} />
+              <ActionButton label="Try again" icon={ICON.retry} onClick={onRetry} disabled={busy} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -518,58 +827,39 @@ function whenLabel(iso: string): string {
  * Open while it works — one line per tool, ticking over — then collapsed to a
  * single line afterwards, expandable if you want to see what it touched.
  */
-function ActivityPanel({ steps, done }: { steps: ActivityStep[]; done: boolean }) {
+function ActivityPanel({ steps, reasoning, done }: { steps: ActivityStep[]; reasoning: string; done: boolean }) {
   const [open, setOpen] = useState(false);
-  const shown = done && !open;
-
-  const summary = useMemo(() => {
-    const failed = steps.filter((s) => s.state === "fail").length;
-    const n = steps.length;
-    return failed
-      ? `${n} step${n === 1 ? "" : "s"}, ${failed} failed`
-      : `${n} step${n === 1 ? "" : "s"}`;
-  }, [steps]);
-
-  if (!steps.length && done) return null;
-
-  if (shown) {
-    return (
-      <button type="button" className="counselor-activity is-collapsed" onClick={() => setOpen(true)}>
-        <Icon path={ICON.check} size={12} />
-        <span>Worked through {summary}</span>
-        <Icon path={ICON.chevronDown} size={12} />
-      </button>
-    );
-  }
+  const running = steps.find((step) => step.state === "run");
+  const hasDetail = Boolean(reasoning || steps.length);
+  if (!hasDetail && done) return null;
+  const summary = done
+    ? steps.length ? `Used ${steps.length} ${steps.length === 1 ? "tool" : "tools"}` : "Thought about it"
+    : running?.label ?? (reasoning ? "Thinking" : "Working");
 
   return (
-    <div className="counselor-activity">
-      <div className="counselor-activity-head">
+    <div className={`tutor-work${open && hasDetail ? " is-open" : ""}`}>
+      <button type="button" className="tutor-work-head" onClick={() => setOpen((value) => !value)} disabled={!hasDetail}>
         {done ? <Icon path={ICON.check} size={12} /> : <Spinner size={12} />}
-        <span>{done ? "What I did" : "Working"}</span>
-        {done && (
-          <button type="button" className="counselor-activity-hide" onClick={() => setOpen(false)}>
-            Hide
-          </button>
-        )}
-      </div>
-      <AnimatePresence initial={false}>
-        {steps.map((s, i) => (
-          <motion.div
-            key={`${s.label}-${i}`}
-            className={`counselor-step is-${s.state}`}
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <span className="counselor-step-dot" />
-            <span className="truncate" style={{ flex: 1 }}>
-              {s.label}
-            </span>
-            {s.secs != null && <span className="counselor-step-secs">{s.secs.toFixed(1)}s</span>}
-          </motion.div>
-        ))}
-      </AnimatePresence>
+        <span className="tutor-work-summary">{summary}</span>
+        {hasDetail && <Icon path={ICON.chevronDown} size={11} style={{ transform: open ? "rotate(180deg)" : "none" }} />}
+      </button>
+      {open && hasDetail && (
+        <div className="tutor-work-body">
+          {steps.map((step) => (
+            <div key={step.id ?? `${step.label}-${step.secs}`} className={`tutor-step is-${step.state}`}>
+              <span className="tutor-step-dot" />
+              <span className="truncate" style={{ flex: 1 }}>{step.label}</span>
+              {step.secs != null && step.secs >= 0.5 && <span className="tutor-step-secs">{step.secs.toFixed(1)}s</span>}
+            </div>
+          ))}
+          {reasoning && (
+            <div className="tutor-reasoning">
+              <span className="section-label" style={{ fontSize: 10 }}>Reasoning</span>
+              <p>{reasoning}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -587,15 +877,14 @@ function Welcome({
 }) {
   return (
     <motion.div
-      className="counselor-welcome"
+      className="gpt-greeting counselor-greeting"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
     >
-      <h2>{name ? `Hey ${name.split(" ")[0]}.` : "Let's get you in somewhere good."}</h2>
+      <h1>{name ? `What should we solve, ${name.split(" ")[0]}?` : "What should we solve?"}</h1>
       <p>
-        I keep your profile, your list, your applications, and everything I learn about you — so
-        we pick up where we left off instead of starting over.
+        Your profile, list, applications, essays, and plan stay connected across every conversation.
       </p>
 
       {!ready ? (
@@ -603,9 +892,9 @@ function Welcome({
           Fill in your profile
         </button>
       ) : (
-        <div className="counselor-openers">
+        <div className="gpt-starters">
           {OPENERS.map((q) => (
-            <button key={q} type="button" className="counselor-opener" onClick={() => onPick(q)}>
+            <button key={q} type="button" className="gpt-starter" onClick={() => onPick(q)}>
               {q}
             </button>
           ))}
@@ -616,52 +905,131 @@ function Welcome({
 }
 
 /** Past conversations, and the button that starts a new one. */
-function ThreadRail({ open, onToggle, busy }: { open: boolean; onToggle: () => void; busy: boolean }) {
+function ThreadRail({ open, onToggle, busyThreadIds }: { open: boolean; onToggle: () => void; busyThreadIds: ReadonlySet<string> }) {
   const c = useCounselor();
-
-  if (!open) {
-    return (
-      <div className="counselor-threads is-closed">
-        <button type="button" className="icon-btn" onClick={onToggle} aria-label="Show conversations" style={{ width: 28, height: 28 }}>
-          <Icon path={ICON.sidebar} size={14} />
-        </button>
-      </div>
-    );
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const needle = query.trim().toLowerCase();
+  const matches = [...c.threads]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .filter((thread) => !needle || thread.title.toLowerCase().includes(needle) || thread.messages.some((message) => message.content.toLowerCase().includes(needle)));
+  const groups: { label: string; items: typeof matches }[] = [];
+  for (const thread of matches) {
+    const label = chatBand(thread.updatedAt);
+    const current = groups[groups.length - 1];
+    if (current?.label === label) current.items.push(thread);
+    else groups.push({ label, items: [thread] });
   }
 
+  const commitRename = () => {
+    if (editing) c.renameThread(editing, nameDraft);
+    setEditing(null);
+  };
+
   return (
-    <div className="counselor-threads">
-      <div className="counselor-threads-head">
-        <span className="section-label" style={{ flex: 1 }}>
-          Conversations
-        </span>
-        <button type="button" className="icon-btn" onClick={() => c.startThread()} aria-label="New conversation" style={{ width: 26, height: 26 }}>
-          <Icon path={ICON.plus} size={13} />
+    <aside className="gpt-drawer" aria-label="Conversations" aria-hidden={!open}>
+      <div className="gpt-drawer-head">
+        <button type="button" className="gpt-icon-btn" onClick={onToggle} aria-label="Hide conversations">
+          <Icon path={ICON.sidebar} size={19} />
         </button>
-        <button type="button" className="icon-btn" onClick={onToggle} aria-label="Hide conversations" style={{ width: 26, height: 26 }}>
-          <Icon path={ICON.sidebar} size={13} />
+        <span className="gpt-header-gap" />
+        <button type="button" className="gpt-icon-btn" onClick={() => c.startThread()} aria-label="New conversation">
+          <Icon path={ICON.compose} size={19} />
         </button>
       </div>
-
-      <div className="counselor-threads-list">
-        {c.threads.length === 0 && <p className="counselor-threads-empty">Nothing yet.</p>}
-        {c.threads.map((t) => (
-          <div key={t.id} className={`counselor-thread-row${t.id === c.threadId ? " is-active" : ""}`}>
-            <button type="button" className="counselor-thread-open" onClick={() => c.openThread(t.id)}>
-              <span className="truncate">{t.title}</span>
-              {busy && t.id === c.threadId && <Spinner size={11} />}
-            </button>
-            <button
-              type="button"
-              className="counselor-thread-del"
-              onClick={() => c.deleteThread(t.id)}
-              aria-label={`Delete ${t.title}`}
-            >
-              <Icon path={ICON.trash} size={12} />
-            </button>
+      <div className="gpt-search">
+        <Icon path={ICON.magnifier} size={15} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" className="bare-field" />
+      </div>
+      <button type="button" className="gpt-drawer-new" onClick={() => c.startThread()}>
+        <span className="gpt-drawer-new-icon"><Icon path={ICON.compose} size={15} /></span>
+        New conversation
+      </button>
+      <div className="gpt-drawer-list">
+        {!c.threads.length && <p className="gpt-drawer-empty">Nothing yet. Your conversations stay on this device.</p>}
+        {c.threads.length > 0 && !matches.length && <p className="gpt-drawer-empty">No conversation matches “{query.trim()}”.</p>}
+        {groups.map((group) => (
+          <div key={group.label} className="gpt-drawer-group">
+            <div className="gpt-drawer-band">{group.label}</div>
+            {group.items.map((thread) => editing === thread.id ? (
+              <input
+                key={thread.id}
+                autoFocus
+                className="gpt-drawer-rename"
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commitRename();
+                  if (event.key === "Escape") setEditing(null);
+                }}
+                aria-label="Rename conversation"
+              />
+            ) : (
+              <div key={thread.id} className="gpt-drawer-row" data-active={thread.id === c.threadId ? "1" : undefined}>
+                <button
+                  type="button"
+                  className="gpt-drawer-open"
+                  onClick={() => c.openThread(thread.id)}
+                  onDoubleClick={() => { setEditing(thread.id); setNameDraft(thread.title); }}
+                  title={thread.title}
+                >
+                  <span className="truncate">{thread.title}</span>
+                  <span className="gpt-drawer-when">{busyThreadIds.has(thread.id) ? "replying..." : chatWhenLabel(thread.updatedAt)}</span>
+                </button>
+                <button type="button" className="gpt-drawer-delete" onClick={() => c.deleteThread(thread.id)} aria-label={`Delete ${thread.title}`}>
+                  <Icon path={ICON.trash} size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         ))}
       </div>
+    </aside>
+  );
+}
+
+function chatWhenLabel(at: number): string {
+  const date = new Date(at);
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (days <= 0) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return date.toLocaleDateString([], { weekday: "long" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function chatBand(at: number): string {
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(at).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 7) return "Previous 7 days";
+  if (days <= 30) return "Previous 30 days";
+  return "Older";
+}
+
+function ActionButton({ label, icon, onClick, disabled }: { label: string; icon: string | string[]; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button type="button" className="gpt-action" onClick={onClick} aria-label={label} title={label} disabled={disabled}>
+      <Icon path={icon} size={15} />
+    </button>
+  );
+}
+
+function AttachmentChip({ attachment, onRemove }: { attachment: Attachment; onRemove?: () => void }) {
+  const thumbnail = attachment.kind === "image" && Boolean(attachment.dataUrl);
+  return (
+    <div className={`gpt-attachment${thumbnail ? " is-image" : ""}`} title={attachment.name}>
+      {thumbnail && attachment.kind === "image" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={attachment.dataUrl} alt={attachment.name} />
+      ) : (
+        <><Icon path={ICON.file} size={13} /><span className="truncate">{attachment.name}</span></>
+      )}
+      {onRemove && (
+        <button type="button" onClick={onRemove} aria-label={`Remove ${attachment.name}`}><Icon path={ICON.close} size={9} /></button>
+      )}
     </div>
   );
 }
+

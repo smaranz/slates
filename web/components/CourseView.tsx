@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { useStore } from "@/lib/store";
-import { gradeFor, letterFor, scoreColor } from "@/lib/grades";
+import { countsTowardGrade, gradeFor, letterFor, scoreColor } from "@/lib/grades";
 import { categoryPct, gradeTimeline } from "@/lib/normalize";
 import { Icon, ICON, LineChart, Meter } from "./ui";
 
@@ -26,7 +26,6 @@ export default function CourseView() {
    * One row open at a time. Prefilled from the item's real score, so typing
    * starts from what actually happened rather than a blank field.
    */
-  const [editing, setEditing] = useState<{ key: string; earned: string; possible: string } | null>(null);
 
   if (!course) return null;
 
@@ -70,11 +69,55 @@ export default function CourseView() {
     };
   });
 
+  /*
+   * Rows switched off, expressed as extras that subtract what they contribute.
+   *
+   * Turning a row off is the same arithmetic as replacing it with nothing, so
+   * it rides the machinery a what-if already uses rather than needing its own
+   * path through the calculation. A row that also carries a what-if is skipped
+   * here — that what-if has already cancelled the real score.
+   */
+  const switchedOff = cats.flatMap((c) =>
+    c.items
+      .filter((it) => it.id && s.excluded[it.id] && !whatIfByItem.has(it.id))
+      .flatMap((it) => {
+        const real = realById.get(it.id!);
+        return real ? [{ cat: c.cat, weight: c.weight, earned: -real.earned, possible: -real.possible }] : [];
+      })
+  );
+
+  const allExtras = [...extras, ...switchedOff];
+
+  /**
+   * What one row is worth to the course grade right now.
+   *
+   * The difference between the grade as it stands and the grade without that
+   * row — so a zero on a big test reads as the double-digit hole it actually
+   * is, and a perfect score on a five-point warm-up reads as the rounding it
+   * actually is. This is the number that answers "which assignment is holding
+   * me back", which no amount of staring at a list of percentages does.
+   */
+  const impactOf = (itemId: string | undefined, catName: string, weight: number): number | null => {
+    if (!itemId || s.excluded[itemId]) return null;
+    const real = realById.get(itemId);
+    const saved = whatIfByItem.get(itemId);
+    const earned = saved ? saved.earned : real?.earned;
+    const possible = saved ? saved.possible : real?.possible;
+    if (earned == null || possible == null || possible <= 0) return null;
+
+    const withIt = gradeFor(cats, allExtras).pct;
+    const without = gradeFor(cats, [
+      ...allExtras,
+      { cat: catName, weight, earned: -earned, possible: -possible },
+    ]).pct;
+    return withIt === null || without === null ? null : withIt - without;
+  };
+
   const base = gradeFor(cats);
-  const proj = gradeFor(cats, extras);
+  const proj = gradeFor(cats, allExtras);
   // A course with nothing scored has no percentage, so there is nothing to
   // project against either — and no delta to draw.
-  const projecting = mine.length > 0 && proj.pct !== null && base.pct !== null;
+  const projecting = (mine.length > 0 || switchedOff.length > 0) && proj.pct !== null && base.pct !== null;
   const delta = projecting ? proj.pct! - base.pct! : 0;
   const up = delta > 0.05;
   const down = delta < -0.05;
@@ -96,10 +139,23 @@ export default function CourseView() {
    * numbers is sound, so that difference is applied to the real grade.
    */
   const anchor = course.gradeSource === "none" ? null : course.pct;
+  /*
+   * The anchor is only usable while the recomputation agrees with it.
+   *
+   * Adding a delta measured on one scale to a number on another is unsound,
+   * and it produced real nonsense: a course reported at 93.3% that recomputed
+   * to 78.9% turned a 7/7 into "114%", because a +20.8 improvement in the
+   * recomputed world was pasted onto the reported one. The two now agree for
+   * every gradebook tested, so this guard should never fire — but if a
+   * gradebook ever disagrees again, showing the recomputed pair is at least
+   * internally consistent, and a number nobody can reach is not.
+   */
+  const anchorable =
+    anchor !== null && base.pct !== null && Math.abs(anchor - base.pct) <= 0.5;
   const anchored = (p: number | null): number | null =>
-    anchor === null || base.pct === null || p === null ? p : anchor + (p - base.pct);
+    !anchorable || base.pct === null || p === null ? p : anchor! + (p - base.pct);
 
-  const headline = projecting ? anchored(proj.pct) : anchor;
+  const headline = projecting ? anchored(proj.pct) : anchorable ? anchor : base.pct ?? anchor;
 
   const options = [...cats.map((c) => ({ value: c.cat, label: c.cat })), { value: CUSTOM, label: "Custom category" }];
   const catLabel = options.find((o) => o.value === cat)?.label ?? "Choose category";
@@ -173,8 +229,12 @@ export default function CourseView() {
       .map((a) => [a.id, a.points!])
   );
 
+  const countsFor = countsTowardGrade(cats);
   const groups = cats.map((c) => ({
     name: c.cat,
+    weight: c.weight,
+    standing: categoryPct(c).pct,
+    counted: countsFor(c),
     rows: c.items.map((it) => {
       const scored = typeof it.earned === "number" && typeof it.possible === "number" && it.possible > 0;
       const pct = scored ? Math.round((it.earned! / it.possible!) * 100) : null;
@@ -219,6 +279,10 @@ export default function CourseView() {
         realPossible: scored ? it.possible! : null,
         itemId: it.id ?? undefined,
         cat: c.cat,
+        weight: c.weight,
+        /** What this row is worth to the course grade, or null when it isn't scored. */
+        impact: impactOf(it.id ?? undefined, c.cat, c.weight),
+        excluded: Boolean(it.id && s.excluded[it.id]),
         // A kept what-if is removable — that's how you take it back off.
         removable: !!saved,
         id: saved?.id ?? "",
@@ -241,63 +305,29 @@ export default function CourseView() {
       // A score you typed in yourself has no real assignment behind it, and
       // no what-if editor either — remove and re-add it to change it.
       assignmentId: null as string | null,
-      earned: null as number | null,
-      possible: null as number | null,
+      earned: c.earned as number | null,
+      possible: c.possible as number | null,
       scored: false,
       realEarned: null as number | null,
       realPossible: null as number | null,
       itemId: undefined as string | undefined,
+      weight: c.weight,
+      impact: null as number | null,
+      excluded: false,
       cat: c.cat,
       removable: true,
       id: c.id,
       whatIf: true,
     };
-    let g = groups.find((g) => g.name === c.cat);
+    let g = groups.find((x) => x.name === c.cat);
     if (!g) {
-      g = { name: c.cat, rows: [] };
+      // A category you invented: it has no Schoology standing of its own, and
+      // its weight is whatever you said it was.
+      g = { name: c.cat, weight: c.weight, standing: null, counted: true, rows: [] };
       groups.push(g);
     }
     g.rows.push(row);
   }
-
-  /*
-   * "If I'd gotten X instead" for whichever row is open. Folded in as a delta
-   * against the item's real score rather than replacing it outright, so it
-   * composes with any what-ifs already applied through `mine` instead of
-   * double-counting or undoing them.
-   */
-  const editingRow = editing ? groups.flatMap((g) => g.rows).find((r) => r.key === editing.key) ?? null : null;
-  const editEarned = editing ? parseFloat(editing.earned) : NaN;
-  const editPossible = editing ? parseFloat(editing.possible) : NaN;
-  const editValid =
-    editing &&
-    !!editingRow &&
-    editing.earned.trim() !== "" &&
-    editing.possible.trim() !== "" &&
-    !Number.isNaN(editEarned) &&
-    editPossible > 0;
-  /*
-   * Folded in as a delta against whatever the category *already counts* for
-   * this row — which for unmarked work is nothing at all. Subtracting its
-   * displayed total would have removed points the average never included, so
-   * a what-if on an ungraded assignment came out looking like a loss.
-   */
-  const editProjection =
-    editValid && editingRow
-      ? gradeFor(cats, [
-          // Any saved what-if for this same row is dropped, not stacked: the
-          // dialog is showing a replacement for it, not a second attempt.
-          ...extras.filter((_, i) => mine[i].itemId !== editingRow.itemId),
-          {
-            cat: editingRow.cat,
-            weight: 0,
-            earned: editEarned - (editingRow.scored ? editingRow.realEarned! : 0),
-            possible: editPossible - (editingRow.scored ? editingRow.realPossible! : 0),
-          },
-        ])
-      : null;
-  const editDelta =
-    editProjection?.pct != null && proj.pct != null ? editProjection.pct - proj.pct : null;
 
   return (
     <div className="scroll centered" style={{ paddingBottom: 32 }}>
@@ -379,6 +409,27 @@ export default function CourseView() {
               const reported = !cat.custom && !cat.touched && source ? categoryPct(source).pct : null;
               const points = cat.possible > 0 ? (cat.earned / cat.possible) * 100 : null;
               const standing = reported ?? points;
+              /*
+               * Points as Schoology keeps them. The projection re-scales a
+               * category's earned points to match the percentage Schoology
+               * publishes, which is right for the arithmetic and wrong to
+               * print — the student's gradebook says 267.2/270, so that is
+               * what this row says until a what-if actually changes it.
+               */
+              const shown =
+                cat.touched || cat.custom
+                  ? cat.possible > 0
+                    ? { earned: cat.earned, possible: cat.possible }
+                    : null
+                  : source && source.possible > 0
+                    ? { earned: source.earned, possible: source.possible }
+                    : null;
+              /*
+               * Schoology holds points in this category but isn't counting
+               * them toward the course grade yet. Saying so is better than a
+               * row that looks graded but moves nothing.
+               */
+              const heldBack = !cat.touched && !cat.custom && cat.possible === 0 && Boolean(cat.held);
               // Nothing scored in a category yet: no bar, no points, no 0%.
               const graded = standing !== null;
               const pct = standing ?? 0;
@@ -386,7 +437,12 @@ export default function CourseView() {
                 <div
                   key={cat.name}
                   className="cat-row"
-                  style={{ display: "flex", alignItems: "center", gap: 14, padding: "7px 0" }}
+                  title={
+                    heldBack
+                      ? `Schoology isn't counting ${cat.name} toward your grade yet, so these points don't move it.`
+                      : undefined
+                  }
+                  style={{ display: "flex", alignItems: "center", gap: 14, padding: "7px 0", opacity: heldBack ? 0.55 : 1 }}
                 >
                   <span className="truncate cat-name" style={{ flex: "0 0 150px", fontSize: 13, color: "var(--text-2)" }}>
                     {cat.custom ? `${cat.name} (custom)` : cat.name}
@@ -394,18 +450,25 @@ export default function CourseView() {
                   <span className="tabular cat-weight" style={{ flex: "0 0 54px", fontSize: 12, color: "var(--muted)" }}>
                     {cat.weight}%
                   </span>
-                  <Meter pct={pct} color={course.dot} flex="1 1 100px" />
+                  <Meter pct={heldBack ? 0 : pct} color={course.dot} flex="1 1 100px" />
                   <span
                     className="tabular cat-points"
                     style={{ flex: "0 0 92px", textAlign: "right", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}
                   >
-                    {cat.possible > 0 ? `${cat.earned}/${cat.possible}` : source?.letter || "—"}
+                    {shown ? `${round(shown.earned)}/${round(shown.possible)}` : source?.letter || "—"}
                   </span>
                   <span
                     className="tabular cat-pct"
-                    style={{ flex: "0 0 54px", textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--text)" }}
+                    style={{
+                      flex: "0 0 92px",
+                      textAlign: "right",
+                      fontSize: heldBack ? 11 : 13,
+                      fontWeight: heldBack ? 400 : 600,
+                      color: heldBack ? "var(--dim)" : "var(--text)",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    {graded ? `${Math.round(pct)}%` : "—"}
+                    {heldBack ? "not counted" : graded ? `${Math.round(pct)}%` : "—"}
                   </span>
                 </div>
               );
@@ -543,354 +606,241 @@ export default function CourseView() {
               .filter((g) => g.rows.length > 0)
               .map((g) => (
                 <div key={g.name}>
-                  <div className="section-label" style={{ fontSize: 11, marginBottom: 4 }}>
-                    {g.name}
-                  </div>
-                  {g.rows.map((it) => {
-                    /*
-                     * Every real gradebook row is editable, marked or not —
-                     * seeing what an outstanding assignment would do to the
-                     * grade is the main reason to open this. Only what-ifs
-                     * you typed yourself are excluded; those are removed and
-                     * re-added rather than edited.
-                     */
-                    const editable = !it.removable;
-                    const toggle = () =>
-                      setEditing({
-                        key: it.key,
-                        // Blank, not "null": there is no score to start from.
-                        earned: it.earned == null ? "" : String(it.earned),
-                        possible: it.possible == null ? "" : String(it.possible),
-                      });
-                    return (
-                    <div key={it.key} style={{ borderTop: "1px solid var(--line)" }}>
-                    <div
-                      onClick={editable ? toggle : undefined}
-                      role={editable ? "button" : undefined}
-                      tabIndex={editable ? 0 : undefined}
-                      onKeyDown={
-                        editable
-                          ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                toggle();
-                              }
-                            }
-                          : undefined
-                      }
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "8px 0",
-                        cursor: editable ? "pointer" : "default",
-                      }}
+                  {/* The weight and the category's own standing, where you're
+                      already looking — a 40% category at 71% explains far more
+                      about a course grade than either number does alone. */}
+                  <div className="score-group">
+                    <span className="score-group-name truncate">{g.name}</span>
+                    <span className="score-group-weight">{g.weight}% of the grade</span>
+                    <span
+                      className="tabular score-group-pct"
+                      style={{ color: g.standing === null ? "var(--dim)" : scoreColor(g.standing) }}
                     >
-                      <span
-                        aria-hidden
-                        style={{
-                          flex: "0 0 10px",
-                          fontSize: 9,
-                          color: "var(--muted)",
-                          // Static: the editor is a dialog now, so a disclosure
-                          // triangle that rotates would promise an expansion
-                          // that never happens.
-                          visibility: editable ? "visible" : "hidden",
-                        }}
-                      >
-                        ▶
-                      </span>
-                      <span className="truncate" style={{ flex: 1, fontSize: 13, color: "var(--text)" }}>
-                        {it.name}
-                      </span>
-                      <span style={{ flex: "0 0 70px", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                        {it.date}
-                      </span>
-                      <span
-                        className="tabular"
-                        style={{
-                          flex: "0 0 96px",
-                          textAlign: "right",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          whiteSpace: "nowrap",
-                          color: it.pct === null ? "var(--muted)" : scoreColor(it.pct),
-                        }}
-                      >
-                        {it.score}
-                      </span>
-                      <span
-                        className="tabular"
-                        style={{
-                          flex: "0 0 60px",
-                          textAlign: "right",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          whiteSpace: "nowrap",
-                          color: it.delta === null || it.delta === 0 ? "var(--muted)" : it.delta > 0 ? "var(--good)" : "var(--bad)",
-                        }}
-                      >
-                        {it.delta === null ? "" : `${it.delta > 0 ? "+" : ""}${it.delta}%`}
-                      </span>
-                      {it.removable && (
-                        <button
-                          type="button"
-                          aria-label="Remove"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            s.removeScore(it.id);
-                          }}
-                          style={{
-                            flex: "0 0 20px",
-                            height: 20,
-                            border: 0,
-                            borderRadius: 9999,
-                            background: "transparent",
-                            color: "var(--muted)",
-                            fontSize: 15,
-                            lineHeight: 1,
-                            cursor: "pointer",
-                          }}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                    </div>
-                    );
-                  })}
+                      {g.counted ? (g.standing === null ? "—" : `${Math.round(g.standing)}%`) : "not counted"}
+                    </span>
+                  </div>
+                  {g.rows.map((it) => (
+                    <ScoreRow
+                      key={it.key}
+                      row={it}
+                      excluded={it.excluded}
+                      onToggle={() => it.itemId && s.toggleExcluded(it.itemId)}
+                      onScore={(earned, possible) => {
+                        // Typing over a row replaces whatever what-if it had,
+                        // so a second edit doesn't stack on the first.
+                        if (it.id) s.removeScore(it.id);
+                        s.addScore({
+                          courseId: id,
+                          cat: it.cat,
+                          weight: it.weight,
+                          name: it.name,
+                          earned,
+                          possible,
+                          itemId: it.itemId,
+                        });
+                      }}
+                      onClear={() => it.id && s.removeScore(it.id)}
+                      onOpen={() => it.assignmentId && s.openAssignment(it.assignmentId)}
+                    />
+                  ))}
                 </div>
               ))}
           </div>
         </div>
       </div>
-
-      {editing && editingRow && (
-        <ScoreDialog
-          name={editingRow.name}
-          cat={editingRow.cat}
-          earned={editing.earned}
-          possible={editing.possible}
-          onEarned={(v) => setEditing((cur) => cur && { ...cur, earned: v })}
-          onPossible={(v) => setEditing((cur) => cur && { ...cur, possible: v })}
-          from={anchored(proj.pct)}
-          to={anchored(editProjection?.pct ?? null)}
-          delta={editDelta}
-          onOpenAssignment={
-            editingRow.assignmentId ? () => s.openAssignment(editingRow.assignmentId!) : undefined
-          }
-          onKeep={
-            editValid && editingRow.itemId
-              ? () => {
-                  s.addScore({
-                    courseId: id,
-                    cat: editingRow.cat,
-                    // Weight 0: it joins a category Schoology already weights.
-                    weight: 0,
-                    name: editingRow.name,
-                    earned: editEarned,
-                    possible: editPossible,
-                    itemId: editingRow.itemId,
-                  });
-                  setEditing(null);
-                }
-              : undefined
-          }
-          onClear={
-            editingRow.whatIf && editingRow.id
-              ? () => {
-                  s.removeScore(editingRow.id);
-                  setEditing(null);
-                }
-              : undefined
-          }
-          onClose={() => setEditing(null)}
-        />
-      )}
     </div>
   );
 }
 
 /**
- * "What if I'd scored X instead?"
+ * One gradebook row, editable in place.
  *
- * A dialog rather than a row that unfolds: the answer is a single number
- * somewhere else on the page, and an expanding row pushed the very grade you
- * were watching further down the screen as you typed. Nothing here is saved —
- * it's a preview against the real gradebook, gone when the dialog closes.
+ * Three things live here that a list of percentages can't tell you, and they
+ * are the reason this screen exists:
+ *
+ *   - What the row is *worth*. "83%" says nothing about whether that score is
+ *     holding the grade down; "−4.2%" says exactly how much. A zero on a big
+ *     test and a zero on a five-point warm-up look identical until you show
+ *     the contribution.
+ *   - What a different score would do. The points are two number fields, so
+ *     the answer arrives as you type rather than after opening a dialog,
+ *     committing, and looking somewhere else.
+ *   - What the grade would be without it. The tick switches a row off, which
+ *     is the other half of the same question and often the more useful one.
+ *
+ * Typing writes a what-if that persists, so a course can be left mid-thought
+ * and picked back up. Clearing a field puts the real score back.
  */
-function ScoreDialog({
-  name,
-  cat,
-  earned,
-  possible,
-  onEarned,
-  onPossible,
-  from,
-  to,
-  delta,
-  onOpenAssignment,
-  onKeep,
+function ScoreRow({
+  row,
+  excluded,
+  onToggle,
+  onScore,
   onClear,
-  onClose,
+  onOpen,
 }: {
-  name: string;
-  cat: string;
-  earned: string;
-  possible: string;
-  onEarned: (v: string) => void;
-  onPossible: (v: string) => void;
-  from: number | null;
-  to: number | null;
-  delta: number | null;
-  onOpenAssignment?: () => void;
-  /** Persist the typed score. Absent when there's nothing valid to keep. */
-  onKeep?: () => void;
-  /** True when this row already carries a kept score, so it can be taken off. */
-  onClear?: () => void;
-  onClose: () => void;
+  row: {
+    key: string;
+    name: string;
+    date: string;
+    pct: number | null;
+    earned: number | null;
+    possible: number | null;
+    impact: number | null;
+    itemId?: string;
+    assignmentId: string | null;
+    whatIf: boolean;
+    removable: boolean;
+  };
+  excluded: boolean;
+  onToggle: () => void;
+  onScore: (earned: number, possible: number) => void;
+  onClear: () => void;
+  onOpen: () => void;
 }) {
-  const first = useRef<HTMLInputElement>(null);
-
   /*
-   * Select the existing score once, on open, so it can be typed straight over.
-   *
-   * Deliberately its own mount-only effect. It used to share the Escape
-   * listener's effect, which depends on `onClose` — an inline arrow rebuilt on
-   * every parent render — so the effect re-ran after each keystroke and
-   * re-selected the field. Every character then replaced the last one: typing
-   * "25" left "5".
+   * Drafts are local so a half-typed "1" in a field that will read "15" never
+   * reaches the projection. They commit on blur and on Enter.
    */
-  useEffect(() => {
-    first.current?.select();
-  }, []);
+  const [earned, setEarned] = useState<string | null>(null);
+  const [possible, setPossible] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const shownEarned = earned ?? (row.earned == null ? "" : String(round(row.earned)));
+  const shownPossible = possible ?? (row.possible == null ? "" : String(round(row.possible)));
 
-  const tone = delta == null ? "var(--muted)" : delta > 0.05 ? "var(--good)" : delta < -0.05 ? "var(--bad)" : "var(--muted)";
+  function commit() {
+    const rawEarned = shownEarned.trim();
+    const rawPossible = shownPossible.trim();
+
+    // An emptied score means "put the real one back", not "I scored zero".
+    if (rawEarned === "") {
+      setEarned(null);
+      setPossible(null);
+      if (row.whatIf) onClear();
+      return;
+    }
+
+    const e = Number(rawEarned);
+    const p = Number(rawPossible);
+
+    /*
+     * Half a score is not a score yet, and the draft has to survive.
+     *
+     * An ungraded assignment starts with both fields empty, so the first one
+     * you fill can't be applied on its own — and clearing the drafts at that
+     * point threw away what you had just typed, which is why typing into an
+     * unscored row appeared to do nothing at all. Keep it until there is a
+     * pair worth saving.
+     */
+    if (!Number.isFinite(e) || !Number.isFinite(p) || p <= 0) return;
+
+    setEarned(null);
+    setPossible(null);
+    if (e === row.earned && p === row.possible) return;
+    onScore(e, p);
+  }
+
+  const impact = row.impact;
+  /*
+   * Every row stays editable, including one you've already typed into.
+   *
+   * This used to read `!row.removable`, and `removable` becomes true the
+   * moment a what-if is saved — so the first edit locked the field and the
+   * second was impossible. Refining a number is the normal way to use this:
+   * you try 6, look at the grade, then try 8. `removable` only decides whether
+   * there's an × to put the real score back.
+   */
+  const editable = !excluded;
 
   return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`What if: ${name}`}
-        onMouseDown={(e) => e.stopPropagation()}
+    <div
+      className="score-row"
+      style={{ opacity: excluded ? 0.45 : 1, borderTop: "1px solid var(--line)" }}
+    >
+      <button
+        type="button"
+        className={`score-tick${excluded ? "" : " is-on"}`}
+        onClick={onToggle}
+        disabled={!row.itemId}
+        aria-pressed={!excluded}
+        aria-label={excluded ? `Count ${row.name} again` : `Leave ${row.name} out of the grade`}
+        title={excluded ? "Not counted — click to put it back" : "Counted — click to see the grade without it"}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.35 }}>{name}</div>
-            <div style={{ marginTop: 3, fontSize: 12, color: "var(--muted)" }}>{cat}</div>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 26,
-              height: 26,
-              flexShrink: 0,
-              border: 0,
-              borderRadius: 9999,
-              background: "var(--sunken)",
-              color: "var(--text-2)",
-              fontSize: 16,
-              lineHeight: 1,
-              cursor: "pointer",
-            }}
-          >
-            ×
-          </button>
-        </div>
+        {excluded ? <Icon path={ICON.close} size={10} /> : <Icon path={ICON.check} size={10} />}
+      </button>
 
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginTop: 16 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-            <span className="field-label">Earned</span>
-            <input
-              ref={first}
-              className="input"
-              value={earned}
-              onChange={(e) => onEarned(e.target.value)}
-              inputMode="decimal"
-            />
-          </label>
-          <span style={{ paddingBottom: 9, fontSize: 13, color: "var(--muted)" }}>/</span>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-            <span className="field-label">Out of</span>
-            <input
-              className="input"
-              value={possible}
-              onChange={(e) => onPossible(e.target.value)}
-              inputMode="decimal"
-            />
-          </label>
-        </div>
+      <button
+        type="button"
+        className="score-name truncate"
+        onClick={onOpen}
+        disabled={!row.assignmentId}
+        title={row.assignmentId ? "Open this assignment" : undefined}
+      >
+        {row.name}
+        {row.whatIf && <span className="score-flag">yours</span>}
+      </button>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 8,
-            marginTop: 16,
-            padding: "12px 14px",
-            borderRadius: "var(--radius-xs)",
-            background: "var(--sunken)",
-            boxShadow: "var(--shadow-sunken)",
+      <span
+        className="tabular score-impact"
+        style={{
+          color:
+            excluded || impact === null
+              ? "var(--dim)"
+              : impact >= 0
+                ? "var(--good)"
+                : "var(--bad)",
+        }}
+        title={
+          impact === null
+            ? undefined
+            : `Your grade would be ${Math.abs(impact).toFixed(2)}% ${impact >= 0 ? "lower" : "higher"} without this`
+        }
+      >
+        {excluded ? "off" : impact === null ? "" : `${impact >= 0 ? "+" : ""}${impact.toFixed(2)}%`}
+      </span>
+
+      <span className="score-fields">
+        <input
+          className="score-field"
+          value={shownEarned}
+          onChange={(e) => setEarned(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
-        >
-          {to != null && from != null ? (
-            <>
-              <span className="tabular" style={{ fontSize: 13, color: "var(--text-2)" }}>
-                {from.toFixed(1)}% → {to.toFixed(1)}%
-              </span>
-              <span className="tabular" style={{ fontSize: 13, fontWeight: 600, color: tone }}>
-                ({delta != null && delta > 0 ? "+" : ""}
-                {delta?.toFixed(1)}%)
-              </span>
-            </>
-          ) : (
-            <span style={{ fontSize: 12.5, color: "var(--muted)" }}>
-              Type a score to see what it would do to this class.
-            </span>
-          )}
-        </div>
+          disabled={!editable || excluded}
+          inputMode="decimal"
+          aria-label={`Score for ${row.name}`}
+          placeholder="—"
+        />
+        <span className="score-slash">/</span>
+        <input
+          className="score-field"
+          value={shownPossible}
+          onChange={(e) => setPossible(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          disabled={!editable || excluded}
+          inputMode="decimal"
+          aria-label={`Out of, for ${row.name}`}
+          placeholder="—"
+        />
+      </span>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14 }}>
-          {onOpenAssignment && (
-            <button type="button" className="btn btn--quiet" style={{ height: 30 }} onClick={onOpenAssignment}>
-              View assignment
-            </button>
-          )}
-          <span style={{ flex: 1 }} />
-          {onClear && (
-            <button type="button" className="btn btn--quiet" style={{ height: 30 }} onClick={onClear}>
-              Remove
-            </button>
-          )}
-          {/* Keeping is the point: a what-if you can't leave the screen with
-              answers nothing about how several scores add up. */}
-          <button
-            type="button"
-            className="btn btn--primary"
-            style={{ height: 30 }}
-            onClick={onKeep ?? onClose}
-            disabled={!onKeep && !onClear}
-            aria-disabled={!onKeep && !onClear}
-          >
-            {onKeep ? "Keep" : "Done"}
-          </button>
-        </div>
-      </div>
+      {row.removable ? (
+        <button type="button" className="score-x" onClick={onClear} aria-label={`Remove ${row.name}`}>
+          <Icon path={ICON.close} size={11} />
+        </button>
+      ) : (
+        <span style={{ width: 20, flexShrink: 0 }} />
+      )}
     </div>
   );
+}
+
+/** Points as a gradebook prints them: 267.2, not 267.20000000000002. */
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
 }

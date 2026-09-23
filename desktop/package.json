@@ -36,6 +36,15 @@
         ]
       },
       {
+        "from": "../detector",
+        "to": "detector",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/.DS_Store"
+        ]
+      },
+      {
         "from": "../web/.next/standalone",
         "to": "web"
       },

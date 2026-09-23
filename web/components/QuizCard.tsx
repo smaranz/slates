@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import type { Quiz, QuizFRQuestion } from "@/lib/tutor-quiz";
 import GraphCard from "./GraphCard";
+import MathText from "./MathText";
 import { Icon, ICON } from "./ui";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -23,7 +24,7 @@ function MCQ({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: "var(--text)" }}>
         <span style={{ color: "var(--muted)" }}>{index + 1}. </span>
-        {q.prompt}
+        <MathText text={q.prompt} />
       </p>
       {q.graph && <GraphCard graph={q.graph} />}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -39,7 +40,7 @@ function MCQ({
               disabled={answered}
               style={{
                 display: "flex",
-                alignItems: "center",
+                alignItems: "flex-start",
                 gap: 8,
                 width: "100%",
                 textAlign: "left",
@@ -57,6 +58,7 @@ function MCQ({
                 style={{
                   flexShrink: 0,
                   width: 18,
+                  paddingTop: 2,
                   fontSize: 11,
                   fontWeight: 600,
                   color: "var(--muted)",
@@ -64,7 +66,9 @@ function MCQ({
               >
                 {LETTERS[i]}
               </span>
-              <span style={{ flex: 1 }}>{choice}</span>
+              <span style={{ flex: 1 }}>
+                <MathText text={choice} />
+              </span>
               {answered && (isCorrect || isPicked) && (
                 <Icon path={isCorrect ? ICON.check : ICON.close} size={13} style={{ flexShrink: 0, color: tone ?? undefined }} />
               )}
@@ -73,7 +77,9 @@ function MCQ({
         })}
       </div>
       {answered && q.explanation && (
-        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--muted)" }}>{q.explanation}</p>
+        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--muted)" }}>
+          <MathText text={q.explanation} />
+        </p>
       )}
     </div>
   );
@@ -98,13 +104,13 @@ function FRQ({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: "var(--text)" }}>
         <span style={{ color: "var(--muted)" }}>{index + 1}. </span>
-        {q.prompt}
+        <MathText text={q.prompt} />
       </p>
       {q.graph && <GraphCard graph={q.graph} />}
       {q.rubric && (
         <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: "var(--muted)" }}>
           <span style={{ color: "var(--text-2)", fontWeight: 600 }}>What a full answer covers: </span>
-          {q.rubric}
+          <MathText text={q.rubric} />
         </p>
       )}
       <div className="ph-field">
@@ -148,7 +154,7 @@ function FRQ({
             padding: "9px 11px",
           }}
         >
-          {q.sampleAnswer}
+          <MathText text={q.sampleAnswer} />
         </p>
       )}
     </div>
@@ -182,7 +188,7 @@ export default function QuizCard({
     >
       {quiz.title && (
         <span className="section-label" style={{ margin: 0 }}>
-          {quiz.title}
+          <MathText text={quiz.title} />
         </span>
       )}
       {quiz.questions.map((q, i) =>

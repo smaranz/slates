@@ -1,14 +1,14 @@
 import { Agent } from "@/lib/cursor-sdk";
-import { openai } from "@ai-sdk/openai";
-import { openrouter } from "@openrouter/ai-sdk-provider";
 import { claudeCode } from "ai-sdk-provider-claude-code";
 import { streamText, type ModelMessage } from "ai";
 
+import { openaiProvider, openrouterModel } from "@/lib/ai-usage/clients";
+import { noteStreamUsage, noteUsage } from "@/lib/ai-usage/note";
 import {
   DEFAULT_THINKING,
   DEFAULT_TUTOR_MODEL,
   isThinkingLevel,
-  isTutorModel,
+  migrateTutorModelId,
   tutorModelBackend,
   tutorModelComposer,
   tutorModelGrok,
@@ -25,6 +25,7 @@ import {
 import { TUTOR_DOCUMENT_INSTRUCTIONS } from "@/lib/tutor-documents";
 import { TUTOR_GRAPH_INSTRUCTIONS } from "@/lib/tutor-graph";
 import { TUTOR_QUIZ_INSTRUCTIONS } from "@/lib/tutor-quiz";
+import { encodeEvent, toolLabel, type TutorEvent } from "@/lib/tutor-stream";
 
 // Streaming keeps the connection alive for long answers instead of
 // hitting a request timeout. The CLI-backed models (Claude Code, Cursor)
@@ -38,6 +39,13 @@ interface TutorRequest {
   }>;
   /** One line per course: name, grade, and what's still open. */
   context?: string;
+  /**
+   * What the student attached with `@` in this message: the specific
+   * assignment, class, essay or material the question is about. Placed after
+   * the board so it reads as the foreground against it — see
+   * lib/tutor-mentions.ts.
+   */
+  focus?: string;
   studentName?: string;
   /** Whichever model the student picked in the composer. */
   model?: string;
@@ -113,10 +121,12 @@ function buildCursorPrompt(
 function cursorModelSelection(modelId: TutorModelId): { id: string; params?: Array<{ id: string; value: string }> } {
   const grok = tutorModelGrok(modelId);
   if (grok) {
+    // Cursor's catalog lists grok-4.7 with `reasoning_effort` + `fast`
+    // (4.6 used the shorter `effort` id). Context stays at the SDK default.
     return {
-      id: "grok-4.6",
+      id: "grok-4.7",
       params: [
-        { id: "effort", value: grok.thinking },
+        { id: "reasoning_effort", value: grok.thinking },
         { id: "fast", value: String(grok.fast) },
       ],
     };
@@ -139,9 +149,9 @@ function streamFromCursorAgentSDK(
   prompt: string,
   images: CursorImage[]
 ): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
   return new ReadableStream({
     async start(controller) {
+      const send = (event: TutorEvent) => controller.enqueue(encodeEvent(event));
       try {
         const agent = await Agent.create({ model: cursorModelSelection(modelId) });
         const run = await agent.send(
@@ -149,28 +159,66 @@ function streamFromCursorAgentSDK(
           {
             mode: "plan",
             onDelta: ({ update }) => {
-              if (update.type === "text-delta" && update.text) {
-                controller.enqueue(encoder.encode(update.text));
+              /*
+               * The Cursor agent reports its own thinking and tool use through
+               * the same delta channel as the prose, so they are separated
+               * here rather than being flattened into the answer — which is
+               * what happened before, when only `text-delta` was read and
+               * everything else was dropped on the floor.
+               */
+              const u = update as { type: string; text?: string; toolName?: string; name?: string };
+              if (u.type === "text-delta" && u.text) send({ t: "delta", v: u.text });
+              else if (u.type === "reasoning-delta" && u.text) send({ t: "reasoning", v: u.text });
+              else if (u.type === "tool-call") {
+                const name = u.toolName ?? u.name ?? "tool";
+                send({ t: "tool", name, label: toolLabel(name) });
+              } else if (u.type === "tool-result") {
+                const name = u.toolName ?? u.name ?? "tool";
+                send({ t: "tool_done", name, label: toolLabel(name), ok: true });
               }
             },
           }
         );
         const result = await run.wait();
+        // Usage before close — the SDK clears the handle afterward.
+        try {
+          const usage = await agent.getUsage();
+          noteUsage({
+            agent: "tutor",
+            model: modelId,
+            backend: "cursor",
+            inputTokens: usage.usage.inputTokens,
+            outputTokens: usage.usage.outputTokens,
+            reasoningTokens: usage.usage.reasoningTokens ?? 0,
+            cacheReadTokens: usage.usage.cacheReadTokens,
+            covered: true,
+          });
+        } catch {
+          noteUsage({
+            agent: "tutor",
+            model: modelId,
+            backend: "cursor",
+            inputTokens: 0,
+            outputTokens: 0,
+            covered: true,
+          });
+        }
         agent.close();
         if (result.status === "error") {
-          controller.error(new Error(result.error?.message ?? "Cursor agent run failed."));
-          return;
+          send({ t: "error", v: result.error?.message ?? "Cursor agent run failed." });
         }
+        send({ t: "done" });
         controller.close();
       } catch (err) {
-        controller.error(err instanceof Error ? err : new Error(String(err)));
+        send({ t: "error", v: err instanceof Error ? err.message : String(err) });
+        controller.close();
       }
     },
   });
 }
 
 export async function POST(req: Request) {
-  const { messages, context, studentName, model, thinking }: TutorRequest = await req.json();
+  const { messages, context, focus, studentName, model, thinking }: TutorRequest = await req.json();
   const thinkingLevel: ThinkingLevel = isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING;
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -181,11 +229,10 @@ export async function POST(req: Request) {
    * Resolved before the prompt is built, because what the tutor should be told
    * about skills depends entirely on whether this backend can run one.
    */
-  const resolvedModel: TutorModelId = isTutorModel(model)
-    ? model
-    : isTutorModel(process.env.SLATES_TUTOR_MODEL)
-      ? process.env.SLATES_TUTOR_MODEL
-      : DEFAULT_TUTOR_MODEL;
+  const resolvedModel: TutorModelId =
+    migrateTutorModelId(model) ??
+    migrateTutorModelId(process.env.SLATES_TUTOR_MODEL) ??
+    DEFAULT_TUTOR_MODEL;
   const canRunSkills = tutorModelBackend(resolvedModel) === "claude-code";
 
   const system = [
@@ -194,6 +241,9 @@ export async function POST(req: Request) {
     context
       ? `Everything on their board — every course, assignment (done and not), grade, submission, and comment:\n${context}`
       : "",
+    // After the board, so the thing being pointed at is the last context read
+    // before the instructions — the foreground against that background.
+    focus ? focus : "",
     "",
     "For an ordinary chat reply, answer in 2-4 short sentences. Be specific:",
     "reference their actual courses and assignments when relevant, and end",
@@ -251,7 +301,11 @@ export async function POST(req: Request) {
   if (backend === "cursor-agent") {
     const { text, images } = buildCursorPrompt(system, modelMessages);
     return new Response(streamFromCursorAgentSDK(modelId, text, images), {
-      headers: { "content-type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+      },
     });
   }
 
@@ -276,23 +330,112 @@ export async function POST(req: Request) {
         })
       : backend === "openrouter"
         ? streamText({
-            // Reads OPENROUTER_API_KEY from the environment.
-            model: openrouter(modelId),
+            model: openrouterModel(modelId),
             system,
             messages: modelMessages,
             providerOptions: {
               openrouter: { reasoning: { effort: thinkingLevel } },
             },
           })
-        : streamText({
-            // Direct to OpenAI — reads OPENAI_API_KEY from the environment.
-            model: openai(modelId),
-            system,
-            messages: modelMessages,
-            providerOptions: {
-              openai: { reasoningEffort: thinkingLevel },
-            },
-          });
+        : (() => {
+            const provider = openaiProvider();
+            return streamText({
+              model: provider(modelId),
+              system,
+              messages: modelMessages,
+              /*
+               * The one tool the API-backed models get. A tutor that can't look
+               * anything up has to answer exam dates and current syllabi from
+               * memory, which is exactly where it makes things up; and it is
+               * what puts visible steps in front of the student on these models,
+               * which otherwise only ever show reasoning.
+               *
+               * Taken from the same provider instance that holds the active
+               * linked key, so web search and the model don't disagree about
+               * credentials.
+               */
+              tools: { web_search: provider.tools.webSearch({}) },
+              providerOptions: {
+                /*
+                 * `reasoningSummary` is what makes the thinking visible. Without
+                 * it the reasoning models still reason, they just never send any
+                 * of it, and the panel above the reply has nothing to show.
+                 */
+                openai: { reasoningEffort: thinkingLevel, reasoningSummary: "auto" },
+              },
+            });
+          })();
 
-  return result.toTextStreamResponse();
+  noteStreamUsage("tutor", modelId, backend, result.totalUsage);
+
+  return ndjson(result.fullStream);
 }
+
+/**
+ * The model's stream, re-emitted as events the client can tell apart.
+ *
+ * `toTextStreamResponse()` would forward the prose and drop everything else —
+ * the reasoning, the tool calls, the step boundaries — which is exactly the
+ * material a student needs to see that something is happening and what.
+ *
+ * An error mid-stream is sent as an event rather than tearing the response
+ * down: whatever the tutor already said is worth keeping on screen, and a
+ * half-answer with a note beats a blank bubble.
+ */
+function ndjson(parts: AsyncIterable<StreamPart>): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: TutorEvent) => controller.enqueue(encodeEvent(event));
+      try {
+        for await (const part of parts) {
+          switch (part.type) {
+            case "text-delta":
+              if (part.text) send({ t: "delta", v: part.text });
+              break;
+            case "reasoning-delta":
+              if (part.text) send({ t: "reasoning", v: part.text });
+              break;
+            case "tool-call": {
+              const name = part.toolName ?? "tool";
+              send({ t: "tool", name, label: toolLabel(name) });
+              break;
+            }
+            case "tool-result":
+            case "tool-error": {
+              const name = part.toolName ?? "tool";
+              send({ t: "tool_done", name, label: toolLabel(name), ok: part.type === "tool-result" });
+              break;
+            }
+            case "finish-step":
+              send({ t: "step" });
+              break;
+            case "error":
+              send({ t: "error", v: part.error instanceof Error ? part.error.message : String(part.error) });
+              break;
+          }
+        }
+        send({ t: "done" });
+      } catch (err) {
+        send({ t: "error", v: err instanceof Error ? err.message : "The tutor stopped unexpectedly." });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+/** Whatever `fullStream` yields — narrowed by the switch above, not here. */
+type StreamPart = {
+  type: string;
+  text?: string;
+  toolName?: string;
+  error?: unknown;
+} & Record<string, unknown>;

@@ -1,3 +1,6 @@
+import { activeApiSecret } from "@/lib/ai-usage/clients";
+import { noteUsage } from "@/lib/ai-usage/note";
+
 /**
  * An illustration the tutor drew, from ElevenLabs' image flow.
  *
@@ -18,7 +21,7 @@ const TIMEOUT_MS = 60_000;
 
 export class MissingImageKeyError extends Error {
   constructor() {
-    super("ElevenLabs isn't connected. Add ELEVENLABS_API_KEY to ~/.slates/.env and restart Slates.");
+    super("ElevenLabs isn't connected. Link a key in AI Usage, or add ELEVENLABS_API_KEY to .env and restart.");
     this.name = "MissingImageKeyError";
   }
 }
@@ -54,7 +57,7 @@ async function readError(res: Response): Promise<string> {
  * track the way the lesson pipeline has to.
  */
 export async function generateTutorImage(prompt: string): Promise<string> {
-  const key = process.env.ELEVENLABS_API_KEY;
+  const key = activeApiSecret("elevenlabs");
   if (!key) throw new MissingImageKeyError();
 
   const createRes = await fetch("https://api.elevenlabs.io/v1/flows/image", {
@@ -92,6 +95,15 @@ export async function generateTutorImage(prompt: string): Promise<string> {
       if (!imgRes.ok) throw new Error(`Couldn't download the generated image (${imgRes.status}).`);
       const bytes = Buffer.from(await imgRes.arrayBuffer());
       const mime = body.content_mime_type || imgRes.headers.get("content-type") || "image/png";
+      noteUsage({
+        agent: "image",
+        model: MODEL_ID,
+        backend: "elevenlabs",
+        inputTokens: 1,
+        outputTokens: 0,
+        unit: "images",
+        covered: false,
+      });
       return `data:${mime};base64,${bytes.toString("base64")}`;
     }
     if (body.status === "failed") {

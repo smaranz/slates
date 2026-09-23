@@ -1,4 +1,5 @@
 import type { RawSnapshot } from "@/lib/normalize";
+import { SCRAPER_URL } from "@/lib/ports";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -9,7 +10,7 @@ export const maxDuration = 120;
  * server keeps the browser from having to reach a non-portal origin, and the
  * scraper itself binds to loopback only.
  */
-const BASE = process.env.SLATES_SCRAPER_URL ?? "http://127.0.0.1:4000";
+const BASE = SCRAPER_URL;
 
 const OFFLINE =
   "The Slates scraper isn't running. In a terminal:  cd scraper && npm run serve";

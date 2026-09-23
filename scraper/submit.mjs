@@ -152,36 +152,58 @@ async function waitForEditor(page) {
 }
 
 /**
- * Put text into the submission editor.
+ * Put the response into the submission editor.
  *
  * The visible field is a TinyMCE iframe, not the textarea — writing to the
  * textarea alone is discarded when TinyMCE syncs over it on submit. Drive the
  * editor and call save() so the textarea matches what the user sees.
+ *
+ * `html` is what Slates rendered from the student's markdown, already
+ * sanitised on its side (see web/lib/submission-html.ts). Schoology stores a
+ * submission as HTML, so passing it through is what makes bold text, lists and
+ * real hyperlinks survive; the plain text is kept only as the fallback for the
+ * case where TinyMCE never loaded and all the textarea can hold is characters.
  */
-async function fillEditor(page, text) {
+async function fillEditor(page, text, html) {
   const how = await page.evaluate(
-    ({ sel, value }) => {
+    ({ sel, value, markup }) => {
       const id = "edit-submission";
       const tm = window.tinymce || window.tinyMCE;
       const editor = tm?.get?.(id);
-      const html = value
-        .split(/\n{2,}/)
-        .map((p) => `<p>${p.replace(/\n/g, "<br>").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c])}</p>`)
-        .join("");
+
+      /*
+       * The fallback for when Slates sent no markup. Escaping has to happen
+       * before the <br> tags go in — doing it the other way round escaped the
+       * tags themselves, and every line break in a submission arrived as the
+       * literal text "<br>".
+       */
+      const fromPlain = () =>
+        value
+          .split(/\n{2,}/)
+          .map((p) => {
+            const escaped = p.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
+            return `<p>${escaped.replace(/\n/g, "<br>")}</p>`;
+          })
+          .join("");
+
+      const body = markup && markup.trim() ? markup : fromPlain();
+
       if (editor) {
-        editor.setContent(html);
+        editor.setContent(body);
         editor.save(); // pushes the content back into the textarea
         return "tinymce";
       }
       const ta = document.querySelector(sel);
       if (ta) {
+        // No editor means no HTML rendering either, so the plain text is the
+        // honest thing to leave behind rather than raw tags.
         ta.value = value;
         ta.dispatchEvent(new Event("input", { bubbles: true }));
         return "textarea";
       }
       return "none";
     },
-    { sel: DROPBOX.createText, value: text }
+    { sel: DROPBOX.createText, value: text, markup: html ?? "" }
   );
   if (how === "none") throw new Error("Couldn't find Schoology's response editor.");
   return how;
@@ -212,7 +234,7 @@ async function confirm(page) {
  */
 export async function submitAssignment(
   ctx,
-  { url, text = "", files = [], draft = false },
+  { url, text = "", html = "", files = [], draft = false },
   onStep = () => {}
 ) {
   if (!text.trim() && !files.length) throw new Error("Nothing to submit.");
@@ -264,7 +286,7 @@ export async function submitAssignment(
       await openTab(page, "Create", DROPBOX.createForm);
       step("editor", "Filling in your response");
       await waitForEditor(page);
-      await fillEditor(page, text);
+      await fillEditor(page, text, html);
       step("send", draft ? "Saving the draft" : "Handing it to Schoology");
       await clickButton(
         page,

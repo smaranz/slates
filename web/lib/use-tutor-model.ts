@@ -6,7 +6,7 @@ import {
   DEFAULT_THINKING,
   DEFAULT_TUTOR_MODEL,
   isThinkingLevel,
-  isTutorModel,
+  migrateTutorModelId,
   type ThinkingLevel,
   type TutorModelId,
 } from "./tutor-models";
@@ -29,7 +29,12 @@ function subscribe(onChange: () => void) {
 function getModelSnapshot(): TutorModelId {
   try {
     const saved = window.localStorage.getItem(MODEL_KEY);
-    if (isTutorModel(saved)) return saved;
+    const migrated = migrateTutorModelId(saved);
+    if (migrated) {
+      // Rewrite old Grok 4.6 ids so the next load hits the live catalog directly.
+      if (saved !== migrated) window.localStorage.setItem(MODEL_KEY, migrated);
+      return migrated;
+    }
   } catch {
     /* private mode / storage disabled */
   }

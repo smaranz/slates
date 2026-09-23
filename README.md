@@ -121,6 +121,7 @@ Slates opens on a choice, because the year has two halves and they share nothing
 - **It has a verdict.** "Apply ED to Michigan." "Retake once, then stop." "Cut two reaches." It's instructed at length not to hand you a balanced list of options and call that advice.
 - **It acts on your real record.** Thirty tools over your profile, next steps, documents, check-ins, college list, and application tracker — so "I'll add that" means a row appeared. When it needs a decision from you it opens a short form instead of burying four questions in a paragraph.
 - **Documents you keep.** Activity lists, brag sheets, deadline checklists, essay outlines, draft emails. Markdown, editable, downloadable. It will not write your personal statement, and says why.
+- **Every sentence of the draft, judged.** The essay studio scores a draft against its rubric — each criterion quoting the line it's scoring — and then reads the whole thing line by line on Claude Sonnet 5: every sentence comes back green, amber, or red in the draft itself, with numbered steps on the ones that aren't working. Click a red sentence and you retype it yourself; what comes back is a verdict, the steps, and the same technique shown on somebody else's subject, so there's nothing to paste in. Plus an honest read of how machine-written the prose sounds, measured locally rather than mailed to detector sites.
 - **Talk to it.** A live call on `gpt-realtime-2.1-mini`, peer-to-peer from your browser to OpenAI over WebRTC — audio never touches Slates, which only mints the one-call key. It searches the same library, saves memories, and records scores mid-sentence.
 - **Honest odds.** A logistic model over each school's acceptance rate, your position in its middle 50%, rigor, activities, first-gen status, and round — always a band, never a single false-precision number.
 
@@ -159,6 +160,15 @@ The portal itself holds **no Schoology cookie.** A dedicated, logged-in Chrome p
 
 ## Run it
 
+Install the CLI (puts `slates` on your PATH), then start the portal:
+
+```bash
+npm install -g github:smaranz/slates
+slates
+```
+
+Or clone and run it by hand:
+
 ```bash
 git clone https://github.com/smaranz/slates.git
 cd slates
@@ -167,7 +177,8 @@ cd slates
 cd web
 cp .env.example .env.local   # drop in whatever keys you have
 npm install
-npm run dev                  # http://localhost:3000
+npm run dev                  # http://localhost:7528
+# same as: slates
 
 # scraper — second terminal
 cd ../scraper

@@ -60,6 +60,25 @@ export async function estimateAssignments(snapshot: SyncSnapshot): Promise<Assig
         due: assignment.due,
         dueInDays: assignment.dateOffset,
         course: courses.get(assignment.courseId) ?? "Unknown course",
+        /*
+         * Everything that makes work long, not just what it is called. The
+         * handouts go across as references; the server fetches their text
+         * through the scraper's session, which the browser has no way to do.
+         */
+        submissionTypes: assignment.submissionTypes,
+        points: assignment.grade?.possible ?? null,
+        attachments: assignment.attachments?.map((a) => ({
+          kind: a.kind,
+          title: a.title,
+          url: a.url,
+          size: a.size,
+        })),
+        assessment: assignment.assessment
+          ? {
+              timeLimitMin: assignment.assessment.timeLimitMin,
+              questionPoints: assignment.assessment.questionPoints,
+            }
+          : null,
       })),
     }),
   });
