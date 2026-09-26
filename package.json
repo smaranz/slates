@@ -6,6 +6,9 @@
   "bin": {
     "slates": "./bin/slates.js"
   },
+  "scripts": {
+    "host": "node bin/slates.js host"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/smaranz/slates.git"

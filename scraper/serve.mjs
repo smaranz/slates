@@ -219,6 +219,21 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
 
   /*
+   * Only the portal, server-side, talks to this. A browser labels every
+   * request (`Origin`, `Sec-Fetch-Site`) and sends its page's own name as
+   * `Host`, so anything carrying those came from a web page — a site you
+   * visited, or one rebinding its DNS to 127.0.0.1 — and gets nothing from
+   * the Schoology session held here.
+   */
+  if (
+    req.headers.origin ||
+    req.headers["sec-fetch-site"] ||
+    !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host ?? "")
+  ) {
+    return send(res, 403, { error: "The sync service only answers the Slates portal." });
+  }
+
+  /*
    * Hand the browser profile over so an interactive login can use it, and
    * keep out of the way until it says it's finished (or the pause lapses).
    */

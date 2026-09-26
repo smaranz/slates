@@ -7,6 +7,7 @@ import {
   REFRESH_CHOICES,
   useHiddenApps,
   useHiddenRegistries,
+  useHostApps,
   useUsageRefreshMinutes,
 } from "@/lib/app-prefs";
 import { UI_REGISTRIES } from "@/lib/ui-registries";
@@ -56,6 +57,7 @@ function Row({ title, sub, children }: { title: string; sub?: string; children: 
 
 export function GeneralSettings() {
   const [hidden, setVisible] = useHiddenApps();
+  const { unavailable } = useHostApps();
   const visibleCount = APPS.filter((a) => !hidden.includes(a.mode)).length;
 
   return (
@@ -66,6 +68,13 @@ export function GeneralSettings() {
       >
         <ul className="app-settings-list">
           {APPS.map((app) => {
+            if (unavailable.includes(app.mode)) {
+              return (
+                <Row key={app.mode} title={app.title} sub={`${app.blurb} · needs Slates hosted on a Mac`}>
+                  <span style={{ color: "var(--muted)", fontSize: 12 }}>Unavailable</span>
+                </Row>
+              );
+            }
             const on = !hidden.includes(app.mode);
             const last = on && visibleCount === 1;
             return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useHiddenApps } from "@/lib/app-prefs";
+import { useHiddenApps, useHostApps } from "@/lib/app-prefs";
 import { useMode } from "@/lib/mode";
 import { useStore } from "@/lib/store";
 
@@ -30,10 +30,11 @@ import UsageApp from "@/components/usage/UsageApp";
 export default function Page() {
   const { mode, ready, settingsOpen } = useMode();
   const [hiddenApps] = useHiddenApps();
+  const host = useHostApps();
 
   // Nothing renders until the saved choice has been read. A frame of the
   // launcher before jumping into School would be a flash of the wrong app.
-  if (!ready) return <div className="shell" />;
+  if (!ready || (mode === "usage" && !host.known)) return <div className="shell" />;
   // Settings sits above both halves rather than inside either, so it takes
   // over the window from wherever it was opened.
   if (settingsOpen) return <UnifiedSettings />;

@@ -65,7 +65,8 @@ export function ensureWorkspace(): string {
     fs.rmSync(link, { recursive: true, force: true });
   }
   if (!fs.existsSync(link) && fs.existsSync(source)) {
-    fs.symlinkSync(source, link, "dir");
+    // A junction on Windows: directory symlinks there need admin or Developer Mode.
+    fs.symlinkSync(source, link, process.platform === "win32" ? "junction" : "dir");
   }
   return OUTPUT_DIR;
 }

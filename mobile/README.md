@@ -66,7 +66,8 @@ the host computer's LAN address, then configure the native shell:
 ```bash
 cd mobile
 cp .env.example .env
-# Edit SLATES_MOBILE_SERVER_URL, for example http://192.168.1.42:3000
+# Edit SLATES_MOBILE_SERVER_URL, for example http://192.168.1.42:7528
+# (or a Tailscale host — see docs/remote-host-setup.md)
 npm run check:server
 npm run sync
 ```
@@ -79,7 +80,7 @@ is connected.
 Simulator shortcuts:
 
 - iOS Simulator: `http://localhost:7528`
-- Android Emulator: `http://10.0.2.2:3000`
+- Android Emulator: `http://10.0.2.2:7528`
 - Physical devices: the host's reachable LAN/private-network URL; never
   `localhost`
 

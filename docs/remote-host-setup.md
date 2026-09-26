@@ -1,192 +1,150 @@
-# Running Slates' back end on the gaming PC
+# Running Slates' back end on another computer
 
-The Mac becomes just the window. The PC runs the Next portal, the Schoology
-scraper and its Chrome, and the Claude Code / Cursor CLIs a tutor reply shells
-out to. That is the part that was eating RAM.
+The heavy part of Slates is the back end: the Next portal, the Schoology
+scraper and the Chrome it drives, and the Claude Code / Cursor processes a
+tutor reply spawns. Put all of that on a computer that stays on — a desktop or
+gaming PC — and the laptop becomes just a window, and the phone app stops
+needing the laptop at all.
 
-**Run this on native Windows, not inside WSL.** The environment probe on the
-PC settled it:
-
-- The Claude Code session that can actually run commands is native Windows
-  (Git Bash), not a session inside Ubuntu.
-- The scraper launches the **installed** Chrome (`channel: "chrome"` in
-  `scraper/browser.mjs`). That Chrome is missing inside WSL. On Windows it is
-  the Chrome already on the gaming PC, so the one-time Schoology login is a
-  normal window, not a WSLg one.
-- WSL2 (`Ubuntu-24.04`) is installed and WSLg works, but that distro only
-  sees 4 CPUs and about 7 GB. The PC has 12 logical CPUs and about 31 GB.
-  Putting the portal in WSL would leave most of the machine idle.
-- The repo is not cloned yet, so nothing is invested in a WSL checkout.
-- Node and the portal do not shell out to `/bin/sh`. `os.homedir()` is what
-  they use for `~/.slates`, which on Windows is `%USERPROFILE%\.slates`.
-
-Leave the Ubuntu distro stopped. Do not install Chrome or Tailscale inside it.
-
-## Do this first
-
-Claude Code is already installed on the PC — that is the session the probe
-came from. Stay in that native Windows session and have it run the steps
-below. Remote Control is how the Mac talks to it. SSH from the Mac is blocked
-by the harness, so this session is the path.
-
-Cursor's CLI is separate and still has to be installed (section 4). The tutor
-shells out to whichever CLI the chosen model uses, and those logins are per
-machine.
-
----
-
-## 1. Node and the repo
-
-In PowerShell:
-
-```powershell
-winget install --id OpenJS.NodeJS.22 -e --accept-package-agreements
-winget install --id Git.Git -e --accept-package-agreements
+```
+Mac: Slates.app (window only) ─┐                 ┌─ 127.0.0.1:7528  portal
+                               ├─ your tailnet ──┤
+Phone: Slates app ─────────────┘  (HTTPS)        └─ 127.0.0.1:7529  scraper ─ Chrome ─ Schoology
+                                  host: tailscale serve
 ```
 
-Open a new terminal so `node` and `git` are on `PATH`, then:
+Both services listen on `127.0.0.1` only. [Tailscale Serve](https://tailscale.com/kb/1312/serve)
+is the one way in, and it only answers devices signed in to your tailnet. The
+portal refuses requests that come from other websites (`web/proxy.ts`), but it
+has **no login**: anything on your tailnet can use it as you. Don't publish it
+with Funnel, ngrok, or a Cloudflare tunnel.
+
+## 1. The host (Windows)
+
+Use native Windows, not WSL — the scraper drives the installed Google Chrome,
+and the Schoology sign-in needs a real window on the desktop.
+
+1. Install [Node.js 22 LTS](https://nodejs.org), [Git](https://git-scm.com), and Google Chrome.
+
+2. Clone the repo and give it your keys:
+
+   ```powershell
+   git clone https://github.com/smaranz/slates.git $env:USERPROFILE\slates
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\.slates" | Out-Null
+   ```
+
+   Copy your `~/.slates/.env` to `%USERPROFILE%\.slates\.env` (for example
+   with `scp` from the Mac). `slates host` hands that file to both services;
+   the portal doesn't read it on its own.
+
+3. Start it once in a terminal:
+
+   ```powershell
+   cd $env:USERPROFILE\slates
+   node bin\slates.js host
+   ```
+
+   The first run installs dependencies and builds the portal, which takes a few
+   minutes. After that it starts both services, restarts either one if it
+   exits, and logs to `%USERPROFILE%\.slates\logs\host.log`. `--stop` stops a
+   running host; `--rebuild` forces a build.
+
+4. Sign in to Schoology, at the PC — a Chrome window opens there:
+
+   ```powershell
+   cd $env:USERPROFILE\slates\scraper
+   node login.mjs <your-district>.schoology.com
+   ```
+
+   A running host pauses its scraper for this and picks the session up when
+   you're done. Google sign-in re-completes itself after that, so you should
+   rarely need to do it again.
+
+5. Sign the tutor's models in on this machine:
+
+   ```powershell
+   claude auth login                        # Claude models
+   npm --prefix web run cursor:login        # Grok and Composer (not `cursor-agent login`)
+   ```
+
+6. Publish the portal to your tailnet. Install [Tailscale](https://tailscale.com/download/windows),
+   sign in, then:
+
+   ```powershell
+   tailscale serve --bg 7528
+   tailscale serve status     # prints https://<host>.<tailnet>.ts.net
+   ```
+
+7. Keep it running. Stop the PC sleeping on AC power, and start the host at
+   log-on without a console window:
+
+   ```powershell
+   powercfg /change standby-timeout-ac 0
+
+   $node = (Get-Command node).Source
+   $slates = "$env:USERPROFILE\slates"
+   $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+     -Argument "-NoProfile -WindowStyle Hidden -Command & '$node' '$slates\bin\slates.js' host" `
+     -WorkingDirectory $slates
+   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1)
+   Register-ScheduledTask -TaskName "Slates host" -Action $action -Trigger $trigger -Settings $settings -Force
+   Start-ScheduledTask -TaskName "Slates host"
+   ```
+
+   The task only runs while you're logged in to Windows, since Chrome and the
+   CLI logins belong to your account.
+
+## 2. The Mac
+
+1. Install [Tailscale](https://tailscale.com/download/mac) and sign in to the same tailnet.
+2. Point Slates at the host:
+
+   ```bash
+   echo 'SLATES_HOST=https://<host>.<tailnet>.ts.net' >> ~/.slates/.env
+   ```
+
+3. Quit Slates and open it again. It starts nothing locally — no portal, no
+   scraper, no Chrome — and copies your board to the new address the first
+   time. Delete the line to go back to running everything on the Mac.
+
+## 3. The phone
+
+1. Install the Tailscale app and sign in to the same tailnet.
+2. In `mobile/.env`:
+
+   ```
+   SLATES_MOBILE_SERVER_URL=https://<host>.<tailnet>.ts.net
+   ```
+
+3. `npm run check:server && npm run sync` in `mobile/`, then build and install
+   from Xcode or Android Studio. It's HTTPS, so no plain-HTTP exceptions are
+   needed, and it works away from home.
+
+## Updating the host
 
 ```powershell
-git clone https://github.com/smaranz/slates.git $env:USERPROFILE\slates
 cd $env:USERPROFILE\slates
-npm --prefix web install
-npm --prefix scraper install
+node bin\slates.js host --stop
+git pull
+Start-ScheduledTask -TaskName "Slates host"
 ```
 
-`origin/main` is what this clone gets. Work that only exists on the Mac and
-has not been pushed will not be on the PC.
+`slates host` reinstalls dependencies when a lockfile changed and rebuilds the
+portal when the commit changed. Only what's pushed reaches the host.
 
-## 2. Chrome
+## Good to know
 
-Confirm the Windows install, not a WSL one:
-
-```powershell
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" --version
-```
-
-If that prints a version, the scraper can launch. Do not install
-`google-chrome` inside Ubuntu.
-
-## 3. Your keys
-
-The portal reads `%USERPROFILE%\.slates\.env`. Copy the values from the Mac's
-`~/.slates/.env`.
-
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.slates" | Out-Null
-@'
-OPENAI_API_KEY=
-OPENROUTER_API_KEY=
-ELEVENLABS_API_KEY=
-NEXT_PUBLIC_SLATES_EXTENSION_ID=
-NEXT_PUBLIC_DESMOS_API_KEY=
-'@ | Set-Content -Encoding utf8 "$env:USERPROFILE\.slates\.env"
-```
-
-Fill the values in before starting the portal. An empty file starts the app
-and then fails every model call.
-
-## 4. Cursor CLI
-
-Claude Code is already signed in on this PC. Cursor is not:
-
-```powershell
-irm https://cursor.com/install | iex
-cursor-agent login
-```
-
-If you skip this, the portal starts and every Grok or Composer reply fails.
-
-## 5. Build and run
-
-```powershell
-cd $env:USERPROFILE\slates
-npm --prefix web run build
-```
-
-Two long-lived processes, both bound to localhost. Leave each in its own
-window (or use `pm2` if you want them to survive logoff). There is no
-systemd on Windows.
-
-```powershell
-# window 1
-cd $env:USERPROFILE\slates\scraper
-node serve.mjs
-
-# window 2
-cd $env:USERPROFILE\slates\web
-$env:PORT = "7528"
-$env:HOSTNAME = "127.0.0.1"
-node .next\standalone\server.js
-```
-
-```powershell
-(Invoke-WebRequest http://127.0.0.1:7528/ -UseBasicParsing).StatusCode   # 200
-```
-
-## 6. Sign in to Schoology, once
-
-```powershell
-cd $env:USERPROFILE\slates\scraper
-node login.mjs
-```
-
-A real Chrome window opens on the Windows desktop. Sign in there. The session
-is saved under `%USERPROFILE%\.slates\chrome-profile` and reused headlessly
-after that.
-
-When Schoology later expires the session, that window appears **on the PC**,
-not the Mac.
-
-## 7. Tailscale
-
-Install the Windows Tailscale app, not the Linux one inside WSL. Sign in to
-the same tailnet as the Mac. Then, from a terminal:
-
-```powershell
-tailscale serve --bg 7528
-tailscale serve status
-```
-
-`status` prints the `https://<host>.<tailnet>.ts.net` URL. Serve publishes to
-**your tailnet only**. Do not use Funnel, ngrok, or a Cloudflare tunnel. The
-portal has no login, and the scraper holds a live Schoology session.
-
-The scraper stays on `127.0.0.1:7529` on the PC and is never published. Only
-the portal talks to it.
-
-## 8. Point the Mac at it
-
-On the **Mac**:
-
-```bash
-echo 'SLATES_HOST=https://<host>.<tailnet>.ts.net' >> ~/.slates/.env
-```
-
-Quit Slates and open it again. It spawns nothing — no portal, no scraper, no
-Chrome, no CLIs. The boot screen says it is connected to that host and loads
-the remote portal.
-
-Delete that line to go back to running everything on the Mac.
-
----
-
-## Keeping it up
-
-- The PC has to be awake. Tailscale cannot wake a sleeping machine from
-  somewhere else. Turn sleep off, or the portal is down whenever the PC sleeps.
-- The two `node` windows die when you close them. A logon task or `pm2` is
-  what makes them survive a reboot.
-
-## What you should expect
-
-- The board comes across on first connect. Assignments, tutor chats, the
-  student record, and Study Studio modules live in the window's
-  `localStorage`, which is keyed by origin. `http://localhost:7528` and
-  `https://<host>.ts.net` are different origins, so this would otherwise open
-  empty. `migrateStorageToRemote()` in `desktop/main.mjs` copies it once, per
-  host, and never overwrites a key the remote origin already has. The local
-  copy is left in place, so removing `SLATES_HOST` puts you back where you were.
-- Replies are a little slower over a tailnet than over loopback.
-- The Mac still runs a Chromium window. What you stop paying for is Node, the
-  scraper's Chrome, and whatever a tutor reply spawns.
+- Your marks, tutor chats and counselor record live in each device's browser
+  storage, which is tied to the address. The Mac's copy is carried to the host's
+  address once; the phone starts fresh there, and devices don't share them yet.
+- AI Usage is hidden when the host isn't a Mac: it reads the host's coding-tool
+  logs with macOS-only commands.
+- Optional extras need installing on the host too: the essay AI detector
+  (`npm --prefix web run detector:install`; without it the essay check uses
+  local statistics) and lesson videos (ffmpeg and HyperFrames).
+- When Schoology signs the scraper out, the board says so; run step 4 again at
+  the PC.
+- Trouble? Read `%USERPROFILE%\.slates\logs\host.log`, and check
+  `curl http://127.0.0.1:7528/api/host` on the host.

@@ -78,18 +78,64 @@ export const APPS: { mode: Mode; title: string; blurb: string }[] = [
   { mode: "usage", title: "AI Usage", blurb: "Every coding tool, every account" },
 ];
 
+/* ── which apps the host can serve ─────────────────────────────────────── */
+
+interface HostApps {
+  /** False until /api/host has answered. */
+  known: boolean;
+  /** Apps the machine running the portal can't serve (AI Usage off a Mac). */
+  unavailable: Mode[];
+}
+
+const HOST_UNKNOWN: HostApps = { known: false, unavailable: [] };
+let hostApps = HOST_UNKNOWN;
+let hostRequest: Promise<void> | null = null;
+const hostListeners = new Set<() => void>();
+
+function loadHostApps() {
+  hostRequest ??= fetch("/api/host", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((body: { unavailable?: unknown } | null) => {
+      const list = Array.isArray(body?.unavailable) ? body.unavailable : [];
+      hostApps = { known: true, unavailable: APPS.map((a) => a.mode).filter((m) => list.includes(m)) };
+    })
+    .catch(() => {
+      hostApps = { known: true, unavailable: [] };
+    })
+    .finally(() => hostListeners.forEach((fn) => fn()));
+}
+
+export function useHostApps(): HostApps {
+  return useSyncExternalStore(
+    (onChange) => {
+      hostListeners.add(onChange);
+      loadHostApps();
+      return () => hostListeners.delete(onChange);
+    },
+    () => hostApps,
+    () => HOST_UNKNOWN,
+  );
+}
+
+/**
+ * Apps the launcher leaves out: the ones switched off in Settings, plus any
+ * the host can't serve. Only the first are stored, so the same record opened
+ * against a Mac host again brings AI Usage straight back.
+ */
 export function useHiddenApps() {
   const [raw, set] = useStored("slates.apps.hidden.v1");
-  const hidden = useMemo(() => parseList(raw) as Mode[], [raw]);
+  const chosen = useMemo(() => parseList(raw) as Mode[], [raw]);
+  const { unavailable } = useHostApps();
+  const hidden = useMemo(() => [...new Set([...chosen, ...unavailable])], [chosen, unavailable]);
 
   const setVisible = useCallback(
     (mode: Mode, visible: boolean) => {
-      const next = visible ? hidden.filter((m) => m !== mode) : [...new Set([...hidden, mode])];
+      const next = visible ? chosen.filter((m) => m !== mode) : [...new Set([...chosen, mode])];
       // A launcher with no doors is a dead end, so the last app stays.
-      if (APPS.every((a) => next.includes(a.mode))) return;
+      if (APPS.every((a) => next.includes(a.mode) || unavailable.includes(a.mode))) return;
       set(next.length ? JSON.stringify(next) : null);
     },
-    [hidden, set],
+    [chosen, unavailable, set],
   );
 
   return [hidden, setVisible] as const;

@@ -40,6 +40,13 @@ interface ProviderStatus {
 
 /** A CLI resolving and running at all — even exiting non-zero — proves it's installed. */
 async function cliInstalled(bin: string): Promise<boolean> {
+  // Windows can't execFile an npm `.cmd` shim by its bare name; `where` finds either kind.
+  if (process.platform === "win32") {
+    return execFileP("where", [bin], { timeout: 4000 }).then(
+      () => true,
+      () => false
+    );
+  }
   try {
     await execFileP(bin, ["--version"], { timeout: 4000 });
     return true;

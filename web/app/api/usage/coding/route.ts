@@ -22,7 +22,15 @@ function pickTool(v: string | null): CodingTool | null {
   return v && (TOOL_ORDER as string[]).includes(v) ? (v as CodingTool) : null;
 }
 
+/** Everything below reads this machine's CLIs through macOS-only commands; see /api/host. */
+function offMac(): Response | null {
+  if (process.platform === "darwin") return null;
+  return Response.json({ error: "AI Usage only runs when Slates is hosted on a Mac." }, { status: 404 });
+}
+
 export async function GET(req: Request) {
+  const unsupported = offMac();
+  if (unsupported) return unsupported;
   const url = new URL(req.url);
   const r = url.searchParams.get("range") ?? "30d";
   const range = RANGES.includes(r as CodingRange) ? (r as CodingRange) : "30d";
@@ -46,6 +54,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const unsupported = offMac();
+  if (unsupported) return unsupported;
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;

@@ -10,8 +10,14 @@ const root = path.resolve(__dirname, "..");
 const web = path.join(root, "web");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
+if (process.argv[2] === "host") {
+  require("./host.js")(process.argv.slice(3));
+  return;
+}
+
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log("Usage: slates    Start the Slates portal (http://localhost:7528)");
+  console.log("Usage: slates          Start the Slates portal (http://localhost:7528)");
+  console.log("       slates host     Run the portal and scraper as a server for your other devices");
   process.exit(0);
 }
 
