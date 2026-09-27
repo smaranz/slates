@@ -8,12 +8,13 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 
 - SSH is key-only and tailnet-only: `ssh -i ~/.ssh/slates_pc email@100.79.163.21`. The default key and the Mac username are refused. SSH lands in cmd.exe: wrap commands in `powershell -NoProfile -Command "..."` (PowerShell 5.1), and for anything with pipes or regexes `scp` a `.ps1` over and run it with `powershell -NoProfile -ExecutionPolicy Bypass -File`, since cmd splits on `|` even inside quotes.
 - The PC runs `node bin/slates.js host` from `C:\Users\email\slates` through the "Slates host" scheduled task (headless console). Log: `%USERPROFILE%\.slates\logs\host.log`.
+- The portal is published with `tailscale funnel` (internet + tailnet), locked to paired devices by `web/proxy.ts` + `web/lib/devices.ts` (registry `%USERPROFILE%\.slates\devices.json`). Devices pair by visiting once over the tailnet; requests on the host itself pass. From the Mac over Tailscale, curl gets in on Tailscale's identity; from outside it needs `Authorization: Bearer <key>` (mint one with `POST /api/devices` over Tailscale). Never publish the portal with anything but Tailscale.
 
 ## Deploying to the PC
 
 1. Commit on the Mac. If `main` is pushed, run `git pull --ff-only` on the PC. If not, ship a bundle: `git bundle create /tmp/slates.bundle <pc-head>..main`, copy it over with `scp`, then on the PC run `git fetch <bundle> main` and `git merge --ff-only FETCH_HEAD`.
 2. Restart: `node bin\slates.js host --stop`, then `Start-ScheduledTask -TaskName "Slates host"`. It reinstalls when the lockfile changed and rebuilds when HEAD changed (a few minutes of downtime), then logs "portal ready".
-3. Check from the Mac: `curl -H "sec-fetch-site: same-origin" https://smaran.tail55de6b.ts.net/api/host`.
+3. Check from the Mac: `curl -H "sec-fetch-site: same-origin" https://smaran.tail55de6b.ts.net/api/host` (open to anyone; other paths need Tailscale on or a device key).
 
 ## Study Studio
 

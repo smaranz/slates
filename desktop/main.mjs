@@ -155,10 +155,11 @@ const ATTACH = process.env.SLATES_ATTACH === "1";
  *
  *   SLATES_HOST=https://gaming-pc.tail1234.ts.net
  *
- * Use Tailscale Serve, not a public tunnel. The portal has no login in front
- * of it and its scraper holds a live Schoology session, so anything that can
- * open the URL can act as you. Serve publishes to your tailnet only; Funnel,
- * ngrok and Cloudflare tunnels publish to the internet.
+ * Publish it with Tailscale (Funnel, or Serve for tailnet-only), never another
+ * tunnel. The portal only lets in paired devices — a device pairs by opening it
+ * once over Tailscale, and then works with Tailscale off (web/lib/devices.ts) —
+ * and it tells the host's own requests apart by Tailscale's headers, so ngrok
+ * or a Cloudflare tunnel would look like the host and skip that lock.
  *
  * The scraper stays bound to localhost *on that machine* and is never exposed
  * — the portal is the only thing that talks to it, and they share a host.
@@ -637,8 +638,8 @@ app.whenReady().then(async () => {
             `Couldn't reach ${REMOTE}.`,
             "",
             "That host runs the portal, the Schoology sync and the AI CLIs.",
-            "Check it is awake, that Tailscale is up on both machines, and that",
-            "`tailscale serve` is still publishing the portal there.",
+            "Check it is awake, that Tailscale is running on it, and that",
+            "`tailscale funnel` is still publishing the portal there.",
             "",
             "Unset SLATES_HOST in ~/.slates/.env to go back to running it here.",
           ].join("\n")

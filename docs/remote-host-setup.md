@@ -7,17 +7,29 @@ gaming PC — and the laptop becomes just a window, and the phone app stops
 needing the laptop at all.
 
 ```
-Mac: Slates.app (window only) ─┐                 ┌─ 127.0.0.1:7528  portal
-                               ├─ your tailnet ──┤
-Phone: Slates app ─────────────┘  (HTTPS)        └─ 127.0.0.1:7529  scraper ─ Chrome ─ Schoology
-                                  host: tailscale serve
+Mac: Slates.app (window only) ─┐   tailnet, or the     ┌─ 127.0.0.1:7528  portal
+                               ├─ internet (HTTPS) ────┤
+Phone: Slates app ─────────────┘                       └─ 127.0.0.1:7529  scraper ─ Chrome ─ Schoology
+                                  host: tailscale funnel
 ```
 
-Both services listen on `127.0.0.1` only. [Tailscale Serve](https://tailscale.com/kb/1312/serve)
-is the one way in, and it only answers devices signed in to your tailnet. The
-portal refuses requests that come from other websites (`web/proxy.ts`), but it
-has **no login**: anything on your tailnet can use it as you. Don't publish it
-with Funnel, ngrok, or a Cloudflare tunnel.
+Both services listen on `127.0.0.1` only, and Tailscale is the one way in.
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel) publishes the portal
+at `https://<host>.<tailnet>.ts.net` to the internet as well as your tailnet,
+so the laptop and phone don't need Tailscale running — but only **paired
+devices** get in (`web/proxy.ts`, `web/lib/devices.ts`):
+
+- A device pairs itself the first time it opens Slates over Tailscale. Tailscale
+  vouches for your account there, so Slates hands the device a 256-bit key, kept
+  as a cookie. From then on it works with Tailscale off.
+- Anything reaching the portal through Tailscale without a key gets a "not
+  paired" page. Settings › General › Devices lists paired devices and forgets a
+  lost one.
+- Requests from the host itself need no key. That's why nothing but Tailscale
+  may publish the portal: another tunnel (ngrok, Cloudflare) would look like the
+  host and skip the lock.
+
+The portal also refuses requests that come from other websites.
 
 ## 1. The host (Windows)
 
@@ -67,13 +79,17 @@ and the Schoology sign-in needs a real window on the desktop.
    npm --prefix web run cursor:login        # Grok and Composer (not `cursor-agent login`)
    ```
 
-6. Publish the portal to your tailnet. Install [Tailscale](https://tailscale.com/download/windows),
+6. Publish the portal. Install [Tailscale](https://tailscale.com/download/windows),
    sign in, then:
 
    ```powershell
-   tailscale serve --bg 7528
-   tailscale serve status     # prints https://<host>.<tailnet>.ts.net
+   tailscale funnel --bg 7528
+   tailscale funnel status    # https://<host>.<tailnet>.ts.net (Funnel on)
    ```
+
+   The first time, Tailscale may ask you to allow Funnel for your tailnet. To
+   keep it tailnet-only instead, use `tailscale serve --bg 7528`; devices then
+   always need Tailscale on.
 
 7. Keep it running. Stop the PC sleeping on AC power, and start the host at
    log-on without a console window:
@@ -108,9 +124,14 @@ and the Schoology sign-in needs a real window on the desktop.
    echo 'SLATES_HOST=https://<host>.<tailnet>.ts.net' >> ~/.slates/.env
    ```
 
-3. Quit Slates and open it again. It starts nothing locally — no portal, no
-   scraper, no Chrome — and copies your board to the new address the first
-   time. Delete the line to go back to running everything on the Mac.
+3. Quit Slates and open it again, with Tailscale on this once so the Mac gets
+   paired. It starts nothing locally — no portal, no scraper, no Chrome — and
+   copies your board to the new address the first time. After that Tailscale can
+   stay off. Delete the line to go back to running everything on the Mac.
+4. For coding agents on the Mac (the `slates-ui` MCP server), give them a key of
+   their own while on Tailscale:
+   `curl -s -X POST https://<host>.<tailnet>.ts.net/api/devices -d '{"name":"Mac coding agents"}'`,
+   and put the `key` it returns in `~/.slates/.env` as `SLATES_HOST_TOKEN=`.
 
 ## 3. The phone
 
@@ -124,6 +145,8 @@ and the Schoology sign-in needs a real window on the desktop.
 3. `npm run check:server && npm run sync` in `mobile/`, then build and install
    from Xcode or Android Studio. It's HTTPS, so no plain-HTTP exceptions are
    needed, and it works away from home.
+4. Open it once with Tailscale on to pair the phone; after that it works with
+   Tailscale off.
 
 ## Updating the host
 

@@ -93,7 +93,69 @@ export function GeneralSettings() {
           })}
         </ul>
       </Card>
+      <DevicesCard />
     </Page>
+  );
+}
+
+interface PairedDevice {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeen: number;
+}
+
+function lastUsed(at: number): string {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 60) return "used in the last hour";
+  if (minutes < 24 * 60) return `used ${Math.round(minutes / 60)}h ago`;
+  return `used ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+/** The devices that can open this Slates without Tailscale; see lib/devices.ts. Hidden where there's nothing to pair (Slates on this machine only). */
+function DevicesCard() {
+  const [data, setData] = useState<{ devices: PairedDevice[]; current: string | null; local: boolean } | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const load = () => {
+    void fetch("/api/devices", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then(setData)
+      .catch(() => setData(null));
+  };
+  useEffect(() => {
+    const first = window.setTimeout(load, 0);
+    return () => window.clearTimeout(first);
+  }, []);
+
+  if (!data || (data.local && !data.devices.length)) return null;
+
+  const forget = (id: string) => {
+    if (confirming !== id) {
+      setConfirming(id);
+      window.setTimeout(() => setConfirming((current) => (current === id ? null : current)), 4000);
+      return;
+    }
+    setConfirming(null);
+    void fetch(`/api/devices?id=${id}`, { method: "DELETE" }).then(load);
+  };
+
+  return (
+    <Card
+      title="Devices"
+      note="These can open Slates from anywhere without Tailscale. A new device pairs itself the first time you open Slates on it with Tailscale on. Forget one you've lost and it's locked out."
+    >
+      <ul className="app-settings-list">
+        {data.devices.map((device) => (
+          <Row key={device.id} title={device.id === data.current ? `${device.name} (this one)` : device.name} sub={`Paired ${new Date(device.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${lastUsed(device.lastSeen)}`}>
+            <button type="button" className="btn btn--quiet" onClick={() => forget(device.id)}>
+              {confirming === device.id ? (device.id === data.current ? "Forget this device?" : "Forget it?") : "Forget"}
+            </button>
+          </Row>
+        ))}
+        {!data.devices.length && <Row title="No devices yet" sub="Open Slates once with Tailscale on to pair a device.">{null}</Row>}
+      </ul>
+    </Card>
   );
 }
 

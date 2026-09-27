@@ -75,12 +75,15 @@ const local: Backend = {
 };
 
 function remote(host: string): Backend {
+  // The host's device key, so this works with Tailscale off (Slates is published through Funnel, locked to paired devices).
+  const auth: Record<string, string> = process.env.SLATES_HOST_TOKEN ? { authorization: `Bearer ${process.env.SLATES_HOST_TOKEN}` } : {};
+
   async function call<T>(pathAndQuery: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${host}${pathAndQuery}`, {
         ...init,
-        headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) },
+        headers: { accept: "application/json", ...auth, ...(init.body ? { "content-type": "application/json" } : {}) },
         signal: AbortSignal.timeout(30_000),
       });
     } catch (error) {
@@ -111,7 +114,7 @@ function remote(host: string): Backend {
     },
     get,
     async bytes(item) {
-      const response = await fetch(`${host}/api/media/file?id=${encodeURIComponent(item.id)}`, { signal: AbortSignal.timeout(120_000) });
+      const response = await fetch(`${host}/api/media/file?id=${encodeURIComponent(item.id)}`, { headers: auth, signal: AbortSignal.timeout(120_000) });
       if (!response.ok) throw new Error(`The Slates host at ${host} couldn't send that file (${response.status}).`);
       return Buffer.from(await response.arrayBuffer());
     },
