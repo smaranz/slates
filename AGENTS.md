@@ -16,12 +16,18 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 2. Restart: `node bin\slates.js host --stop`, then `Start-ScheduledTask -TaskName "Slates host"`. It reinstalls when the lockfile changed and rebuilds when HEAD changed (a few minutes of downtime), then logs "portal ready".
 3. Check from the Mac: `curl -H "sec-fetch-site: same-origin" https://smaran.tail55de6b.ts.net/api/host` (open to anyone; other paths need Tailscale on or a device key).
 
+## The desktop app
+
+- Build from a clean checkout, so other sessions' uncommitted work stays out: `git worktree add --detach /tmp/slates-build HEAD`, `npm ci` in `web/`, `desktop/` and `scraper/`, then `npm run dist:mac` in `desktop/`. Install by swapping `desktop/dist/mac-arm64/Slates.app` into `/Applications`.
+- Shells started by the IDE carry `ELECTRON_RUN_AS_NODE=1`, and `open` passes it on, so Slates exits at once as plain Node. Launch with `env -u ELECTRON_RUN_AS_NODE open -a Slates`; the Dock is unaffected.
+- In remote mode AI Usage still reads the Mac: `desktop/preload.cjs` gives the window a bridge, `main.mjs` (`LOCAL_APPS`) starts the bundled portal on the Mac on first use with `SLATES_USAGE_ONLY=1` (no routines), and `web/lib/desktop-bridge.ts` sends `/api/usage/coding` through it. Slates' own calls come from the host's ledger (`/api/usage?view=events`).
+
 ## Study Studio
 
 Sets live in `~/.slates/study` on the host. `web/lib/study/gather.ts` reads the unit through the sync service (Materials folders and every subfolder of the matching unit, Pages and link views via `/course/page`, files via `/course/document` + `/course/file`); the study agent (`web/lib/study/agent.ts`) then researches with the Agent app's browser and tools. School-only Google files are read with the Agent browser's Google sign-in (`web/lib/study/google.ts`); the sync browser has no Google session. `npx tsx --test lib/study/*.test.ts` in `web/`.
 
 ## Working here
 
-- In `web/`: `npx tsc --noEmit`, `npx eslint <paths>`, `npx tsx --test <file>.test.ts`.
+- In `web/`: `npx tsc --noEmit`, `npx eslint <paths>`, `npx tsx --test <file>.test.ts`. Tests that load a `server-only` module need a stub, since only Next provides it: point `NODE_PATH` at a folder holding an empty `server-only` package.
 - Several agent sessions may share this checkout. Commit only your own paths (`git commit -- <paths>`), check `git diff --cached` first, and never sweep up another session's staged changes.
 - Never print values from `~/.slates/.env`; compare keys by hash.
