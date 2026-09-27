@@ -2,12 +2,12 @@
  * Shapes shared by the coding-usage server and the AI Usage screen.
  *
  * "Coding usage" is everything the CLIs on this machine did — Claude Code,
- * Codex, Gemini CLI, opencode — read straight from their own logs, plus
+ * Codex, Devin, Gemini CLI, opencode — read straight from their own logs, plus
  * Slates' own ledger so the screen has one total. Nothing here carries a
  * secret; tokens stay inside lib/ai-usage/coding/limits.ts.
  */
 
-export type CodingTool = "claude" | "codex" | "antigravity" | "cursor" | "gemini" | "opencode" | "slates";
+export type CodingTool = "claude" | "codex" | "antigravity" | "cursor" | "devin" | "gemini" | "opencode" | "slates";
 
 /** Tools that support more than one signed-in account through a home dir. */
 export type LinkableTool = "claude" | "codex" | "antigravity" | "cursor";
@@ -25,12 +25,13 @@ export const TOOL_LABEL: Record<CodingTool, string> = {
   codex: "Codex",
   antigravity: "Antigravity",
   cursor: "Cursor",
+  devin: "Devin",
   gemini: "Gemini CLI",
   opencode: "opencode",
   slates: "Slates",
 };
 
-export const TOOL_ORDER: CodingTool[] = ["claude", "codex", "antigravity", "cursor", "gemini", "opencode", "slates"];
+export const TOOL_ORDER: CodingTool[] = ["claude", "codex", "antigravity", "cursor", "devin", "gemini", "opencode", "slates"];
 
 export const LINKABLE_TOOLS: LinkableTool[] = ["claude", "codex", "antigravity", "cursor"];
 

@@ -8,6 +8,7 @@ import path from "node:path";
 import { readEvents, USAGE_DIR } from "../store";
 import { allHomes, dotDir, type Home } from "./accounts";
 import { appSession, fetchEvents } from "./cursor";
+import { DEVIN_DB, DEVIN_OVERLAP, devinReqs, devinSql } from "./devin";
 
 /**
  * Incremental index of every CLI's request log.
@@ -59,12 +60,14 @@ interface IndexData {
   opencode: { stamp: number; reqs: RawReq[] };
   /** Cursor's dashboard events, by account email. */
   cursor?: Record<string, CursorStore>;
+  /** Devin's session database, read up to `maxRow`. */
+  devin?: { stamp: number; maxRow: number; reqs: RawReq[] };
 }
 
 export interface ScanResult {
   /** Requests grouped by where they came from. */
   groups: {
-    tool: "claude" | "codex" | "gemini" | "cursor" | "opencode" | "slates";
+    tool: "claude" | "codex" | "gemini" | "cursor" | "devin" | "opencode" | "slates";
     homeId: string | null;
     /** Set when the source already knows the account (Cursor's dashboard). */
     accountKey?: string;
@@ -455,6 +458,30 @@ async function scanOpencode(idx: IndexData): Promise<void> {
   dirty = true;
 }
 
+async function scanDevin(idx: IndexData): Promise<void> {
+  let stamp = 0;
+  for (const f of [DEVIN_DB, `${DEVIN_DB}-wal`]) {
+    try {
+      stamp = Math.max(stamp, fs.statSync(f).mtimeMs);
+    } catch {
+      // absent
+    }
+  }
+  const store = idx.devin;
+  if (!stamp || stamp === store?.stamp) return;
+  const top = await sqliteJson(DEVIN_DB, "select max(row_id) as top from message_nodes");
+  // No answer at all means the read failed (locked, mid-migration); try next time.
+  if (!top.length) return;
+  const newest = num(top[0]!.top);
+  // A database that shrank was replaced, so it's read from the start.
+  const fresh = !store || newest < store.maxRow;
+  const rows = await sqliteJson(DEVIN_DB, devinSql(fresh ? 0 : store.maxRow - DEVIN_OVERLAP));
+  const byId = new Map((fresh ? [] : store.reqs).map((r) => [r[0], r]));
+  for (const r of devinReqs(rows)) byId.set(r[0], r);
+  idx.devin = { stamp, maxRow: newest, reqs: [...byId.values()] };
+  dirty = true;
+}
+
 async function scan(): Promise<void> {
   const idx = load();
   const seen = new Set<string>();
@@ -466,6 +493,7 @@ async function scan(): Promise<void> {
     }
   }
   await scanOpencode(idx);
+  await scanDevin(idx);
   void persist();
 }
 
@@ -532,6 +560,7 @@ export async function scanAll(force = false): Promise<ScanResult> {
     groups.push({ tool, homeId, reqs });
   }
   if (idx.opencode.reqs.length) groups.push({ tool: "opencode", homeId: null, reqs: idx.opencode.reqs });
+  if (idx.devin?.reqs.length) groups.push({ tool: "devin", homeId: null, reqs: idx.devin.reqs });
   for (const [email, store] of Object.entries(idx.cursor ?? {})) {
     if (store.reqs.length) groups.push({ tool: "cursor", homeId: null, accountKey: `cursor:${email}`, reqs: store.reqs });
   }

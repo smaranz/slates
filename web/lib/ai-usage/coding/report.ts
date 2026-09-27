@@ -101,7 +101,7 @@ async function allRequests(ctx: Ctx, force = false): Promise<{ reqs: CodingReque
       }
       let key: string;
       if (g.accountKey) key = g.accountKey;
-      else if (g.tool === "opencode" || g.tool === "slates") key = `${g.tool}:local`;
+      else if (g.tool === "opencode" || g.tool === "devin" || g.tool === "slates") key = `${g.tool}:local`;
       else if (home && home.owned) key = ctx.keyOfHome.get(home.id)!;
       else {
         const owner = defaultOwnerAt(g.tool as HomeTool, at, tl);
@@ -203,7 +203,7 @@ function accountRows(ctx: Ctx, reqs: CodingRequest[], start: number): AccountRow
   }
 
   for (const row of rows.values()) {
-    if (row.tool === "opencode" || row.tool === "slates") {
+    if (row.tool === "opencode" || row.tool === "devin" || row.tool === "slates") {
       row.label = meta[row.key]?.label ?? TOOL_LABEL[row.tool];
       row.canLink = false;
     }

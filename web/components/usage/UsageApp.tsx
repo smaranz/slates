@@ -24,7 +24,7 @@ import CapacityView from "./CapacityView";
 /**
  * AI Usage — every coding CLI on this machine, every account, every request.
  *
- * Reads Claude Code, Codex, Gemini CLI and opencode from their own logs and
+ * Reads Claude Code, Codex, Devin, Gemini CLI and opencode from their own logs and
  * prices each request at API rates, so a subscription reads as "what these
  * tokens would have cost". Accounts are linked by giving the CLI a second
  * home, which is why nothing here ever signs you out of the one you use.
@@ -43,6 +43,7 @@ export const TOOL_COLOR: Record<CodingTool, string> = {
   codex: "oklch(0.78 0.1 200)",
   antigravity: "oklch(0.72 0.14 265)",
   cursor: "oklch(0.86 0.02 250)",
+  devin: "oklch(0.78 0.12 160)",
   gemini: "oklch(0.7 0.08 250)",
   // The logo's warm grey — distinct from Cursor's cooler near-white.
   opencode: "oklch(0.66 0.012 30)",
@@ -50,6 +51,9 @@ export const TOOL_COLOR: Record<CodingTool, string> = {
 };
 
 const PAGE = 50;
+
+/** ">_" on a 24x24 grid. */
+const PROMPT = "M4.3 6.3 9.99 12l-5.7 5.7-1.4-1.4 4.29-4.3L2.9 7.7zM11 17h10v2H11z";
 
 // ── formatting ────────────────────────────────────────────────────────────
 
@@ -119,6 +123,8 @@ export function ToolMark({ tool, size = 14 }: { tool: CodingTool; size?: number 
   if (tool === "gemini" || tool === "antigravity") return <GeminiLogo size={size} style={style} />;
   if (tool === "cursor") return <CursorLogo size={size} style={style} />;
   if (tool === "slates") return <Image src="/assets/slates-mark.png" alt="" width={size} height={size} />;
+  // A terminal prompt: Devin is a terminal agent, and this isn't pretending to be its logo.
+  if (tool === "devin") return <Icon path={PROMPT} size={size} style={style} />;
   // opencode's own mark is monochrome, so it wears the text colour, not its chart colour.
   return <OpenCodeLogo size={size} style={{ color: "var(--text)" }} />;
 }
