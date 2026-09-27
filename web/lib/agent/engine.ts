@@ -87,6 +87,8 @@ export function addNote(agentId: string, note: string): void {
 /* ---------- models ---------- */
 
 const PREFERRED = ["grok-4.7", "claude-opus-5-5", "claude-sonnet-5", "gpt-5.6-sol", "gemini-3.1-pro", "composer-2.5", "kimi-k3", "claude-haiku-4-5", "gpt-5.6-luna", "gemini-3.8-flash"];
+/** Models Slates has moved past: hidden from the picker, and agents still set to one run on its successor. */
+const REPLACED: Record<string, string> = { "claude-opus-5": "claude-opus-5-5" };
 
 export async function listModels(): Promise<ModelChoice[]> {
   const cached = state.__slatesAgentModels;
@@ -94,7 +96,7 @@ export async function listModels(): Promise<ModelChoice[]> {
   try {
     const raw = await Cursor.models.list();
     const list = raw
-      .filter((model) => model.id !== "default")
+      .filter((model) => model.id !== "default" && !REPLACED[model.id])
       .map((model) => ({ id: model.id, label: model.displayName || model.id }))
       .sort((a, b) => {
         const ia = PREFERRED.indexOf(a.id);
@@ -285,7 +287,8 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const profile = getAgent(job.agentId);
   if (!profile) return;
   const models = await listModels();
-  const modelId = models.some((m) => m.id === profile.model) ? profile.model : DEFAULT_MODEL;
+  const wanted = REPLACED[profile.model] ?? profile.model;
+  const modelId = models.some((m) => m.id === wanted) ? wanted : DEFAULT_MODEL;
 
   let mcp = browserMcp();
   if (mcp) {

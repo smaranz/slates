@@ -131,7 +131,7 @@ export const TUTOR_MODELS = [
     creator: "anthropic",
     backend: "claude-code",
   },
-  { id: "claude-opus-5", label: "Claude Opus 5", creator: "anthropic", backend: "claude-code" },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5", creator: "anthropic", backend: "claude-code" },
 
   /*
    * Grok and Composer run through `@cursor/sdk`'s local Cursor CLI login.
@@ -184,11 +184,13 @@ export function isTutorModel(value: unknown): value is TutorModelId {
 
 /**
  * Map a persisted catalog id onto today's catalog. Grok 4.6 picks become the
- * matching 4.7 variant so a stored choice still resolves after the upgrade.
+ * matching 4.7 variant, and Opus 5 becomes Opus 5.5, so a stored choice still
+ * resolves after the upgrade.
  */
 export function migrateTutorModelId(value: unknown): TutorModelId | null {
   if (isTutorModel(value)) return value;
   if (typeof value !== "string") return null;
+  if (value === "claude-opus-5") return "claude-opus-5-5";
   const grok46 = /^cursor-grok-4\.6-(low|medium|high|xhigh)(-fast)?$/.exec(value);
   if (grok46) return grokModelId(grok46[1] as ThinkingLevel, !!grok46[2]) as TutorModelId;
   return null;

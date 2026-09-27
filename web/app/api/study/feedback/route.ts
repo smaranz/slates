@@ -12,11 +12,11 @@ import { noteFromUsage } from "@/lib/ai-usage/note";
  * studio marks its own practice, inline, against the rubric the plan was built
  * with.
  *
- * Same Opus 5 pin as the generator, for the same reason: the feedback is the
+ * Same Opus 5.5 pin as the generator, for the same reason: the feedback is the
  * part a student acts on.
  */
 
-const MODEL = "claude-opus-5";
+const MODEL = "claude-opus-5-5";
 
 export const maxDuration = 120;
 
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
     return Response.json(
       {
         error: notLoggedIn
-          ? "Marking runs on Claude Opus 5 through your local Claude Code login, and it isn't signed in. Run `claude` in a terminal to log in."
+          ? "Marking runs on Claude Opus 5.5 through your local Claude Code login, and it isn't signed in. Run `claude` in a terminal to log in."
           : message,
       },
       { status: 502 }

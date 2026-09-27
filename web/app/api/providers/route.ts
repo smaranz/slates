@@ -71,7 +71,7 @@ export async function GET() {
     {
       backend: "claude-code",
       label: "Claude Code CLI",
-      powers: "Claude Sonnet 5, Haiku 4.5, Opus 5",
+      powers: "Claude Sonnet 5, Haiku 4.5, Opus 5.5",
       configured: claudeInstalled,
       detail: "Local `claude auth login` — no API key needed.",
     },

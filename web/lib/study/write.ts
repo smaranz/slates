@@ -15,7 +15,7 @@ import type { StudyCard, StudyQuestion, StudySource } from "./types";
  * Both run through the host's Claude Code login.
  */
 
-export const SET_MODEL = "claude-opus-5";
+export const SET_MODEL = "claude-opus-5-5";
 export const ROUND_MODEL = "claude-sonnet-5";
 
 const source = z.number().int().positive().nullish();
