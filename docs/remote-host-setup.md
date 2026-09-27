@@ -144,9 +144,11 @@ portal when the commit changed. Only what's pushed reaches the host.
   address once; the phone starts fresh there, and devices don't share them yet.
 - AI Usage is hidden when the host isn't a Mac: it reads the host's coding-tool
   logs with macOS-only commands.
-- Optional extras need installing on the host too: the essay AI detector
-  (`npm --prefix web run detector:install`; without it the essay check uses
-  local statistics) and lesson videos (ffmpeg and HyperFrames).
+- Optional extras need installing on the host too: the essay AI detector and
+  lesson videos (ffmpeg and HyperFrames). On Windows the detector installs with
+  `powershell -ExecutionPolicy Bypass -File detector\install.ps1 -Gpu gfx1200`,
+  which runs it on an AMD Radeon through ROCm (`-Gpu cpu` without one); without
+  it the essay check uses local statistics.
 - When Schoology signs the scraper out, the board says so; run step 4 again at
   the PC.
 - Trouble? Read `%USERPROFILE%\.slates\logs\host.log`, and check

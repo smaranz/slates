@@ -37,6 +37,19 @@ MODEL_DIR = os.environ.get(
 )
 
 
+def pick_device() -> str:
+    """
+    The GPU when PyTorch can see one, else the CPU. AMD's ROCm builds of
+    PyTorch report a Radeon as "cuda" too, so one check covers both vendors.
+    SLATES_DETECTOR_DEVICE overrides it. Weights stay float32 either way: the
+    flagging threshold was calibrated at full precision.
+    """
+    wanted = os.environ.get("SLATES_DETECTOR_DEVICE", "").strip()
+    if wanted:
+        return wanted
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 class Meld(nn.Module):
     def __init__(self, model_dir: str):
         super().__init__()
@@ -128,9 +141,12 @@ def _sentences(text: str):
 class Detector:
     """Loaded once, scored many times — see detector/serve.py."""
 
-    def __init__(self, model_dir: str = MODEL_DIR, device: str = "cpu"):
-        self.device = device
-        self.model = Meld(model_dir).to(device)
+    def __init__(self, model_dir: str = MODEL_DIR, device: str | None = None):
+        self.device = device or pick_device()
+        self.device_name = (
+            torch.cuda.get_device_name(0) if self.device.startswith("cuda") else self.device
+        )
+        self.model = Meld(model_dir).to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
         self.threshold = self.model.cfg["score_offsets"]["overall"]["fpr_0.01"]
 

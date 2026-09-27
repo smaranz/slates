@@ -29,7 +29,10 @@ MAX_BODY = 2_000_000  # a 650-word essay is ~4KB; this is only a sanity bound
 
 print(f"[detector] loading MELD from {os.environ.get('SLATES_MELD_DIR', '~/.slates/meld/model')}", flush=True)
 DETECTOR = Detector()
-print(f"[detector] ready on {PORT}, flagging above {DETECTOR.threshold:.3f}", flush=True)
+# A GPU compiles its kernels on the first pass (~5s on a Radeon). Pay that here,
+# before the server answers, rather than on the student's first essay.
+DETECTOR.score("This sentence only warms the model up before the first real essay arrives. " * 8)
+print(f"[detector] ready on {PORT} ({DETECTOR.device_name}), flagging above {DETECTOR.threshold:.3f}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") in ("", "/health"):
-            self._send(200, {"ok": True, "model": "meld-v5", "threshold": DETECTOR.threshold})
+            self._send(200, {"ok": True, "model": "meld-v5", "threshold": DETECTOR.threshold, "device": DETECTOR.device_name})
         else:
             self._send(404, {"error": "not found"})
 

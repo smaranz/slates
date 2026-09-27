@@ -33,14 +33,18 @@ const BASE = DETECTOR_URL;
  * `detector/` beside it either way.
  */
 const DIR = path.resolve(process.cwd(), "../detector");
-const PYTHON = path.join(os.homedir(), ".slates", "meld", "venv", "bin", "python");
+const WINDOWS = process.platform === "win32";
+const PYTHON = WINDOWS
+  ? path.join(os.homedir(), ".slates", "meld", "venv", "Scripts", "python.exe")
+  : path.join(os.homedir(), ".slates", "meld", "venv", "bin", "python");
+const INSTALL = WINDOWS ? "`detector\\install.ps1`" : "`npm run detector:install` in web/";
 
-/** What `npm run detector:install` sets up. Checked so the error can say so. */
+/** What the installer sets up. Checked so the error can say so. */
 function installed(): string | null {
-  if (!fs.existsSync(PYTHON)) return "The detector isn't installed yet — run `npm run detector:install` in web/.";
+  if (!fs.existsSync(PYTHON)) return `The detector isn't installed yet — run ${INSTALL}.`;
   if (!fs.existsSync(path.join(DIR, "serve.py"))) return `Couldn't find the detector at ${DIR}.`;
   if (!fs.existsSync(path.join(os.homedir(), ".slates/meld/model/model.safetensors"))) {
-    return "The MELD weights aren't downloaded yet — run `npm run detector:install` in web/.";
+    return `The MELD weights aren't downloaded yet — run ${INSTALL}.`;
   }
   return null;
 }
@@ -65,6 +69,8 @@ async function start(): Promise<boolean> {
     cwd: DIR,
     detached: true,
     stdio: "ignore",
+    // A detached child gets its own console on Windows; keep it off the host's screen.
+    windowsHide: true,
     env: { ...process.env, SLATES_DETECTOR_PORT: String(PORT) },
   }).unref();
 
