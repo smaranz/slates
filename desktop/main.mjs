@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, screen, session, shell, dialog, ipcMain } from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -515,12 +515,87 @@ async function copyOrigin(from, targetUrl) {
   }
 }
 
+/**
+ * How far to zoom the page on the display the window is on.
+ *
+ * A 27" 1440p monitor shows one CSS pixel per screen pixel at about 109 per
+ * inch, where a MacBook's default scaling works out near 127, so Slates came
+ * out a sixth smaller there and floated in the middle of the screen. Displays
+ * at least 2400 points wide (1440p, 5K, and 4K monitors scaled to look like
+ * 1440p) get 120%, which leaves about 2130px of page; laptops stay at 100%.
+ */
+const WIDE_DISPLAY = 2400;
+const WIDE_ZOOM = 1.2;
+
+function zoomFor(display) {
+  return display.workAreaSize.width >= WIDE_DISPLAY ? WIDE_ZOOM : 1;
+}
+
+/*
+ * Re-fitted only when the window lands on another display, or the page on
+ * another origin, so a zoom set by hand (⌘+ / ⌘−) holds until then.
+ */
+let zoomedFor = "";
+
+function fitZoom() {
+  if (!win || win.isDestroyed()) return;
+  const display = screen.getDisplayMatching(win.getBounds());
+  let origin = "";
+  try {
+    origin = new URL(win.webContents.getURL()).origin;
+  } catch {}
+  const key = `${display.id}:${display.workAreaSize.width}:${origin}`;
+  if (key === zoomedFor) return;
+  zoomedFor = key;
+  win.webContents.setZoomFactor(zoomFor(display));
+}
+
+const WINDOW_STATE = () => path.join(app.getPath("userData"), "window-state.json");
+
+/** Where the window was when it last closed, if that spot is still on a connected display. */
+function savedBounds() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(WINDOW_STATE(), "utf8"));
+    if (![saved.x, saved.y, saved.width, saved.height].every(Number.isFinite)) return null;
+    const area = screen.getDisplayMatching(saved).workArea;
+    const onScreen =
+      saved.x < area.x + area.width - 120 && saved.x + saved.width > area.x + 120 && saved.y >= area.y - 40 && saved.y < area.y + area.height - 120;
+    return onScreen ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The first time, or when the old spot is gone: a size that suits the screen it opens on. */
+function defaultBounds() {
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const wide = area.width >= WIDE_DISPLAY;
+  const width = Math.min(wide ? 2200 : 1440, area.width - 80);
+  const height = Math.min(wide ? 1300 : 940, area.height - 60);
+  return { x: Math.round(area.x + (area.width - width) / 2), y: Math.round(area.y + (area.height - height) / 2), width, height };
+}
+
+function rememberBounds() {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.isMaximized() || win.isFullScreen() ? win.getNormalBounds() : win.getBounds();
+  try {
+    fs.writeFileSync(WINDOW_STATE(), JSON.stringify({ ...bounds, maximized: win.isMaximized() }));
+  } catch {
+    // A window that opens at the default size next time is fine.
+  }
+}
+
 function createWindow() {
   prepareUiSession();
 
+  const saved = savedBounds();
+  const bounds = saved ?? defaultBounds();
+
   win = new BrowserWindow({
-    width: 1440,
-    height: 940,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -539,14 +614,22 @@ function createWindow() {
       // guest runs in its own process on its own session and never inherits
       // Node; this only permits the tag to exist at all.
       webviewTag: true,
+      // Carries across every page the window loads, the splash included.
+      zoomFactor: zoomFor(screen.getDisplayMatching(bounds)),
       ...(LOCAL_APPS.length
         ? { preload: path.join(HERE, "preload.cjs"), additionalArguments: [`--slates-local-apps=${LOCAL_APPS.join(",")}`] }
         : {}),
     },
   });
 
-  win.once("ready-to-show", () => win?.show());
+  win.once("ready-to-show", () => {
+    if (saved?.maximized) win?.maximize();
+    win?.show();
+  });
+  win.on("close", rememberBounds);
   win.on("closed", () => (win = null));
+  win.on("moved", fitZoom);
+  win.webContents.on("did-navigate", fitZoom);
 
   // Anything that isn't the portal itself belongs in the real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -711,6 +794,9 @@ function serveLocalApps() {
 app.whenReady().then(async () => {
   try {
     if (LOCAL_APPS.length) serveLocalApps();
+    // A monitor plugged in, unplugged or rescaled can put the window on a display that wants another zoom.
+    screen.on("display-metrics-changed", fitZoom);
+    screen.on("display-removed", fitZoom);
     createWindow();
     await new Promise((r) => setTimeout(r, 50)); // let the first paint land
 

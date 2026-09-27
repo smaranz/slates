@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
+import "./wide.css";
 import { CounselorProvider } from "@/lib/counselor/store";
 import { IdentityProvider } from "@/lib/identity";
 import { ModeProvider } from "@/lib/mode";

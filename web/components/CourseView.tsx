@@ -331,8 +331,8 @@ export default function CourseView() {
 
   return (
     <div className="scroll centered" style={{ paddingBottom: 32 }}>
-      <div className="col" style={{ maxWidth: 1100, gap: 16 }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+      <div className="col course-page" style={{ maxWidth: 1100, gap: 16 }}>
+        <div className="course-head" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.01em", color: "var(--text)" }}>
               {course.name}
@@ -375,7 +375,7 @@ export default function CourseView() {
           </div>
         </div>
 
-        <div className="card card--pad">
+        <div className="card card--pad course-chart">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <span className="card-title">Grade over time</span>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>
@@ -393,7 +393,7 @@ export default function CourseView() {
           </div>
         </div>
 
-        <div className="card card--pad">
+        <div className="card card--pad course-cats">
           <span className="card-title">Categories</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 10 }}>
             {proj.cats.map((cat) => {
@@ -476,7 +476,7 @@ export default function CourseView() {
           </div>
         </div>
 
-        <div className="card card--pad">
+        <div className="card card--pad course-scores">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <span className="card-title">Recent scores</span>
             <button

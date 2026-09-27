@@ -1,0 +1,112 @@
+/* ================================================================ Wide screens
+
+   A 27" monitor, or anything that leaves more than 1800 CSS px of page. The
+   desktop app zooms 1440p-class displays to 120% (desktop/main.mjs), which
+   leaves about 2130px; a browser at 100% gets the full 2560. Layouts built
+   for a laptop's 1500px sat in a narrow strip there, with rows the width of
+   the screen, so these give them the room: grades and one class's scores in
+   columns, classes in a grid, and a wider calendar, tutor and study page.
+
+   Loaded after globals.css. Widths the components set inline are overridden
+   with !important, the way the phone layout in globals.css does it.          */
+
+@media (min-width: 1800px) {
+  /* Grades: classes two across, instead of one column with its categories floating in the middle. */
+  .grades-list {
+    display: grid !important;
+    max-width: 1760px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* One class: its grade over time and categories beside the scores that make them. */
+  .course-page {
+    display: grid !important;
+    max-width: 1760px !important;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr;
+    align-items: start;
+  }
+
+  .course-head {
+    grid-column: 1 / -1;
+  }
+
+  .course-chart,
+  .course-cats {
+    grid-column: 1;
+  }
+
+  .course-scores {
+    grid-row: 2 / span 2;
+    grid-column: 2;
+  }
+
+  /* Classes: cards in a grid, not rows the width of the screen with the chevron a metre away. */
+  .classes-list {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+    align-items: stretch;
+    gap: 12px !important;
+  }
+
+  .calendar-frame {
+    max-width: 1640px !important;
+  }
+
+  .gpt-column,
+  .gpt-composer {
+    max-width: 880px;
+  }
+
+  .study-page {
+    max-width: 1480px;
+  }
+
+  .study-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 32px;
+  }
+
+  .study-set {
+    max-width: 980px;
+  }
+
+  .counselor-overview,
+  .upage {
+    max-width: 1560px;
+  }
+
+  .messages-list {
+    width: 440px !important;
+  }
+
+  .launcher-grid {
+    grid-auto-columns: 216px;
+    gap: 20px;
+  }
+
+  .launcher-card {
+    gap: 22px;
+  }
+
+  .launcher-glyph {
+    transform: scale(1.2);
+  }
+
+  .launcher-card-title {
+    font-size: 16.5px;
+  }
+}
+
+/* A browser at 100% on a 1440p screen: room for a third column of grades. */
+@media (min-width: 2400px) {
+  .grades-list {
+    max-width: 2240px !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .calendar-frame {
+    max-width: 1920px !important;
+  }
+}

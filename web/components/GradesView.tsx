@@ -11,7 +11,7 @@ export default function GradesView() {
 
   return (
     <div className="scroll centered">
-      <div className="col" style={{ maxWidth: 1100, gap: 12 }}>
+      <div className="col grades-list" style={{ maxWidth: 1100, gap: 12 }}>
         {s.snapshot.courses.map((c) => {
           const open = s.snapshot.assignments.filter(
             (a) => a.courseId === c.id && s.statusOf(a) !== "done"

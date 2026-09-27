@@ -32,7 +32,7 @@ function ClassList() {
 
   return (
     <div className="scroll">
-      <div className="col" style={{ gap: 10 }}>
+      <div className="col classes-list" style={{ gap: 10 }}>
         {courses.length === 0 && (
           <p style={{ margin: "24px 0", fontSize: 13, color: "var(--muted)", textAlign: "center" }}>
             Nothing synced yet.

@@ -70,7 +70,7 @@ export default function CalendarView() {
 
   return (
     <div className="calendar-view" style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "0 24px 24px", display: "flex", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 1100, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="calendar-frame" style={{ width: "100%", maxWidth: 1100, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="calendar-heading" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text)" }}>{monthLabel}</span>
