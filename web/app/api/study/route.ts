@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { settle, startBuild } from "@/lib/study/jobs";
-import { deleteSet, getSet, isStudyId, listSets } from "@/lib/study/store";
+import { deleteSet, getHidden, getSet, hiddenList, isStudyId, listSets } from "@/lib/study/store";
 import { mastery, type BuildRequest, type StudySet } from "@/lib/study/types";
 import { deleteUpload, isUploadId } from "@/lib/study/uploads";
 
@@ -81,8 +81,8 @@ export async function GET(request: Request) {
     if (!set) return Response.json({ error: "Not found." }, { status: 404 });
     return Response.json({ set: await settle(set) });
   }
-  const sets = await Promise.all((await listSets()).map(settle));
-  return Response.json({ sets: sets.map(summary) });
+  const [sets, hidden] = await Promise.all([listSets().then((all) => Promise.all(all.map(settle))), getHidden()]);
+  return Response.json({ sets: sets.map(summary), hidden: hiddenList(hidden) });
 }
 
 export async function POST(request: Request) {

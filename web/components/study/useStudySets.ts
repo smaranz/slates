@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { StudySummary } from "@/app/api/study/route";
+import type { HiddenEntry } from "@/lib/study/store";
 import type { BuildRequest, StudyAnswer, StudySet, StudyUpload } from "@/lib/study/types";
 
 /** The host's study sets, kept fresh while any of them is building. */
@@ -45,12 +46,15 @@ export async function removeUpload(id: string): Promise<void> {
 
 export function useStudySets() {
   const [sets, setSets] = useState<StudySummary[]>([]);
+  const [hidden, setHidden] = useState<HiddenEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setSets((await json<{ sets: StudySummary[] }>(await fetch("/api/study", { cache: "no-store" }))).sets);
+      const body = await json<{ sets: StudySummary[]; hidden?: HiddenEntry[] }>(await fetch("/api/study", { cache: "no-store" }));
+      setSets(body.sets);
+      setHidden(body.hidden ?? []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -81,7 +85,24 @@ export function useStudySets() {
     await refresh();
   }, [refresh]);
 
-  return { sets, loaded, error, refresh, build, remove };
+  /** Takes tests off the list, or puts them back. Shown at once; the host's answer then settles it. */
+  const changeHidden = useCallback(async (change: { hide?: { id: string; title: string; courseId: string }[]; show?: string[] | "all" }) => {
+    setHidden((current) => [
+      ...(change.hide ?? []).map((test) => ({ ...test, at: Date.now() })),
+      ...current.filter((entry) => change.show !== "all" && !change.show?.includes(entry.id) && !change.hide?.some((test) => test.id === entry.id)),
+    ]);
+    try {
+      const body = await json<{ hidden: HiddenEntry[] }>(
+        await fetch("/api/study/hidden", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(change) }),
+      );
+      setHidden(body.hidden);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      await refresh();
+    }
+  }, [refresh]);
+
+  return { sets, hidden, loaded, error, refresh, build, remove, changeHidden };
 }
 
 /** One full set, polled while it builds or while a practice round is being written. */

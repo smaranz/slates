@@ -231,11 +231,106 @@ function Status({ summary, loaded, onBuild, onOpen }: { summary: StudySummary | 
   );
 }
 
-function TestRow({ entry, course, summary, loaded, onBuild, onOpen }: { entry: Entry; course: Course | undefined; summary: StudySummary | undefined; loaded: boolean; onBuild: () => void; onOpen: () => void }) {
+/** Three dots, for the menu on each test. */
+const MORE = "M6 10.25a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 1 1 0-3.5zM12 10.25a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 1 1 0-3.5zM18 10.25a1.75 1.75 0 1 1 0 3.5a1.75 1.75 0 1 1 0-3.5z";
+
+interface MenuItem {
+  label: string;
+  icon: string;
+  danger?: boolean;
+  /** Asked on the first click; the second one does it. */
+  confirm?: string;
+  onSelect: () => void;
+}
+
+/** What you can do with one test beyond studying it: take it off the list, delete its set, or edit one you added. */
+function RowMenu({ items, label }: { items: MenuItem[]; label: string }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !wrap.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setConfirming(null);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  if (!items.length) return null;
   return (
-    <li className={`study-item${summary?.status === "ready" ? " is-ready" : ""}`}>
+    <div className="study-more" ref={wrap}>
+      <button type="button" className="study-more-btn" aria-label={label} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <Icon path={MORE} size={16} />
+      </button>
+      {open && (
+        <div className="study-more-menu">
+          {items.map((item, index) => (
+            <button
+              key={item.label}
+              type="button"
+              className={`study-more-item${item.danger ? " is-danger" : ""}`}
+              onClick={() => {
+                if (item.confirm && confirming !== index) {
+                  setConfirming(index);
+                  return;
+                }
+                setOpen(false);
+                setConfirming(null);
+                item.onSelect();
+              }}
+            >
+              <Icon path={item.icon} size={13} />
+              {confirming === index ? item.confirm : item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestRow({
+  entry,
+  course,
+  summary,
+  loaded,
+  actions,
+  selecting,
+  picked,
+  onBuild,
+  onOpen,
+  onToggle,
+}: {
+  entry: Entry;
+  course: Course | undefined;
+  summary: StudySummary | undefined;
+  loaded: boolean;
+  actions: MenuItem[];
+  selecting: boolean;
+  picked: boolean;
+  onBuild: () => void;
+  onOpen: () => void;
+  onToggle: () => void;
+}) {
+  return (
+    <li className={`study-item${summary?.status === "ready" ? " is-ready" : ""}${selecting ? " is-selecting" : ""}${picked ? " is-picked" : ""}`}>
+      {selecting && <span className="study-check" aria-hidden="true">{picked && <Icon path={ICON.check} size={10} />}</span>}
       <DateTile offset={entry.dateOffset} />
-      <button type="button" className="study-item-main" onClick={summary ? onOpen : onBuild}>
+      <button
+        type="button"
+        className="study-item-main"
+        onClick={selecting ? onToggle : summary ? onOpen : onBuild}
+        {...(selecting ? { role: "checkbox", "aria-checked": picked } : {})}
+      >
         <span className="study-item-meta">
           <CourseTag course={course} />
           <span className="study-kind">{KIND_LABEL[entry.kind]}</span>
@@ -245,13 +340,14 @@ function TestRow({ entry, course, summary, loaded, onBuild, onOpen }: { entry: E
         {!entry.custom && <span className="study-item-why">{entry.because}</span>}
       </button>
       <div className="study-item-side">
-        <Status summary={summary} loaded={loaded} onBuild={onBuild} onOpen={onOpen} />
+        {!selecting && <Status summary={summary} loaded={loaded} onBuild={onBuild} onOpen={onOpen} />}
+        {!selecting && <RowMenu items={actions} label={`More for ${entry.title}`} />}
       </div>
     </li>
   );
 }
 
-function NextUp({ entry, course, summary, loaded, onBuild, onOpen }: { entry: Entry; course: Course | undefined; summary: StudySummary | undefined; loaded: boolean; onBuild: () => void; onOpen: () => void }) {
+function NextUp({ entry, course, summary, loaded, actions, onBuild, onOpen }: { entry: Entry; course: Course | undefined; summary: StudySummary | undefined; loaded: boolean; actions: MenuItem[]; onBuild: () => void; onOpen: () => void }) {
   const day = whenLabel(entry.dateOffset);
   const building = isBuilding(summary);
   const ready = summary?.status === "ready";
@@ -294,6 +390,7 @@ function NextUp({ entry, course, summary, loaded, onBuild, onOpen }: { entry: En
             </button>
           )
         )}
+        <RowMenu items={actions} label={`More for ${entry.title}`} />
       </div>
     </section>
   );
@@ -402,21 +499,98 @@ export default function StudyView() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [undo, setUndo] = useState<{ ids: string[]; label: string } | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
 
   const targets = useMemo(() => studyTargets(s.snapshot), [s.snapshot]);
   const byId = useMemo(() => new Map(study.sets.map((set) => [set.id, set])), [study.sets]);
+  const hiddenIds = useMemo(() => new Set(study.hidden.map((entry) => entry.id)), [study.hidden]);
   const courseOf = useCallback((id: string) => s.snapshot.courses.find((course) => course.id === id), [s.snapshot.courses]);
 
+  useEffect(() => {
+    if (!undo) return;
+    const timer = window.setTimeout(() => setUndo(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [undo]);
+
   const entries = useMemo<Entry[]>(() => {
-    const found = targets.map((target) => ({ id: target.id, courseId: target.courseId, title: target.title, kind: target.kind, dateOffset: target.dateOffset, because: target.because, target }));
+    const found = targets
+      .filter((target) => !hiddenIds.has(target.id))
+      .map((target) => ({ id: target.id, courseId: target.courseId, title: target.title, kind: target.kind, dateOffset: target.dateOffset, because: target.because, target }));
     const added = study.sets
       .filter((set) => set.custom)
       .map((set) => ({ id: set.id, courseId: set.courseId, title: set.title, kind: set.kind, dateOffset: offsetOf(set.date), because: "Added by you", custom: set }))
       .filter((entry) => entry.dateOffset === null || entry.dateOffset >= 0);
     return [...found, ...added].sort((a, b) => (a.dateOffset ?? Number.MAX_SAFE_INTEGER) - (b.dateOffset ?? Number.MAX_SAFE_INTEGER));
-  }, [targets, study.sets]);
+  }, [targets, study.sets, hiddenIds]);
 
   const closeSheet = useCallback(() => setSheet(null), []);
+
+  async function removeSet(id: string) {
+    try {
+      await study.remove(id);
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Takes tests Slates found off the list; they stay off until put back. Ones you added are deleted instead. */
+  async function hideEntries(list: Entry[]) {
+    const found = list.filter((entry) => !entry.custom);
+    if (!found.length) return;
+    await study.changeHidden({ hide: found.map((entry) => ({ id: entry.id, title: entry.title, courseId: entry.courseId })) });
+    setUndo({
+      ids: found.map((entry) => entry.id),
+      label: found.length === 1 ? `Removed “${found[0]!.title}” from Study.` : `Removed ${found.length} tests and quizzes from Study.`,
+    });
+  }
+
+  function actionsFor(entry: Entry): MenuItem[] {
+    const summary = byId.get(entry.id);
+    const settled = !!summary && !isBuilding(summary);
+    if (entry.custom) {
+      return [
+        { label: "Edit test", icon: ICON.pencil, onSelect: () => openFor(entry) },
+        ...(isBuilding(summary) ? [] : [{ label: "Delete test", icon: ICON.trash, danger: true, confirm: summary?.cards ? "Delete it and its study set?" : "Delete this test?", onSelect: () => void removeSet(entry.id) }]),
+      ];
+    }
+    return [
+      { label: "Remove from Study", icon: ICON.close, onSelect: () => void hideEntries([entry]) },
+      ...(settled ? [{ label: "Delete study set", icon: ICON.trash, danger: true, confirm: "Delete the set and your progress?", onSelect: () => void removeSet(entry.id) }] : []),
+    ];
+  }
+
+  function togglePick(id: string) {
+    setConfirmRemove(false);
+    setPicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function stopSelecting() {
+    setSelecting(false);
+    setPicked(new Set());
+    setConfirmRemove(false);
+  }
+
+  async function removePicked() {
+    const chosen = entries.filter((entry) => picked.has(entry.id));
+    const added = chosen.filter((entry) => entry.custom);
+    // Tests you added have nowhere to go back to, so deleting them asks first.
+    if (added.length && !confirmRemove) {
+      setConfirmRemove(true);
+      return;
+    }
+    await hideEntries(chosen);
+    for (const entry of added) await removeSet(entry.id);
+    stopSelecting();
+  }
 
   function metaOf(courseId: string, kind: TestKind, offset: number | null): string {
     return [courseLabel(courseOf(courseId)), KIND_LABEL[kind], whenLabel(offset).relative].join(" · ");
@@ -508,8 +682,13 @@ export default function StudyView() {
     );
   }
 
-  const next = entries.find((entry) => entry.dateOffset !== null && entry.dateOffset <= 14);
+  // While picking, the next test is just another row, so it can be picked too.
+  const next = selecting ? undefined : entries.find((entry) => entry.dateOffset !== null && entry.dateOffset <= 14);
   const rest = entries.filter((entry) => entry !== next);
+  const targetIds = new Set(targets.map((target) => target.id));
+  // Only the removed tests that would otherwise be on the list; ones since graded or past don't need putting back.
+  const hiddenHere = study.hidden.filter((entry) => targetIds.has(entry.id));
+  const addedPicked = entries.filter((entry) => entry.custom && picked.has(entry.id)).length;
   const groups = [
     { label: "This week", rows: rest.filter((entry) => entry.dateOffset !== null && entry.dateOffset <= 6) },
     { label: "Later", rows: rest.filter((entry) => entry.dateOffset !== null && entry.dateOffset > 6) },
@@ -526,8 +705,12 @@ export default function StudyView() {
       course={courseOf(entry.courseId)}
       summary={byId.get(entry.id)}
       loaded={study.loaded}
+      actions={actionsFor(entry)}
+      selecting={selecting}
+      picked={picked.has(entry.id)}
       onBuild={() => openFor(entry)}
       onOpen={() => setOpenId(entry.id)}
+      onToggle={() => togglePick(entry.id)}
     />
   );
 
@@ -548,6 +731,11 @@ export default function StudyView() {
             </p>
           </div>
           <div className="study-top-actions">
+            {entries.length > 0 && (
+              <button type="button" className="btn btn--quiet" aria-pressed={selecting} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+                {selecting ? "Done" : "Select"}
+              </button>
+            )}
             <Picker snapshot={s.snapshot} taken={taken} onPick={studyAssignment} />
             <button type="button" className="btn btn--primary" onClick={addTest} disabled={!s.snapshot.courses.length}>
               <Icon path={ICON.plus} size={12} /> Add a test
@@ -559,6 +747,22 @@ export default function StudyView() {
           <p className="study-notice is-bad study-banner" role="alert"><Icon path={ICON.alert} size={13} /> {buildError ?? study.error}</p>
         )}
 
+        {undo && (
+          <p className="study-notice study-undo" role="status">
+            <Icon path={ICON.check} size={13} /> {undo.label}{" "}
+            <button
+              type="button"
+              className="study-link"
+              onClick={() => {
+                void study.changeHidden({ show: undo.ids });
+                setUndo(null);
+              }}
+            >
+              Undo
+            </button>
+          </p>
+        )}
+
         <div className="study-layout">
           <div className="study-main">
             {next && (
@@ -567,6 +771,7 @@ export default function StudyView() {
                 course={courseOf(next.courseId)}
                 summary={byId.get(next.id)}
                 loaded={study.loaded}
+                actions={actionsFor(next)}
                 onBuild={() => openFor(next)}
                 onOpen={() => setOpenId(next.id)}
               />
@@ -591,6 +796,62 @@ export default function StudyView() {
                   <Icon path={ICON.plus} size={12} /> Add a test
                 </button>
               </section>
+            )}
+
+            {hiddenHere.length > 0 && (
+              <section className="study-hidden" aria-label="Removed from Study">
+                <button type="button" className="study-hidden-toggle" aria-expanded={showHidden} onClick={() => setShowHidden((value) => !value)}>
+                  Removed from Study
+                  <span className="study-count">{hiddenHere.length}</span>
+                  <Icon path={ICON.chevronDown} size={11} style={showHidden ? { transform: "rotate(180deg)" } : undefined} />
+                </button>
+                {showHidden && (
+                  <>
+                    <ul className="study-hidden-list">
+                      {hiddenHere.map((entry) => (
+                        <li key={entry.id}>
+                          <span className="study-hidden-title">{entry.title}</span>
+                          <span className="study-hidden-meta">{courseLabel(courseOf(entry.courseId))}</span>
+                          <button type="button" className="btn btn--quiet" onClick={() => void study.changeHidden({ show: [entry.id] })}>
+                            Put back
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {hiddenHere.length > 1 && (
+                      <button type="button" className="study-link study-hidden-all" onClick={() => void study.changeHidden({ show: hiddenHere.map((entry) => entry.id) })}>
+                        Put them all back
+                      </button>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {selecting && (
+              <div className="study-selectbar" role="toolbar" aria-label="Selected tests">
+                <span className="study-selectbar-count">{picked.size ? `${picked.size} selected` : "Pick the tests to remove"}</span>
+                <button
+                  type="button"
+                  className="study-link"
+                  onClick={() => {
+                    setConfirmRemove(false);
+                    setPicked(picked.size === entries.length ? new Set() : new Set(entries.map((entry) => entry.id)));
+                  }}
+                >
+                  {picked.size === entries.length ? "Clear" : "Select all"}
+                </button>
+                <div className="study-selectbar-actions">
+                  <button type="button" className="btn btn--quiet" onClick={stopSelecting}>Cancel</button>
+                  <button type="button" className="btn btn--danger" disabled={!picked.size} onClick={() => void removePicked()}>
+                    {confirmRemove
+                      ? `Remove ${picked.size}? ${addedPicked} you added ${addedPicked === 1 ? "is" : "are"} deleted`
+                      : picked.size > 1
+                        ? `Remove ${picked.size} from Study`
+                        : "Remove from Study"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 

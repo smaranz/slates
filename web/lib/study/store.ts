@@ -91,6 +91,39 @@ export async function listSets(): Promise<StudySet[]> {
   return sets.filter((set): set is StudySet => !!set);
 }
 
+/** A test the student took off the Study list, kept by id so the next sync doesn't bring it back. */
+export interface HiddenTest {
+  title: string;
+  courseId: string;
+  at: number;
+}
+
+const hiddenFile = () => path.join(dir(), "hidden.json");
+
+export async function getHidden(): Promise<Record<string, HiddenTest>> {
+  return (await readJson<Record<string, HiddenTest>>(hiddenFile())) ?? {};
+}
+
+/** Newest first, as the list shows them. */
+export function hiddenList(hidden: Record<string, HiddenTest>) {
+  return Object.entries(hidden)
+    .map(([id, test]) => ({ id, ...test }))
+    .sort((a, b) => b.at - a.at);
+}
+
+export type HiddenEntry = ReturnType<typeof hiddenList>[number];
+
+/** Takes tests off the list or puts them back, in one write, queued like a set's own changes. */
+export function changeHidden(change: (hidden: Record<string, HiddenTest>) => Record<string, HiddenTest>): Promise<Record<string, HiddenTest>> {
+  const next = (queues.get("hidden") ?? Promise.resolve()).then(async () => {
+    const updated = change(await getHidden());
+    await writeAtomic(hiddenFile(), updated);
+    return updated;
+  });
+  queues.set("hidden", next.catch(() => {}));
+  return next;
+}
+
 export async function deleteSet(id: string): Promise<void> {
   await fs.rm(fileFor(id), { force: true });
   await fs.rm(fileFor(id, ".material"), { force: true });

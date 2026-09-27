@@ -10891,6 +10891,207 @@ a.counselor-source:hover {
   font-size: 11.5px;
 }
 
+/* ── taking tests off the list ──
+
+   Each test has a menu (remove it, delete its set, edit one you added), and
+   Select picks several at once. Removed tests wait at the foot of the list to
+   be put back.                                                              */
+
+.study-more {
+  position: relative;
+  flex: none;
+}
+
+.study-more-btn {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.study-more-btn:hover,
+.study-more-btn[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.study-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  min-width: 220px;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 5px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+
+.study-more-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.study-more-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.study-more-item.is-danger {
+  color: var(--bad);
+}
+
+.study-more-item.is-danger:hover {
+  background: oklch(0.78 0.18 25 / 0.12);
+  color: var(--bad);
+}
+
+.study-item.is-selecting {
+  grid-template-columns: 18px 52px minmax(0, 1fr) auto;
+}
+
+.study-item.is-picked {
+  border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+  background: color-mix(in oklch, var(--accent) 6%, var(--surface));
+}
+
+.study-item.is-picked .study-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.study-item-side:empty {
+  display: none;
+}
+
+.study-selectbar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 10px 16px;
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+}
+
+.study-selectbar-count {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.study-selectbar .study-link {
+  font-size: 13px;
+}
+
+.study-selectbar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.study-undo {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.study-undo svg {
+  margin-top: 0;
+  color: var(--good);
+}
+
+.study-hidden {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.study-hidden-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 4px 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.study-hidden-toggle:hover {
+  color: var(--text);
+}
+
+.study-hidden-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.study-hidden-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  padding: 8px 8px 8px 14px;
+}
+
+.study-hidden-title {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-hidden-meta {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.study-hidden-all {
+  align-self: flex-start;
+  font-size: 12.5px;
+}
+
 /* ── the build sheet ──
 
    Slides in from the right over the list, so the test it's for stays in view
@@ -11872,6 +12073,9 @@ textarea.input.study-notes {
 }
 
 .study-item-main:focus-visible,
+.study-more-btn:focus-visible,
+.study-more-item:focus-visible,
+.study-hidden-toggle:focus-visible,
 .study-status.is-building:focus-visible,
 .study-library-item:focus-visible,
 .study-browser-row:focus-visible,
@@ -11936,6 +12140,21 @@ textarea.input.study-notes {
     grid-column: 2;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .study-item.is-selecting {
+    grid-template-columns: 18px 46px minmax(0, 1fr);
+  }
+
+  .study-more-menu {
+    right: auto;
+    left: 0;
+  }
+
+  .study-selectbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
   }
 
   .study-field-row {

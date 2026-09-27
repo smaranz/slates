@@ -143,6 +143,36 @@ test("a test added by hand gets a set id of its own, listed beside Schoology's",
   assert.ok((await listSets()).some((entry) => entry.id === set.id && entry.custom && entry.date === "2026-09-29"));
 });
 
+test("tests taken off the list stay off, and come back when put back", async () => {
+  const { POST } = await import("../../app/api/study/hidden/route");
+  const { listSets, getHidden } = await setup;
+  const call = async (body: unknown) => {
+    const response = await POST(new Request("http://slates/api/study/hidden", { method: "POST", body: JSON.stringify(body) }));
+    return { status: response.status, body: (await response.json()) as { hidden?: { id: string; title: string }[]; error?: string } };
+  };
+
+  const before = (await listSets()).length;
+  let result = await call({ hide: [
+    { id: "8801", title: "Quiz 4", courseId: "7" },
+    { id: "8802", title: "Quiz 4", courseId: "9" },
+    { id: "8803", title: "Unit 2 Test", courseId: "7" },
+  ] });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.hidden!.map((entry) => entry.id).sort(), ["8801", "8802", "8803"]);
+  assert.equal((await listSets()).length, before, "the list of hidden tests isn't mistaken for a study set");
+
+  result = await call({ show: ["8802"] });
+  assert.deepEqual(result.body.hidden!.map((entry) => entry.id).sort(), ["8801", "8803"]);
+  assert.deepEqual(Object.keys(await getHidden()).sort(), ["8801", "8803"], "kept on disk");
+
+  result = await call({ show: "all" });
+  assert.deepEqual(result.body.hidden, []);
+
+  for (const bad of [{ hide: [{ id: "../etc", title: "x", courseId: "7" }] }, { hide: [{ id: "8801", title: "", courseId: "7" }] }, { show: "some" }]) {
+    assert.equal((await call(bad)).status, 400, JSON.stringify(bad));
+  }
+});
+
 test.after(async () => {
   const { server } = await setup;
   await new Promise<void>((resolve) => server.close(() => resolve()));
