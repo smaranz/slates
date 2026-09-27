@@ -83,8 +83,11 @@ and the Schoology sign-in needs a real window on the desktop.
 
    $node = (Get-Command node).Source
    $slates = "$env:USERPROFILE\slates"
-   $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-     -Argument "-NoProfile -WindowStyle Hidden -Command & '$node' '$slates\bin\slates.js' host" `
+   # conhost --headless, not powershell -WindowStyle Hidden: with Windows
+   # Terminal as the default console the latter opens a visible window, and
+   # closing it stops Slates.
+   $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" `
+     -Argument "--headless `"$node`" `"$slates\bin\slates.js`" host" `
      -WorkingDirectory $slates
    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
