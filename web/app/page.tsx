@@ -16,6 +16,7 @@ import TutorView from "@/components/TutorView";
 import StudyView from "@/components/StudyView";
 import EssaysView from "@/components/counselor/EssaysView";
 import MessagesView from "@/components/MessagesView";
+import UpdatesView from "@/components/UpdatesView";
 import AssignmentView from "@/components/AssignmentView";
 import ClassesView from "@/components/ClassesView";
 import CommandPalette from "@/components/CommandPalette";
@@ -74,6 +75,8 @@ function School() {
         return <StudyView />;
       case "essays":
         return <EssaysView scope="school" />;
+      case "updates":
+        return <UpdatesView />;
       case "messages":
         return <MessagesView />;
       case "list":

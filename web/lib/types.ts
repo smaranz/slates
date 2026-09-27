@@ -315,6 +315,33 @@ export interface Message {
   unread: boolean;
 }
 
+/**
+ * A post from a class's or group's Updates feed: the announcements that move a
+ * test or add a quiz, which never reach the To Do list or the inbox.
+ */
+export interface Update {
+  /** Schoology's post id. */
+  id: string;
+  /** The class it was posted to; empty for a group or anything Slates doesn't list as a class. */
+  courseId: string;
+  /** Where Schoology says it went, e.g. "Spanish 3 - 4330: AbarcaN p1 T1". */
+  realm: string;
+  /** That class's or group's Updates page. */
+  realmUrl: string;
+  author: string;
+  /** Epoch ms. */
+  at: number;
+  kind: "post" | "poll";
+  /** The post as plain text, in full even where Schoology cut it off behind "Show More". */
+  text: string;
+  /** The same with its structure, cleaned by the scraper. Empty when too large to carry. */
+  html: string;
+  /** Images or videos that only open in Schoology. */
+  media: number;
+  attachments: ItemAttachment[];
+  comments: number;
+}
+
 /** Someone you can write to, exactly as Schoology's directory returned them. */
 export interface Recipient {
   /** Schoology's own user id. Never invented locally — only ever echoed back. */
@@ -353,5 +380,7 @@ export interface SyncSnapshot {
   courseGrades: Record<string, { pct: number; letter: string }>;
   history: Record<string, HistoryPoint[]>;
   messages: Message[];
+  /** Newest first. Absent from a board cached before Slates read them. */
+  updates?: Update[];
   syncedAt: number;
 }

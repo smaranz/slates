@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
 import DocumentViewer from "./DocumentViewer";
+import { UpdatesPeek } from "./UpdatesView";
 import { Badge, ClockIcon, Dot, Icon, ICON, Spinner } from "./ui";
 
 /**
@@ -243,6 +244,8 @@ function ClassDetail() {
   return (
     <div className="scroll">
       <div className="col" style={{ gap: 14 }}>
+        {trail.length === 1 && <UpdatesPeek courseId={course.id} />}
+
         {/* The top bar already carries the class name, colour and the way out,
             so this row is the trail through the folders instead. */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

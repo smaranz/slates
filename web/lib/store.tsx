@@ -40,6 +40,7 @@ export type View =
   | "tutor"
   | "study"
   | "essays"
+  | "updates"
   | "messages"
   | "settings";
 

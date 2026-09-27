@@ -100,7 +100,7 @@ function inlineTypeOf(url: string): string | null {
  * for the real site, and goes to the destination itself rather than through
  * Schoology's redirect, which would need that session too.
  */
-function Attachments({ items, domain }: { items: ItemAttachment[]; domain: string }) {
+export function Attachments({ items, domain }: { items: ItemAttachment[]; domain: string }) {
   const [open, setOpen] = useState<string | null>(null);
 
   return (

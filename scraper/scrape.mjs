@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launch, readConfig, isLoggedIn, openHome, HOME } from "./browser.mjs";
+import { readUpdates } from "./updates.mjs";
 
 /**
  * Scrape Schoology from a real, rendered page.
@@ -1162,6 +1163,10 @@ export async function scrape({ headless = true, reuse = false } = {}) {
       console.error(`  messages failed: ${e.message}`);
       return [];
     });
+    const posts = await readUpdates(page, domain).catch((e) => {
+      console.error(`  updates failed: ${e.message}`);
+      return [];
+    });
 
     /*
      * The grades report is the better course list: it names every course in
@@ -1185,11 +1190,27 @@ export async function scrape({ headless = true, reuse = false } = {}) {
       }
     }
 
+    /*
+     * A post names its class by the course page it went to, which is the id in
+     * a course's `url` — not always its gradebook `id` (the Hub is 2670361865
+     * in grades and /course/2670361877 on the page). The label is the fallback.
+     * Groups and anything else stay unmatched and keep their own name.
+     */
+    const updates = posts.map(({ realmKind, realmId, ...post }) => {
+      const course =
+        realmKind === "course"
+          ? courses.find((c) => c.id === realmId || c.url.match(/\/course\/(\d+)/)?.[1] === realmId) ||
+            matchCourse(courses, { courseName: post.realm.split(/\s*:\s*/)[0], courseFull: post.realm })
+          : null;
+      return { ...post, courseId: course?.id ?? "" };
+    });
+
     const stats = {
       todo: todo.length,
       courses: courses.length,
       graded: Object.keys(courseGrades).length,
       messages: messages.length,
+      updates: updates.length,
       unmatched: 0,
     };
     const assignments = [];
@@ -1296,6 +1317,7 @@ export async function scrape({ headless = true, reuse = false } = {}) {
         // per-assignment dates instead — Schoology exposes no history to scrape.
         history: {},
         messages,
+        updates,
         syncedAt: Date.now(),
       },
       stats,

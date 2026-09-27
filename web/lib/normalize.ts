@@ -438,6 +438,7 @@ export interface RawSnapshot {
   courseGrades?: Record<string, { pct: number; letter: string }>;
   history?: SyncSnapshot["history"];
   messages?: SyncSnapshot["messages"];
+  updates?: SyncSnapshot["updates"];
   syncedAt?: number;
 }
 
@@ -537,6 +538,7 @@ export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnaps
     courseGrades,
     history: raw.history ?? {},
     messages: raw.messages ?? [],
+    updates: raw.updates ?? [],
     syncedAt: raw.syncedAt ?? Date.now(),
   };
 }

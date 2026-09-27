@@ -53,6 +53,7 @@ interface Snapshot {
   assignments?: { id: string; courseId: string; title: string; due?: string; dueAt?: string | null; completed?: boolean; kind?: string; url?: string; points?: string }[];
   courseGrades?: Record<string, { pct: number; letter: string }>;
   messages?: { id: string; from: string; courseId?: string; subject: string; body?: string; time?: string; unread?: boolean }[];
+  updates?: { courseId?: string; realm: string; author: string; at: number; text: string; attachments?: { title: string; target?: string; url: string }[] }[];
   syncedAt?: number;
 }
 
@@ -98,6 +99,14 @@ function boardText(snap: Snapshot, section: string, course: string): string {
       out.push(`- [thread ${m.id}] ${m.unread ? "UNREAD " : ""}${m.time ?? ""} from ${m.from}: ${m.subject}${m.body ? ` — ${m.body.replace(/\s+/g, " ").slice(0, 220)}` : ""}`);
     }
   }
+  if (section === "all" || section === "updates") {
+    const updates = (snap.updates ?? []).filter((u) => (u.courseId ? matchCourse(u.courseId) : !course || u.realm.toLowerCase().includes(course.toLowerCase()))).slice(0, 20);
+    out.push(`## Updates teachers posted to classes (${updates.length} most recent)`);
+    for (const u of updates) {
+      const files = (u.attachments ?? []).map((a) => `${a.title} (${a.target || a.url})`).join("; ");
+      out.push(`- ${new Date(u.at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} — ${u.realm} — ${u.author}: ${u.text.replace(/\s+/g, " ").slice(0, 600)}${files ? ` — attached: ${files}` : ""}`);
+    }
+  }
   return out.join("\n");
 }
 
@@ -117,9 +126,9 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
 
   return {
     slates_board: tool(
-      "Read the student's Schoology board as Slates last synced it: classes and grades, open assignments with due dates, and recent messages (with thread ids for replies).",
+      "Read the student's Schoology board as Slates last synced it: classes and grades, open assignments with due dates, recent messages (with thread ids for replies), and the updates teachers posted to their classes (announcements such as a test moved or cancelled).",
       {
-        section: { type: "string", enum: ["all", "assignments", "grades", "messages"], description: "Which part to read. Default all." },
+        section: { type: "string", enum: ["all", "assignments", "grades", "messages", "updates"], description: "Which part to read. Default all." },
         course: { type: "string", description: "Only this class (part of its name)." },
         fresh: { type: "boolean", description: "Sync with Schoology first (slower). Default false." },
       },
