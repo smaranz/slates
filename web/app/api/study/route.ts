@@ -33,6 +33,7 @@ const Item = z.object({
 const Build = z.object({
   target: Item.extend({ courseId: numericId, testKind: z.enum(["test", "quiz", "exam"]) }),
   course: z.object({ id: numericId, name: z.string().min(1).max(200) }),
+  domain: z.string().regex(/^[\w.-]+\.schoology\.com$/).optional(),
   related: z.array(Item).max(300),
 });
 

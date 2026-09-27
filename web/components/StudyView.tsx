@@ -59,6 +59,7 @@ function requestFor(target: StudyTarget, snapshot: SyncSnapshot): BuildRequest {
       testKind: target.kind,
     },
     course: { id: target.courseId, name: course?.name ?? "this class" },
+    ...(/^[\w.-]+\.schoology\.com$/.test(snapshot.domain ?? "") ? { domain: snapshot.domain } : {}),
     related: snapshot.assignments.filter((entry) => entry.courseId === target.courseId && entry.id !== target.id).slice(0, 300).map(itemInput),
   };
 }

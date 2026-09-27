@@ -3,7 +3,14 @@ import type { TestKind } from "./detect";
 
 /** Shared study-set shapes; safe in the browser and on the server. */
 
-export type SourceKind = "writeup" | "handout" | "review" | "material" | "homework";
+export type SourceKind = "writeup" | "handout" | "review" | "material" | "homework" | "web";
+
+/** One thing the study agent did, for the build's live view. */
+export interface StudyActivity {
+  at: number;
+  label: string;
+  detail?: string;
+}
 
 export interface StudySource {
   /** Citation number used in the guide and on cards, from 1. */
@@ -75,6 +82,10 @@ export interface StudySet {
   updatedAt: number;
   builtAt?: number;
   model?: string;
+  /** Who wrote it: the study agent (browser, web, files) or the plain writer it falls back to. */
+  builder?: "agent" | "writer";
+  /** The study agent's steps, newest last. */
+  activity?: StudyActivity[];
   sources: StudySource[];
   /** Something the student should know about how the set was built, e.g. Materials was unreachable. */
   notice?: string;
@@ -105,6 +116,8 @@ export interface StudyItemInput {
 export interface BuildRequest {
   target: StudyItemInput & { courseId: string; testKind: TestKind };
   course: { id: string; name: string };
+  /** The school's Schoology host, e.g. "fuhsd.schoology.com", for turning Schoology's relative links into real ones. */
+  domain?: string;
   /** Other work in the same class, for the unit's homework and review sheets. */
   related: StudyItemInput[];
 }

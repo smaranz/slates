@@ -191,7 +191,7 @@ export const AGENT_PROVIDERS: Record<UsageAgent, UsageProvider[]> = {
   essay: ["openai"],
   rubric: ["openai"],
   plan: ["openai", "openrouter"],
-  study: ["claude-code"],
+  study: ["claude-code", "cursor"],
   estimate: ["openai"],
   dictation: ["openai"],
   voice: ["openai"],

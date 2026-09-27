@@ -34,7 +34,7 @@ export interface Gathered {
   notice?: string;
 }
 
-interface MaterialItem {
+export interface MaterialItem {
   kind: string;
   title: string;
   filename?: string;
@@ -102,7 +102,44 @@ async function scraper<T>(pathAndQuery: string): Promise<T> {
   return body;
 }
 
+/** One level of a class's Materials, as Schoology files it. */
+export async function listMaterials(courseId: string, folderId?: string | null): Promise<MaterialItem[]> {
+  if (!/^\d+$/.test(courseId) || (folderId && !/^\d+$/.test(folderId))) throw new Error("That isn't a Schoology class or folder id.");
+  return (await scraper<{ items: MaterialItem[] }>(`/course/materials?course=${courseId}${folderId ? `&folder=${folderId}` : ""}`)).items ?? [];
+}
+
+/** Schoology wraps outside links as /link?path=<url>; this is where they really go. */
+export function unwrapLink(url: string): string {
+  const wrapped = /^\/link\?(?:.*&)?path=([^&]+)/.exec(url);
+  return wrapped ? decodeURIComponent(wrapped[1]!) : url;
+}
+
+/**
+ * The text of any Schoology file: a Materials document (/course/…/materials/gp/…)
+ * or an attachment (/attachment/…). Read through the sync service's session and cached.
+ */
+export async function readSchoologyFile(url: string): Promise<string> {
+  const cache = await loadCache();
+  const file = /^\/course\/\d+\/materials\/gp\/\d+$/.test(url)
+    ? (await scraper<{ file: string }>(`/course/document?path=${encodeURIComponent(url)}`)).file
+    : url;
+  if (!/^\/attachment\/\d+\//.test(file)) throw new Error("That isn't a Schoology file. Open other pages in the browser.");
+  const text = await readAttachment(file, cache);
+  await saveCache(cache);
+  if (!text) throw new Error("Slates can't read text from that kind of file.");
+  return text;
+}
+
 const cacheFile = () => path.join(os.homedir(), ".slates", "study", "text-cache.json");
+
+function loadCache(): Promise<Record<string, string>> {
+  return fs.readFile(cacheFile(), "utf8").then((raw) => JSON.parse(raw) as Record<string, string>, () => ({}));
+}
+
+async function saveCache(cache: Record<string, string>): Promise<void> {
+  await fs.mkdir(path.dirname(cacheFile()), { recursive: true });
+  await fs.writeFile(cacheFile(), JSON.stringify(cache)).catch(() => {});
+}
 
 /** Whole-handout text, read once per file and kept: a posted handout doesn't change. */
 async function readAttachment(url: string, cache: Record<string, string>): Promise<string> {
@@ -137,7 +174,7 @@ async function materialCandidates(
   let listings = 0;
   const list = async (folderId: string | null) => {
     listings += 1;
-    return (await scraper<{ items: MaterialItem[] }>(`/course/materials?course=${courseId}${folderId ? `&folder=${folderId}` : ""}`)).items ?? [];
+    return listMaterials(courseId, folderId);
   };
 
   const files: (MaterialItem & { where: string; score: number })[] = [];
@@ -174,7 +211,7 @@ async function materialCandidates(
       title: file.title || file.filename || "Untitled",
       kind: /\b(review|study guide|practice (test|quiz|exam)|test prep)\b/i.test(file.title) ? "review" : "material",
       where: file.where,
-      url: file.url,
+      url: file.kind === "link" ? unwrapLink(file.url) : file.url,
       priority: /\b(review|study guide)\b/i.test(file.title) ? 90 + file.score : 40 + file.score,
       ...(file.kind === "document"
         ? { document: file.url }
@@ -229,7 +266,7 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
   const readable = ordered.filter((candidate) => candidate.text || candidate.attachment || candidate.document).length;
   onStep(readable ? `Reading ${readable} ${readable === 1 ? "item" : "items"} from Schoology` : "Nothing readable was posted for this test");
 
-  const cache = await fs.readFile(cacheFile(), "utf8").then((raw) => JSON.parse(raw) as Record<string, string>, () => ({} as Record<string, string>));
+  const cache = await loadCache();
   const sources: StudySource[] = [];
   const texts = new Map<number, string>();
   let used = 0;
@@ -268,7 +305,6 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
       source.note = `Couldn’t be read: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
     }
   }
-  await fs.mkdir(path.dirname(cacheFile()), { recursive: true });
-  await fs.writeFile(cacheFile(), JSON.stringify(cache)).catch(() => {});
+  await saveCache(cache);
   return { sources, texts, notice };
 }

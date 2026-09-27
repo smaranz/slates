@@ -10471,6 +10471,31 @@ a.counselor-source:hover {
   box-shadow: var(--shadow-raised);
 }
 
+.study-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.study-activity li {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-activity li.is-now {
+  color: var(--text-2);
+}
+
+.study-activity li span {
+  color: var(--dim);
+}
+
 .study-guide {
   display: flex;
   max-width: 70ch;

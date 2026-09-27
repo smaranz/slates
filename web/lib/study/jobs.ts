@@ -1,7 +1,8 @@
+import { studyWithAgent } from "./agent";
 import { gather } from "./gather";
 import { getMaterial, getSet, saveMaterial, saveSet, updateSet } from "./store";
 import type { BuildRequest, StudyAnswer, StudySet } from "./types";
-import { SET_MODEL, writeRound, writeSet } from "./write";
+import { SET_MODEL, writeRound, writeSet, type WrittenSet } from "./write";
 
 /**
  * Builds and practice rounds run in the background of the server, so leaving
@@ -9,8 +10,12 @@ import { SET_MODEL, writeRound, writeSet } from "./write";
  */
 
 const running = new Map<string, Promise<void>>();
-/** A set that says it's building but has had no word for this long was cut off by a restart. */
-const STALE_MS = 4 * 60_000;
+/**
+ * A set that says it's building but has had no word for this long was cut off
+ * by a restart. The study agent reports every step, so a long quiet stretch
+ * means it is gone rather than thinking.
+ */
+const STALE_MS = 6 * 60_000;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message.split("\n")[0]! : String(error);
@@ -48,18 +53,59 @@ export async function startBuild(request: BuildRequest): Promise<StudySet> {
       await updateSet(target.id, (current) => ({
         ...current,
         status: "writing",
-        step: material.length ? `Writing from ${material.length} ${material.length === 1 ? "source" : "sources"}` : "Writing from the test’s title",
+        step: "Starting the study agent",
         sources: found.sources,
         notice: found.notice,
+        activity: [],
       }));
-      const written = await writeSet({ title: target.title, kind: target.testKind, course: course.name, due: target.due ?? "", sources: found.sources, material });
-      await updateSet(target.id, (current) => ({ ...current, ...written, status: "ready", step: "", builtAt: Date.now(), model: SET_MODEL, error: undefined }));
+      await research(request, found.sources, material, found.notice);
     } catch (error) {
       await updateSet(target.id, (current) => ({ ...current, status: "failed", step: "", error: messageOf(error) }));
     }
   })().finally(() => running.delete(target.id));
   running.set(target.id, job);
   return set;
+}
+
+/**
+ * The study agent researches past what `gather` found and writes the set. When
+ * it can't run — no Cursor sign-in on the host, a crash, a run that ends
+ * without saving — the plain writer builds the set from the gathered material
+ * instead, and the set says so.
+ */
+async function research(request: BuildRequest, sources: StudySet["sources"], material: { n: number; title: string; text: string }[], notice: string | undefined): Promise<void> {
+  const { target, course } = request;
+  const held: { set?: WrittenSet } = {};
+  try {
+    const result = await studyWithAgent({
+      request,
+      sources,
+      material,
+      onActivity: (entry) => void updateSet(target.id, (current) => ({
+        ...current,
+        step: entry.detail ? `${entry.label}: ${entry.detail}` : entry.label,
+        activity: [...(current.activity ?? []), entry].slice(-40),
+      })),
+      onSource: (source, text) => {
+        material.push({ n: source.n, title: source.title, text });
+        void saveMaterial(target.id, material);
+        void updateSet(target.id, (current) => ({ ...current, sources: [...current.sources.filter((entry) => entry.n !== source.n), source].sort((a, b) => a.n - b.n) }));
+      },
+      onSave: async (set) => {
+        held.set = set;
+        await updateSet(target.id, (current) => ({ ...current, ...set, status: "ready", step: "", builtAt: Date.now(), builder: "agent", error: undefined }));
+      },
+    });
+    if (!result.saved) throw new Error("it finished without saving a study set");
+    await updateSet(target.id, (current) => ({ ...current, model: result.model }));
+  } catch (error) {
+    if (held.set) return;
+    const why = `The study agent couldn’t finish (${messageOf(error)}), so this was written from the gathered material without it.`;
+    await updateSet(target.id, (current) => ({ ...current, step: "Writing without the study agent", notice: [notice, why].filter(Boolean).join(" ") }));
+    const current = (await getSet(target.id))!;
+    const written = await writeSet({ title: target.title, kind: target.testKind, course: course.name, due: target.due ?? "", sources: current.sources, material });
+    await updateSet(target.id, (set) => ({ ...set, ...written, status: "ready", step: "", builtAt: Date.now(), builder: "writer", model: SET_MODEL, error: undefined }));
+  }
 }
 
 export async function startRound(id: string): Promise<StudySet | null> {

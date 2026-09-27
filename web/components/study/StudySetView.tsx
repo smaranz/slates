@@ -15,12 +15,14 @@ type Tab = "guide" | "cards" | "practice" | "sources";
 
 const PHASES: { status: StudySet["status"]; label: string }[] = [
   { status: "gathering", label: "Find the material in Schoology" },
-  { status: "writing", label: "Write the guide, flashcards and practice" },
+  { status: "writing", label: "Research and write the guide, flashcards and practice" },
 ];
 
 function Building({ set }: { set: StudySet }) {
   const current = PHASES.findIndex((phase) => phase.status === set.status);
   const reading = set.sources.filter((source) => source.read);
+  const activity = (set.activity ?? []).slice(-6);
+  const browsing = (set.activity ?? []).some((entry) => entry.label.startsWith("Browser") || entry.label === "Opened a page");
   return (
     <div className="study-building" aria-live="polite">
       <ol className="study-phases">
@@ -31,7 +33,18 @@ function Building({ set }: { set: StudySet }) {
             </span>
             <div>
               <strong>{phase.label}</strong>
-              {index === current && set.step && <span>{set.step}</span>}
+              {index === current && set.status === "gathering" && set.step && <span>{set.step}</span>}
+              {index === current && set.status === "writing" && (
+                activity.length ? (
+                  <ul className="study-activity">
+                    {activity.map((entry, row) => (
+                      <li key={`${entry.at}-${row}`} className={row === activity.length - 1 ? "is-now" : ""}>
+                        {entry.label}{entry.detail ? <span> · {entry.detail}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : set.step ? <span>{set.step}</span> : null
+              )}
             </div>
           </li>
         ))}
@@ -39,7 +52,10 @@ function Building({ set }: { set: StudySet }) {
       {reading.length > 0 && (
         <p className="study-muted">Working from {reading.slice(0, 4).map((source) => `“${source.title}”`).join(", ")}{reading.length > 4 ? ` and ${reading.length - 4} more` : ""}.</p>
       )}
-      <p className="study-muted">This takes a minute or two, and keeps going if you leave.</p>
+      <p className="study-muted">
+        The study agent can use the browser, the web and your class’s Schoology files, so this can take a few minutes. It keeps going if you leave.
+        {browsing ? " You can watch its browser in Agent › Computer." : ""}
+      </p>
     </div>
   );
 }
@@ -160,7 +176,8 @@ export default function StudySetView({
                 <p className="study-overview">{set.overview}</p>
                 <TutorMarkdown text={set.guide} className="study-md" />
                 <p className="study-muted study-guide-foot">
-                  Written from {read} {read === 1 ? "source" : "sources"} in Schoology.{" "}
+                  {set.builder === "agent" ? "Researched and written by the study agent" : "Written"} from {read} {read === 1 ? "source" : "sources"}
+                  {set.sources.some((source) => source.read && source.kind === "web") ? ", in Schoology and on the web" : " in Schoology"}.{" "}
                   <button type="button" className="study-link" onClick={() => setTab("sources")}>See which</button>
                 </p>
               </article>
