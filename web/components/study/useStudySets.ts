@@ -29,7 +29,9 @@ export async function listMaterials(courseId: string, folderId: string | null): 
 
 /** Files up to 25 MB, the same limit the host enforces (lib/study/uploads.ts). */
 export const MAX_UPLOAD_MB = 25;
-export const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
+/** Photos are read off the page on the host, like scanned PDFs (lib/study/scan.ts). */
+export const PHOTO_EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
+export const UPLOAD_ACCEPT = [".pdf", ".docx", ".pptx", ".txt", ".md", ".csv", ...PHOTO_EXTS.map((ext) => `.${ext}`)].join(",");
 
 export async function uploadFile(file: File): Promise<StudyUpload> {
   const form = new FormData();

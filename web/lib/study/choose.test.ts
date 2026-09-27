@@ -44,8 +44,8 @@ const setup = (async () => {
     resolve(address && typeof address !== "string" ? `http://127.0.0.1:${address.port}` : "");
   }));
   process.env.SLATES_SCRAPER_URL = base;
-  const [gather, uploads, store] = await Promise.all([import("./gather"), import("./uploads"), import("./store")]);
-  return { server, ...gather, ...uploads, ...store };
+  const [gather, uploads, store, scan] = await Promise.all([import("./gather"), import("./uploads"), import("./store"), import("./scan")]);
+  return { server, ...gather, ...uploads, ...store, ...scan };
 })();
 
 const base: BuildRequest = {
@@ -101,9 +101,26 @@ test("an upload with no text, or one that's gone, is listed and says why", async
   assert.match(found.sources[1]!.note!, /no longer on this computer/);
 });
 
+test("a photo the teacher attached is read off the page, like an uploaded scan", async () => {
+  const { gather, setScanReader } = await setup;
+  setScanReader(async (file) => `From ${file.name}: the normal force points out of the incline.`);
+  try {
+    const found = await gather({
+      ...base,
+      auto: false,
+      target: { ...base.target, attachments: [{ kind: "file", title: "Whiteboard from class", url: "/attachment/77/source/whiteboard.jpg" }] },
+    }, () => {});
+    const photo = found.sources.find((source) => source.title === "Whiteboard from class")!;
+    assert.ok(photo.read, photo.note);
+    assert.match(found.texts.get(photo.n)!, /^From whiteboard\.jpg: the normal force/);
+  } finally {
+    setScanReader(null);
+  }
+});
+
 test("uploads take readable formats only, and delete cleanly", async () => {
   const { saveUpload, readUpload, deleteUpload, isUploadId } = await setup;
-  await assert.rejects(saveUpload("photo.heic", new ArrayBuffer(4)), /PDF, TXT, MD, CSV, DOCX and PPTX/);
+  await assert.rejects(saveUpload("notes.pages", new ArrayBuffer(4)), /PDF, Word, PowerPoint and text files/);
   const upload = await saveUpload("chapter.md", new TextEncoder().encode("# Friction\nOpposes relative motion.").buffer as ArrayBuffer);
   assert.ok(isUploadId(upload.id));
   assert.equal(upload.chars, (await readUpload(upload.id))!.text.length);

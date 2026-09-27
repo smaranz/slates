@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { extractText, READABLE, type TextLimits } from "../attachment-text";
+import type { TextLimits } from "../attachment-text";
 import { SCRAPER_URL } from "../ports";
 import type { ItemAttachment } from "../types";
 import { classify } from "./detect";
 import { googleExport, NeedsGoogleSignIn, readGoogle } from "./google";
+import { fileText, READS } from "./scan";
 import type { BuildRequest, SourceKind, StudyItemInput, StudySource } from "./types";
 import { readUpload } from "./uploads";
 
@@ -176,14 +177,15 @@ async function saveCache(cache: Record<string, string>): Promise<void> {
   await fs.writeFile(cacheFile(), JSON.stringify(cache)).catch(() => {});
 }
 
-/** Whole-handout text, read once per file and kept: a posted handout doesn't change. */
+/** Whole-handout text, read once per file and kept: a posted handout doesn't change. Scans and photos are read off the page. */
 async function readAttachment(url: string, cache: Record<string, string>): Promise<string> {
   if (cache[url] !== undefined) return cache[url]!;
   const ext = extOf(url);
-  if (!READABLE.includes(ext)) return "";
+  if (!READS.includes(ext)) return "";
   const response = await fetch(`${SCRAPER_URL}/course/file?path=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`Schoology wouldn't send the file (${response.status}).`);
-  const text = await extractText(await response.arrayBuffer(), ext, PER_DOC);
+  const name = decodeURIComponent(url.split(/[?#]/)[0]!.split("/").pop() || `file.${ext}`);
+  const { text } = await fileText(await response.arrayBuffer(), ext, name, PER_DOC);
   cache[url] = text;
   return text;
 }
@@ -192,9 +194,9 @@ function attachmentCandidates(item: StudyItemInput, kind: SourceKind, where: str
   return (item.attachments ?? []).map((attachment: ItemAttachment) => {
     const base = { title: attachment.title || attachment.filename || "Attachment", kind, where, priority };
     if (attachment.kind === "file" && /^\/attachment\/\d+\//.test(attachment.url)) {
-      return READABLE.includes(extOf(attachment.url))
+      return READS.includes(extOf(attachment.url))
         ? { ...base, url: attachment.url, attachment: attachment.url }
-        : { ...base, url: attachment.url, note: "Not a format Slates can read (images and some files aren't)." };
+        : { ...base, url: attachment.url, note: "Not a format Slates can read." };
     }
     const target = attachment.target ?? unwrapLink(attachment.url);
     return googleExport(target)
@@ -426,9 +428,8 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
       source.chars = text.length;
       source.read = true;
     } catch (error) {
-      source.note = error instanceof NeedsGoogleSignIn
-        ? error.message
-        : `Couldn’t be read: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
+      const message = error instanceof Error ? error.message.split("\n")[0]! : String(error);
+      source.note = error instanceof NeedsGoogleSignIn || message.startsWith("Couldn’t") ? message : `Couldn’t be read: ${message}`;
       if (error instanceof NeedsGoogleSignIn) lockedGoogle += 1;
     }
   }

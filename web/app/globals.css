@@ -11174,7 +11174,8 @@ a.counselor-source:hover {
   background: var(--accent-soft);
 }
 
-.study-drop:focus-within {
+/* Keyboard focus only: a click on the zone focuses its file input too, and a ring left behind after choosing files looked broken. */
+.study-drop:has(:focus-visible) {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }

@@ -6,7 +6,7 @@ import type { TestKind } from "@/lib/study/detect";
 import type { StudyInputs, StudyPick, StudyUpload } from "@/lib/study/types";
 import type { Course } from "@/lib/types";
 import { Icon, ICON, Spinner, Toggle } from "../ui";
-import { listMaterials, MAX_UPLOAD_MB, removeUpload, UPLOAD_ACCEPT, uploadFile, type MaterialEntry } from "./useStudySets";
+import { listMaterials, MAX_UPLOAD_MB, PHOTO_EXTS, removeUpload, UPLOAD_ACCEPT, uploadFile, type MaterialEntry } from "./useStudySets";
 
 /**
  * Where a study set's material comes from, chosen before it's built: the
@@ -47,6 +47,8 @@ interface UploadRow {
   error?: string;
   /** Uploaded in this sheet, so cancelling throws it away; ones from an earlier build stay. */
   fresh: boolean;
+  /** Still reading after a few seconds, which means a scan or a photo. */
+  slow?: boolean;
 }
 
 const KINDS: { id: TestKind; label: string }[] = [
@@ -253,26 +255,35 @@ export default function StudyBuildSheet({
     cancelRef.current = cancel;
   });
 
+  /** All at once: a scan takes a model run to read, and one shouldn't wait behind another. */
   async function addFiles(files: FileList | File[]) {
-    for (const file of Array.from(files)) {
+    const accepted = UPLOAD_ACCEPT.split(",").map((ext) => ext.slice(1));
+    await Promise.all(Array.from(files).map(async (file) => {
       const key = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`;
-      const accepted = UPLOAD_ACCEPT.split(",").map((ext) => ext.slice(1));
-      if (!accepted.includes(extOf(file.name))) {
-        setUploads((rows) => [...rows, { key, name: file.name, state: "failed", error: "Slates reads PDF, Word, PowerPoint and text files.", fresh: true }]);
-        continue;
-      }
-      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
-        setUploads((rows) => [...rows, { key, name: file.name, state: "failed", error: `Over ${MAX_UPLOAD_MB} MB.`, fresh: true }]);
-        continue;
+      const ext = extOf(file.name);
+      const refuse = !accepted.includes(ext)
+        ? /^hei[cf]$/.test(ext)
+          ? "Slates can’t read HEIC photos yet. Save it as a JPEG and upload that."
+          : "Slates reads PDF, Word, PowerPoint and text files, and photos."
+        : file.size > MAX_UPLOAD_MB * 1024 * 1024
+          ? `Over ${MAX_UPLOAD_MB} MB.`
+          : null;
+      if (refuse) {
+        setUploads((rows) => [...rows, { key, name: file.name, state: "failed", error: refuse, fresh: true }]);
+        return;
       }
       setUploads((rows) => [...rows, { key, name: file.name, state: "uploading", fresh: true }]);
+      // Most files read in a second; a scan or photo is read off the page, so say why it's taking longer.
+      const slow = window.setTimeout(() => setUploads((rows) => rows.map((row) => (row.key === key ? { ...row, slow: true } : row))), 4000);
       try {
         const upload = await uploadFile(file);
         setUploads((rows) => rows.map((row) => (row.key === key ? { ...row, upload, state: upload.error ? "failed" : "ready", error: upload.error } : row)));
       } catch (err) {
         setUploads((rows) => rows.map((row) => (row.key === key ? { ...row, state: "failed", error: message(err) } : row)));
+      } finally {
+        window.clearTimeout(slow);
       }
-    }
+    }));
   }
 
   function dropUpload(row: UploadRow) {
@@ -401,7 +412,7 @@ export default function StudyBuildSheet({
             <div className="study-option is-stacked">
               <div>
                 <strong>Your own files</strong>
-                <span>Notes, a review packet, slides the teacher handed out in class.</span>
+                <span>Notes, a review packet, or a scan or photo of a handout.</span>
               </div>
               <label
                 className={`study-drop${dragging ? " is-over" : ""}`}
@@ -431,7 +442,7 @@ export default function StudyBuildSheet({
                 <span>
                   <strong>Drop files here</strong> or choose them
                 </span>
-                <span className="study-drop-hint">PDF, Word, PowerPoint or text, up to {MAX_UPLOAD_MB} MB each</span>
+                <span className="study-drop-hint">PDF, Word, PowerPoint, text or photos, up to {MAX_UPLOAD_MB} MB each</span>
               </label>
               {uploads.length > 0 && (
                 <ul className="study-uploads">
@@ -442,11 +453,11 @@ export default function StudyBuildSheet({
                         <span className="study-pick-title">{row.name}</span>
                         <span className="study-upload-state">
                           {row.state === "uploading" ? (
-                            <><Spinner size={10} /> Reading it</>
+                            <><Spinner size={10} /> {row.slow ? "Reading it off the page. Scans and photos take up to a minute." : "Reading it"}</>
                           ) : row.state === "failed" ? (
                             row.error
                           ) : row.upload && row.upload.chars ? (
-                            `${sizeLabel(row.upload.bytes)} · ${row.upload.chars.toLocaleString()} characters read`
+                            `${sizeLabel(row.upload.bytes)} · ${row.upload.chars.toLocaleString()} characters${row.upload.scanned ? `, read from the ${PHOTO_EXTS.includes(row.upload.ext) ? "photo" : "scan"}` : " read"}`
                           ) : (
                             "Added earlier"
                           )}

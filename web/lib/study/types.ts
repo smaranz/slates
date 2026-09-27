@@ -123,6 +123,8 @@ export interface StudyUpload {
   bytes: number;
   /** Characters of text Slates read from it; 0, with `error`, when it couldn't. */
   chars: number;
+  /** Read off the page by a vision model, because it's a scan or a photo. */
+  scanned?: boolean;
   at: number;
   error?: string;
 }
