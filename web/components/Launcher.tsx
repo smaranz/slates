@@ -23,6 +23,7 @@ const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolea
   { mode: "ui", title: "UI", accent: "oklch(0.78 0.15 165)", mark: (h) => <StackMark hovered={h} /> },
   { mode: "usage", title: "AI Usage", accent: "oklch(0.82 0.12 85)", mark: (h) => <MeterMark hovered={h} /> },
   { mode: "media", title: "Media Gen Studio", accent: "oklch(0.8 0.13 25)", mark: (h) => <MediaMark hovered={h} /> },
+  { mode: "agent", title: "Agent", accent: "oklch(0.8 0.12 215)", mark: (h) => <AgentMark hovered={h} /> },
 ];
 
 export default function Launcher() {
@@ -263,6 +264,47 @@ function MediaMark({ hovered }: { hovered: boolean }) {
           transition={{ type: "spring", stiffness: 260, damping: 22, delay: i * 0.04 }}
         />
       ))}
+    </svg>
+  );
+}
+
+/** A screen with a prompt — the computer the agents work on. The cursor blinks on hover. */
+function AgentMark({ hovered }: { hovered: boolean }) {
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      <motion.rect
+        x="5"
+        y="9"
+        width="44"
+        height="32"
+        rx="7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        initial={false}
+        animate={{ opacity: hovered ? 0.8 : 0.48 }}
+      />
+      <motion.line x1="21" x2="33" y1="47" y2="47" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" initial={false} animate={{ opacity: hovered ? 0.7 : 0.4 }} />
+      <motion.path
+        d="M15 20.5l6 4.5-6 4.5"
+        stroke="var(--accent)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={false}
+        animate={{ x: hovered ? 2 : 0 }}
+        transition={{ type: "spring", stiffness: 260, damping: 22 }}
+      />
+      <motion.rect
+        x="25"
+        y="28"
+        width="9"
+        height="2.2"
+        rx="1.1"
+        fill="var(--accent)"
+        initial={false}
+        animate={{ opacity: hovered ? [1, 0.15, 1] : 0.85 }}
+        transition={{ duration: 1, repeat: hovered ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }}
+      />
     </svg>
   );
 }

@@ -29,6 +29,7 @@
     "@cursor/sdk": "^1.0.30",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openrouter/ai-sdk-provider": "^3.0.0",
+    "@playwright/mcp": "0.0.82",
     "ai": "^7.0.84",
     "ai-sdk-provider-claude-code": "^4.1.1",
     "docx": "^9.7.1",
