@@ -6,6 +6,7 @@ import { extractText, READABLE, type TextLimits } from "../attachment-text";
 import { SCRAPER_URL } from "../ports";
 import type { ItemAttachment } from "../types";
 import { classify } from "./detect";
+import { googleExport, NeedsGoogleSignIn, readGoogle } from "./google";
 import type { BuildRequest, SourceKind, StudyItemInput, StudySource } from "./types";
 
 /**
@@ -115,40 +116,7 @@ export function unwrapLink(url: string): string {
   return wrapped ? decodeURIComponent(wrapped[1]!) : url;
 }
 
-/** Where a Google Doc, Slides deck, Sheet or Drive file can be downloaded as text, or null for anything else. */
-export function googleExport(url: string): string | null {
-  const doc = /^https:\/\/docs\.google\.com\/(document|presentation|spreadsheets)\/d\/([\w-]{20,})/.exec(url);
-  if (doc) {
-    const [, kind, id] = doc;
-    if (kind === "document") return `https://docs.google.com/document/d/${id}/export?format=txt`;
-    if (kind === "presentation") return `https://docs.google.com/presentation/d/${id}/export/txt`;
-    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
-  }
-  const drive = /^https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]{20,})/.exec(url);
-  return drive ? `https://drive.google.com/uc?export=download&id=${drive[1]}` : null;
-}
-
-/**
- * A Google file the class posted. Most are shared only inside the school, so
- * it's read through the sync service first: its browser signs in to Schoology
- * with the school Google account, and reads what the student can. A file
- * shared publicly still works when the sync service is down.
- */
-async function readGoogle(url: string): Promise<string> {
-  const target = googleExport(url);
-  if (!target) throw new Error("Only Google Docs, Slides, Sheets and Drive files can be read directly. Open other sites in the browser.");
-  const viaSession = await fetch(`${SCRAPER_URL}/google/file?url=${encodeURIComponent(target)}`, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
-  const response = viaSession?.ok ? viaSession : await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
-  const type = response.headers.get("content-type") ?? "";
-  if (!response.ok || type.includes("text/html")) {
-    throw new Error("That Google file needs a sign-in Slates doesn't have. The study agent can try it in its browser.");
-  }
-  if (type.startsWith("text/")) return (await response.text()).replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, PER_DOC.chars);
-  const ext = type.includes("pdf") ? "pdf" : type.includes("wordprocessingml") ? "docx" : type.includes("presentationml") ? "pptx" : "";
-  const text = ext ? await extractText(await response.arrayBuffer(), ext, PER_DOC) : "";
-  if (!text) throw new Error("Slates can't read text from that kind of Google Drive file.");
-  return text;
-}
+export { googleExport };
 
 /**
  * The words behind any link a class posts in Schoology: its own documents and
@@ -159,14 +127,14 @@ async function readGoogle(url: string): Promise<string> {
 export async function readSchoologyItem(raw: string): Promise<{ text: string; links: { title: string; url: string }[] }> {
   const url = raw.replace(/^https?:\/\/[\w.-]+\.schoology\.com(?=\/)/i, "");
   const outside = unwrapLink(url);
-  if (/^https?:\/\//i.test(outside)) return { text: await readGoogle(outside), links: [] };
+  if (/^https?:\/\//i.test(outside)) return { text: await readGoogle(outside, PER_DOC), links: [] };
   if (/^\/course\/\d+\/materials\/gp\/\d+$/.test(url) || /^\/attachment\/\d+\//.test(url)) return { text: await readSchoologyFile(url), links: [] };
   if (/^\/(?:page\/\d+|course\/\d+\/materials\/(?:link\/view|page)\/\d+)/.test(url)) {
     const page = await scraper<{ text: string; links: { title: string; url: string }[]; files: string[] }>(`/course/page?path=${encodeURIComponent(url)}`);
     const parts = [page.text];
     // A link view is mostly a frame around one Google file; read the file.
     const google = page.links.find((link) => googleExport(link.url));
-    if (google && page.text.length < 600) parts.push(await readGoogle(google.url).catch(() => ""));
+    if (google && page.text.length < 600) parts.push(await readGoogle(google.url, PER_DOC).catch(() => ""));
     for (const file of page.files.slice(0, 3)) parts.push(await readSchoologyFile(file).catch(() => ""));
     const text = parts.filter(Boolean).join("\n\n").trim().slice(0, PER_DOC.chars);
     if (!text) throw new Error("That page has no text Slates can read.");
@@ -364,6 +332,7 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
   const texts = new Map<number, string>();
   let used = 0;
   let materialFiles = 0;
+  let lockedGoogle = 0;
   for (const candidate of ordered) {
     const n = sources.length + 1;
     const source: StudySource = { n, title: candidate.title, kind: candidate.kind, where: candidate.where, url: candidate.url, chars: 0, read: false, ...(candidate.note ? { note: candidate.note } : {}) };
@@ -394,9 +363,18 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
       source.chars = text.length;
       source.read = true;
     } catch (error) {
-      source.note = `Couldn’t be read: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
+      source.note = error instanceof NeedsGoogleSignIn
+        ? `A Google file shared only inside your school. ${error.message}`
+        : `Couldn’t be read: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
+      if (error instanceof NeedsGoogleSignIn) lockedGoogle += 1;
     }
   }
   await saveCache(cache);
+  if (lockedGoogle) {
+    notice = [
+      notice,
+      `${lockedGoogle === 1 ? "One of the class’s Google files is" : `${lockedGoogle} of the class’s Google files are`} shared only inside your school. Sign in to your school Google account once in Agent › Computer, then rebuild, and Slates can read ${lockedGoogle === 1 ? "it" : "them"}.`,
+    ].filter(Boolean).join(" ");
+  }
   return { sources, texts, notice };
 }
