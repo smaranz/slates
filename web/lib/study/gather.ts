@@ -22,7 +22,7 @@ import type { BuildRequest, SourceKind, StudyItemInput, StudySource } from "./ty
 const PER_DOC: TextLimits = { chars: 14_000, pages: 40 };
 /** What goes to the writer in total. Enough for a unit; not a semester. */
 const BUDGET = 70_000;
-const MAX_LISTINGS = 7;
+const MAX_LISTINGS = 10;
 const MAX_MATERIAL_FILES = 10;
 const MAX_HOMEWORK = 8;
 /** How far back a unit's homework reaches before a test. */
@@ -51,7 +51,8 @@ interface Candidate {
   /** Text already in hand (a write-up), or how to fetch it. */
   text?: string;
   attachment?: string;
-  document?: string;
+  /** Any other readable Schoology link: a document, Page, link view or Google file. */
+  item?: string;
   note?: string;
 }
 
@@ -114,6 +115,60 @@ export function unwrapLink(url: string): string {
   return wrapped ? decodeURIComponent(wrapped[1]!) : url;
 }
 
+/** Where a Google Doc, Slides deck, Sheet or Drive file can be downloaded as text, or null for anything else. */
+export function googleExport(url: string): string | null {
+  const doc = /^https:\/\/docs\.google\.com\/(document|presentation|spreadsheets)\/d\/([\w-]{20,})/.exec(url);
+  if (doc) {
+    const [, kind, id] = doc;
+    if (kind === "document") return `https://docs.google.com/document/d/${id}/export?format=txt`;
+    if (kind === "presentation") return `https://docs.google.com/presentation/d/${id}/export/txt`;
+    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
+  }
+  const drive = /^https:\/\/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]{20,})/.exec(url);
+  return drive ? `https://drive.google.com/uc?export=download&id=${drive[1]}` : null;
+}
+
+/** A Google file the teacher shared by link. One that's restricted to the school needs a sign-in, which only the agent's browser can do. */
+async function readGoogle(url: string): Promise<string> {
+  const target = googleExport(url);
+  if (!target) throw new Error("Only Google Docs, Slides, Sheets and Drive files can be read directly. Open other sites in the browser.");
+  const response = await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  const type = response.headers.get("content-type") ?? "";
+  if (!response.ok || type.includes("text/html")) {
+    throw new Error("That Google file isn't shared by link, so it needs a sign-in. The study agent can try it in its browser.");
+  }
+  if (type.startsWith("text/")) return (await response.text()).replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, PER_DOC.chars);
+  const ext = type.includes("pdf") ? "pdf" : type.includes("wordprocessingml") ? "docx" : type.includes("presentationml") ? "pptx" : "";
+  const text = ext ? await extractText(await response.arrayBuffer(), ext, PER_DOC) : "";
+  if (!text) throw new Error("Slates can't read text from that kind of Google Drive file.");
+  return text;
+}
+
+/**
+ * The words behind any link a class posts in Schoology: its own documents and
+ * attachments, Pages the teacher wrote, link views, and the Google Docs and
+ * Slides that most teachers post by link. Also returns where a page points, so
+ * the study agent can follow it.
+ */
+export async function readSchoologyItem(raw: string): Promise<{ text: string; links: { title: string; url: string }[] }> {
+  const url = raw.replace(/^https?:\/\/[\w.-]+\.schoology\.com(?=\/)/i, "");
+  const outside = unwrapLink(url);
+  if (/^https?:\/\//i.test(outside)) return { text: await readGoogle(outside), links: [] };
+  if (/^\/course\/\d+\/materials\/gp\/\d+$/.test(url) || /^\/attachment\/\d+\//.test(url)) return { text: await readSchoologyFile(url), links: [] };
+  if (/^\/(?:page\/\d+|course\/\d+\/materials\/(?:link\/view|page)\/\d+)/.test(url)) {
+    const page = await scraper<{ text: string; links: { title: string; url: string }[]; files: string[] }>(`/course/page?path=${encodeURIComponent(url)}`);
+    const parts = [page.text];
+    // A link view is mostly a frame around one Google file; read the file.
+    const google = page.links.find((link) => googleExport(link.url));
+    if (google && page.text.length < 600) parts.push(await readGoogle(google.url).catch(() => ""));
+    for (const file of page.files.slice(0, 3)) parts.push(await readSchoologyFile(file).catch(() => ""));
+    const text = parts.filter(Boolean).join("\n\n").trim().slice(0, PER_DOC.chars);
+    if (!text) throw new Error("That page has no text Slates can read.");
+    return { text, links: page.links };
+  }
+  throw new Error("That isn't a link Slates can read. Open it in the browser.");
+}
+
 /**
  * The text of any Schoology file: a Materials document (/course/…/materials/gp/…)
  * or an attachment (/attachment/…). Read through the sync service's session and cached.
@@ -161,7 +216,10 @@ function attachmentCandidates(item: StudyItemInput, kind: SourceKind, where: str
         ? { ...base, url: attachment.url, attachment: attachment.url }
         : { ...base, url: attachment.url, note: "Not a format Slates can read (images and some files aren't)." };
     }
-    return { ...base, url: attachment.target ?? attachment.url, note: "A link to another site — open it in Schoology to see it." };
+    const target = attachment.target ?? unwrapLink(attachment.url);
+    return googleExport(target)
+      ? { ...base, url: target, item: target }
+      : { ...base, url: target, note: "A link to another site; the study agent can open it in its browser." };
   });
 }
 
@@ -179,45 +237,74 @@ async function materialCandidates(
 
   const files: (MaterialItem & { where: string; score: number })[] = [];
   const matched: string[] = [];
-  const visit = async (items: MaterialItem[], trail: string[], bias: number, depth: number) => {
+  const take = (items: MaterialItem[], trail: string[], bias: number) => {
     for (const item of items) {
-      if (item.kind === "document" || item.kind === "link" || item.kind === "page") {
-        files.push({ ...item, where: ["Materials", ...trail].join(" › "), score: relevance(item.title, context) + bias });
-      }
-    }
-    const folders = items
-      .filter((item) => item.kind === "folder" && item.folderId)
-      .map((item) => ({ item, score: relevance(item.title, context) }))
-      .filter((folder) => folder.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, depth === 0 ? 3 : 2);
-    for (const folder of folders) {
-      if (listings >= MAX_LISTINGS) break;
-      matched.push(folder.item.title);
-      onStep(`Opening “${folder.item.title}” in Materials`);
-      await visit(await list(folder.item.folderId), [...trail, folder.item.title], 4, depth + 1);
+      if (item.kind === "folder" || ["assignment", "assessment", "discussion"].includes(item.kind)) continue;
+      files.push({ ...item, where: ["Materials", ...trail].join(" › "), score: relevance(item.title, context) + bias });
     }
   };
 
-  await visit(await list(null), [], 0, 0);
+  const root = await list(null);
+  take(root, [], 0);
+  const units = root
+    .filter((item) => item.kind === "folder" && item.folderId)
+    .map((item) => ({ item, score: relevance(item.title, context) }))
+    .filter((folder) => folder.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2);
+  for (const unit of units) {
+    if (listings >= MAX_LISTINGS) break;
+    matched.push(unit.item.title);
+    onStep(`Opening “${unit.item.title}” in Materials`);
+    const inside = await list(unit.item.folderId);
+    take(inside, [unit.item.title], 4);
+    // A unit's subfolders are all part of the unit, whatever they're called ("PPTs & Resources", "Daily Agendas").
+    const subfolders = inside
+      .filter((item) => item.kind === "folder" && item.folderId)
+      .sort((a, b) => subfolderRank(b.title) - subfolderRank(a.title) || relevance(b.title, context) - relevance(a.title, context));
+    for (const sub of subfolders) {
+      if (listings >= MAX_LISTINGS) break;
+      onStep(`Opening “${unit.item.title} › ${sub.title}”`);
+      take(await list(sub.folderId), [unit.item.title, sub.title], 3 + subfolderRank(sub.title));
+    }
+  }
+
   const picked = files
     .filter((file) => file.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_MATERIAL_FILES + 6);
+    .slice(0, MAX_MATERIAL_FILES + 8);
 
   return {
     matched,
-    candidates: picked.map((file) => ({
-      title: file.title || file.filename || "Untitled",
-      kind: /\b(review|study guide|practice (test|quiz|exam)|test prep)\b/i.test(file.title) ? "review" : "material",
-      where: file.where,
-      url: file.kind === "link" ? unwrapLink(file.url) : file.url,
-      priority: /\b(review|study guide)\b/i.test(file.title) ? 90 + file.score : 40 + file.score,
-      ...(file.kind === "document"
-        ? { document: file.url }
-        : { note: file.kind === "link" ? "A link to another site — open it in Schoology to see it." : "A Schoology page — open it in Schoology to read it." }),
-    })),
+    candidates: picked.map((file) => {
+      const outside = unwrapLink(file.url);
+      const external = /^https?:\/\//i.test(outside);
+      return {
+        title: file.title || file.filename || "Untitled",
+        kind: /\b(review|study guide|practice (test|quiz|exam)|test prep)\b/i.test(file.title) ? "review" : "material",
+        where: file.where,
+        url: external ? outside : file.url,
+        priority: /\b(review|study guide)\b/i.test(file.title) ? 90 + file.score : 40 + file.score,
+        ...(readable(file.url)
+          ? { item: file.url }
+          : { note: external ? "A link to another site; the study agent can open it in its browser." : "Slates can't read this kind of item." }),
+      };
+    }),
   };
+}
+
+/** A unit's subfolders to open first: its slides and notes before its daily agendas. */
+function subfolderRank(title: string): number {
+  if (/\b(review|study|test prep|notes|ppts?|slides|resources|readings?|handouts?|lectures?|videos?)\b/i.test(title)) return 2;
+  if (/\b(daily|agendas?)\b/i.test(title)) return 0;
+  return 1;
+}
+
+/** Whether Slates can read an item's words itself; the study agent can still open the rest in its browser. */
+function readable(url: string): boolean {
+  const outside = unwrapLink(url);
+  if (/^https?:\/\//i.test(outside)) return googleExport(outside) !== null;
+  return /^\/(?:course\/\d+\/materials\/gp\/\d+$|attachment\/\d+\/|page\/\d+|course\/\d+\/materials\/(?:link\/view|page)\/\d+)/.test(url);
 }
 
 export async function gather(request: BuildRequest, onStep: (step: string) => void): Promise<Gathered> {
@@ -263,8 +350,8 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
   }
 
   const ordered = candidates.sort((a, b) => b.priority - a.priority);
-  const readable = ordered.filter((candidate) => candidate.text || candidate.attachment || candidate.document).length;
-  onStep(readable ? `Reading ${readable} ${readable === 1 ? "item" : "items"} from Schoology` : "Nothing readable was posted for this test");
+  const readableCount = ordered.filter((candidate) => candidate.text || candidate.attachment || candidate.item).length;
+  onStep(readableCount ? `Reading ${readableCount} ${readableCount === 1 ? "item" : "items"} from Schoology` : "Nothing readable was posted for this test");
 
   const cache = await loadCache();
   const sources: StudySource[] = [];
@@ -283,14 +370,13 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
     try {
       let text = candidate.text ?? "";
       if (candidate.attachment) text = await readAttachment(candidate.attachment, cache);
-      if (candidate.document) {
+      if (candidate.item) {
         if (materialFiles >= MAX_MATERIAL_FILES) {
           source.note = "Left out — there was already enough to study from.";
           continue;
         }
         materialFiles += 1;
-        const document = await scraper<{ file: string }>(`/course/document?path=${encodeURIComponent(candidate.document)}`);
-        text = await readAttachment(document.file, cache);
+        text = (await readSchoologyItem(candidate.item)).text;
       }
       text = text.trim().slice(0, Math.min(PER_DOC.chars, BUDGET - used));
       if (!text) {

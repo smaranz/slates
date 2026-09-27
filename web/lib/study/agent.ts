@@ -11,7 +11,7 @@ import { browserMcp, ensureBrowser } from "@/lib/agent/browser";
 import { listModels } from "@/lib/agent/engine";
 import { buildTools } from "@/lib/agent/tools";
 import { DEFAULT_MODEL } from "@/lib/agent/types";
-import { listMaterials, readSchoologyFile } from "./gather";
+import { listMaterials, readSchoologyItem, unwrapLink } from "./gather";
 import type { StoredMaterial } from "./store";
 import type { BuildRequest, StudyActivity, StudySource } from "./types";
 import { finishSet, GROUNDING, SET_WRITING, SetSchema, type WrittenSet } from "./write";
@@ -117,17 +117,26 @@ export async function studyWithAgent(build: AgentBuild): Promise<{ model: string
       },
     ),
     schoology_read: tool(
-      "Read the text of a Schoology file (a Materials document or an attachment: PDF, Word, PowerPoint, text) through Slates' signed-in session. It becomes a numbered source you can cite.",
+      "Read any link from this class's Schoology, exactly as schoology_materials lists it: documents and attachments (PDF, Word, PowerPoint), Pages the teacher wrote, link views, and Google Docs, Slides or Sheets posted by link. Uses Slates' signed-in session, so no browser sign-in is needed. It becomes a numbered source you can cite, and you get back the links on the page to follow.",
       {
-        url: { type: "string", description: "The Schoology link, e.g. /course/123/materials/gp/456 or /attachment/…" },
-        title: { type: "string", description: "What the file is called." },
+        url: { type: "string", description: "The link as listed, e.g. /course/123/materials/gp/456, /page/789, /link?path=…, or a full https://… Schoology or Google link." },
+        title: { type: "string", description: "What it is called." },
       },
       ["url", "title"],
       async (args) => {
-        const url = str(args.url).replace(/^https?:\/\/[^/]+/i, "");
-        const text = await readSchoologyFile(url);
-        const source = register({ title: str(args.title) || "Schoology file", kind: "material", where: "Materials, found by the study agent", url, chars: text.length, read: true }, text);
-        return `[${source.n}] ${source.title}\n\n${text}`;
+        const url = str(args.url).replace(/^https?:\/\/[\w.-]+\.schoology\.com(?=\/)/i, "");
+        const read = await readSchoologyItem(url);
+        const outside = unwrapLink(url);
+        const source = register({
+          title: str(args.title) || "Schoology item",
+          kind: "material",
+          where: "Materials, found by the study agent",
+          url: /^https?:\/\//i.test(outside) ? outside : url,
+          chars: read.text.length,
+          read: true,
+        }, read.text);
+        const links = read.links.length ? `\n\nLinks on this page:\n${read.links.map((link) => `- ${link.title || "link"}: ${link.url}`).join("\n")}` : "";
+        return `[${source.n}] ${source.title}\n\n${read.text}${links}`;
       },
     ),
     add_source: tool(
@@ -223,7 +232,7 @@ function brief(build: AgentBuild, sources: StudySource[], absolute: (url: string
     browser
       ? "- A real Chrome browser (browser_* tools) shared with the student's other agents; its sign-ins persist. If a page wants a password, 2FA or a CAPTCHA, skip it — the student isn't watching this run — and say which source needed a sign-in in your final sentence."
       : "- No browser this time (Chrome isn't available on the host); use web search and the Schoology tools.",
-    "- schoology_materials and schoology_read: this class's Schoology Materials and files, through Slates' own signed-in Schoology session (no browser sign-in needed).",
+    "- schoology_materials and schoology_read: this class's Schoology Materials (folders, files, Pages, link views, Google Docs and Slides posted by link), through Slates' own signed-in Schoology session. Use these rather than the browser for anything on Schoology: the browser isn't signed in to Schoology.",
     "- slates_board: the student's classes, grades and assignments. list_skills / get_skill: the student's saved instructions; check for one about study guides.",
     "- add_source to cite outside pages, and save_study_set to hand in the finished set.",
     "",
@@ -237,7 +246,7 @@ function brief(build: AgentBuild, sources: StudySource[], absolute: (url: string
     "",
     "YOUR JOB",
     "1. Read the sources and work out what the test covers.",
-    "2. Get what's missing. Open the unread links in the browser (Google Docs, Slides, videos, Quizlet sets). If the unit looks incomplete, look through the class's Materials with schoology_materials and read what's relevant with schoology_read. Use the web only where the class material is thin, prefer reputable sources (textbooks, universities, Khan Academy, OpenStax), and add_source every outside page you use. Spend at most about ten minutes gathering.",
+    "2. Get what's missing. Look through the unit's folders with schoology_materials (its subfolders too: slides, resources, agendas) and read what's relevant with schoology_read — that includes Google Docs and Slides posted by link. Use the browser for outside sites schoology_read can't read (videos, Quizlet sets, Google files that need a sign-in). Use the web only where the class material is thin, prefer reputable sources (textbooks, universities, Khan Academy, OpenStax), and add_source every outside page you use. Spend at most about ten minutes gathering.",
     "3. Write the set from all of it and call save_study_set. If it reports problems, fix them and call it again.",
     "",
     GROUNDING,

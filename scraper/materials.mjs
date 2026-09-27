@@ -190,6 +190,57 @@ export async function resolveDocument(ctx, { domain, path }) {
   }
 }
 
+/**
+ * Read a Schoology page a file resolver can't: a Page the teacher wrote
+ * (`/page/<id>`, or one inside a course), or a link view
+ * (`/course/<c>/materials/link/view/<id>`) that wraps an outside site.
+ *
+ * Returns the page's own words plus where it points — outside links unwrapped
+ * from Schoology's /link redirect, and any attached files — so a caller can
+ * follow a link view to the Google Doc behind it.
+ */
+const READABLE_PAGE = /^\/(?:page\/\d+|course\/\d+\/materials\/(?:link\/view|page)\/\d+)(?:[/?#].*)?$/;
+
+export async function readPage(ctx, { domain, path }) {
+  if (!READABLE_PAGE.test(path ?? "")) throw new Error("That isn't a Schoology page Slates can read.");
+
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`https://${domain}${path}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForTimeout(1200);
+    return await page.evaluate(() => {
+      const clean = (s) => (s || "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+      // The biggest block of the page that isn't navigation is the teacher's content.
+      const candidates = [...document.querySelectorAll("#main-inner, #content-wrapper, .s-page-content, .content-wrapper, main")];
+      const root = candidates.sort((a, b) => b.innerText.length - a.innerText.length)[0] || document.body;
+      const unwrap = (href) => {
+        try {
+          const url = new URL(href, location.origin);
+          if (url.pathname === "/link" && url.searchParams.get("path")) return url.searchParams.get("path");
+          return url.href;
+        } catch {
+          return "";
+        }
+      };
+      const links = [
+        ...[...root.querySelectorAll("a[href]")].map((a) => ({ title: clean(a.textContent).slice(0, 200), url: unwrap(a.getAttribute("href")) })),
+        ...[...root.querySelectorAll("iframe[src]")].map((frame) => ({ title: frame.getAttribute("title") || "Embedded page", url: unwrap(frame.getAttribute("src")) })),
+      ].filter((link) => /^https?:/.test(link.url) && !/\/docviewer|javascript:/.test(link.url));
+      const files = [...document.querySelectorAll("a[href]")]
+        .map((a) => a.getAttribute("href") || "")
+        .filter((href) => /\/attachment\/\d+\/source\//.test(href));
+      return {
+        title: clean(document.querySelector("h2.page-title, .page-title, h1")?.textContent || document.title),
+        text: clean(root.innerText).slice(0, 40_000),
+        links: links.slice(0, 40),
+        files: [...new Set(files)].slice(0, 20),
+      };
+    });
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 /** Content types worth rendering in the app rather than handing to a browser. */
 const INLINE = {
   pdf: "application/pdf",
