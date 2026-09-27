@@ -3,7 +3,6 @@ import { z } from "zod";
 import { aiSignals } from "@/lib/counselor/ai-signals";
 import { countWords } from "@/lib/counselor/ai-signals";
 import { detect } from "@/lib/counselor/detector";
-import { hasSecret } from "@/lib/ai-usage/clients";
 import { essayObject } from "@/lib/counselor/essay-model";
 import { lineReview, sentenceCheck } from "@/lib/counselor/line-review";
 import { ESSAY_KIND_LABEL, RUBRICS } from "@/lib/counselor/rubric";
@@ -20,7 +19,7 @@ import type { EssayFeedback, EssayKind, EssayReport, Rubric } from "@/lib/counse
  * them run and the other two forgotten — and a 17/25 means something different
  * once you know a paragraph reads as generated.
  *
- * The two model passes run on GPT-5.6 Terra (lib/counselor/essay-model.ts).
+ * The two model passes run on Claude Opus 5.5 (lib/counselor/essay-model.ts).
  * Detection is a local model, MELD, and makes no network call at all
  * (lib/counselor/detector.ts) — an unpublished personal statement is not
  * something to post to a detector website, and the check keeps working when
@@ -95,13 +94,6 @@ export async function POST(req: Request) {
     } catch (err) {
       return Response.json({ error: message(err) }, { status: 502 });
     }
-  }
-
-  if (!hasSecret("openai")) {
-    return Response.json(
-      { error: "No OpenAI key. Link one in AI Usage, or add OPENAI_API_KEY to .env and restart." },
-      { status: 500 }
-    );
   }
 
   const content = body?.content?.trim();

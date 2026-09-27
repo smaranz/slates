@@ -1,6 +1,8 @@
-import { openaiModel, hasSecret } from "@/lib/ai-usage/clients";
 import { noteFromUsage } from "@/lib/ai-usage/note";
-import { generateObject, NoObjectGeneratedError } from "ai";
+import { extractText } from "@/lib/attachment-text";
+import { claudeLoginProblem, ESSAY_MODEL } from "@/lib/counselor/essay-model";
+import { generateText, NoObjectGeneratedError, NoOutputGeneratedError, Output } from "ai";
+import { claudeCode } from "ai-sdk-provider-claude-code";
 import { z } from "zod";
 
 /**
@@ -70,13 +72,6 @@ const READABLE = new Set([
 ]);
 
 export async function POST(req: Request) {
-  if (!hasSecret("openai")) {
-    return Response.json(
-      { error: "No OpenAI key. Link one in AI Usage, or add OPENAI_API_KEY to .env and restart." },
-      { status: 500 }
-    );
-  }
-
   const type = (req.headers.get("content-type") ?? "").split(";")[0].trim();
   if (!READABLE.has(type)) {
     return Response.json(
@@ -106,43 +101,57 @@ export async function POST(req: Request) {
   ].join("\n");
 
   /*
-   * Text files go in as text rather than as an image: the model reads a typed
-   * rubric more reliably from characters than from a picture of characters,
-   * and it costs a fraction as much.
+   * Text files and PDFs go in as text rather than as an image: the model reads
+   * a typed rubric more reliably from characters than from a picture of
+   * characters, and Claude Code takes images but not PDF attachments. A PDF
+   * with no text layer is a scan, and a photo of it reads better.
    */
-  const isText = type.startsWith("text/");
+  let text: string | null = null;
+  if (type.startsWith("text/")) text = new TextDecoder().decode(bytes).slice(0, 40_000);
+  else if (type === "application/pdf") {
+    try {
+      text = await extractText(bytes, "pdf", { chars: 40_000, pages: 20 });
+    } catch (err) {
+      const why = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      return Response.json({ error: `Slates couldn't read that PDF (${why}). A photo of the page works too.` }, { status: 422 });
+    }
+    if (!text.trim()) {
+      return Response.json(
+        { error: "That PDF has no readable text, so it's probably a scan. Take a photo of the page instead." },
+        { status: 422 }
+      );
+    }
+  }
 
   try {
-    const result = await generateObject({
-      model: openaiModel("gpt-5.6-terra"),
-      schema: RUBRIC,
+    const result = await generateText({
+      model: claudeCode(ESSAY_MODEL),
+      output: Output.object({ schema: RUBRIC }),
       system,
-      maxOutputTokens: 4_000,
-      providerOptions: { openai: { reasoningEffort: "medium" } },
+      providerOptions: { "claude-code": { effort: "medium" } },
       messages: [
         {
           role: "user",
-          content: isText
+          content: text !== null
             ? [
                 { type: "text", text: "The rubric:" },
-                { type: "text", text: new TextDecoder().decode(bytes).slice(0, 40_000) },
+                { type: "text", text },
               ]
             : [
-                { type: "text", text: "Read the rubric in this document." },
+                { type: "text", text: "Read the rubric in this image." },
                 { type: "file", data: new Uint8Array(bytes), mediaType: type },
               ],
         },
       ],
     });
-    noteFromUsage("rubric", "gpt-5.6-terra", "openai", result.usage);
+    noteFromUsage("rubric", ESSAY_MODEL, "claude-code", result.usage);
 
-    return Response.json({ rubric: result.object });
+    return Response.json({ rubric: result.output });
   } catch (err) {
-    if (NoObjectGeneratedError.isInstance(err)) {
-      console.error(
-        `[rubric] unparseable reply (finish: ${err.finishReason ?? "?"}, out: ${err.usage?.outputTokens ?? "?"} tokens)`
-      );
-      if (err.usage) noteFromUsage("rubric", "gpt-5.6-terra", "openai", err.usage);
+    const login = claudeLoginProblem(err, "Reading a rubric");
+    if (login) return Response.json({ error: login.message }, { status: 502 });
+    if (NoObjectGeneratedError.isInstance(err) || NoOutputGeneratedError.isInstance(err)) {
+      console.error(`[rubric] unreadable reply: ${err.message.split("\n")[0]}`);
       return Response.json(
         { error: "The model couldn't turn that into a rubric. A clearer photo of the page usually fixes it." },
         { status: 502 }

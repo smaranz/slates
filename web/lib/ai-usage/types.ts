@@ -188,8 +188,8 @@ export const AGENT_LABEL: Record<UsageAgent, string> = {
 export const AGENT_PROVIDERS: Record<UsageAgent, UsageProvider[]> = {
   tutor: ["openai", "claude-code", "openrouter", "cursor"],
   counselor: ["openai", "openrouter"],
-  essay: ["openai"],
-  rubric: ["openai"],
+  essay: ["claude-code"],
+  rubric: ["claude-code"],
   plan: ["openai", "openrouter"],
   study: ["claude-code", "cursor"],
   estimate: ["openai"],
