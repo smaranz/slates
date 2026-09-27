@@ -128,14 +128,20 @@ export function googleExport(url: string): string | null {
   return drive ? `https://drive.google.com/uc?export=download&id=${drive[1]}` : null;
 }
 
-/** A Google file the teacher shared by link. One that's restricted to the school needs a sign-in, which only the agent's browser can do. */
+/**
+ * A Google file the class posted. Most are shared only inside the school, so
+ * it's read through the sync service first: its browser signs in to Schoology
+ * with the school Google account, and reads what the student can. A file
+ * shared publicly still works when the sync service is down.
+ */
 async function readGoogle(url: string): Promise<string> {
   const target = googleExport(url);
   if (!target) throw new Error("Only Google Docs, Slides, Sheets and Drive files can be read directly. Open other sites in the browser.");
-  const response = await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  const viaSession = await fetch(`${SCRAPER_URL}/google/file?url=${encodeURIComponent(target)}`, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
+  const response = viaSession?.ok ? viaSession : await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
   const type = response.headers.get("content-type") ?? "";
   if (!response.ok || type.includes("text/html")) {
-    throw new Error("That Google file isn't shared by link, so it needs a sign-in. The study agent can try it in its browser.");
+    throw new Error("That Google file needs a sign-in Slates doesn't have. The study agent can try it in its browser.");
   }
   if (type.startsWith("text/")) return (await response.text()).replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, PER_DOC.chars);
   const ext = type.includes("pdf") ? "pdf" : type.includes("wordprocessingml") ? "docx" : type.includes("presentationml") ? "pptx" : "";

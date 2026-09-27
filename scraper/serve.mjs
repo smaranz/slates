@@ -12,7 +12,7 @@ import { readConfig, HOME } from "./browser.mjs";
 import * as attempt from "./attempt.mjs";
 import { submitAssignment } from "./submit.mjs";
 import { composeMessage, replyToThread, searchRecipients } from "./message.mjs";
-import { readMaterials, resolveDocument, fetchAttachment, inlineTypeFor, readPage } from "./materials.mjs";
+import { readMaterials, resolveDocument, fetchAttachment, inlineTypeFor, readPage, fetchGoogleFile } from "./materials.mjs";
 import { readReview } from "./review.mjs";
 
 /**
@@ -460,6 +460,18 @@ const server = http.createServer(async (req, res) => {
     try {
       const { domain } = readConfig();
       return send(res, 200, await readPage(await getSharedContext(true), { domain, path: url.searchParams.get("path") ?? "" }));
+    } catch (e) {
+      return send(res, 500, { error: e.message });
+    }
+  }
+
+  /* ---- a Google file the class shared inside the school, read as the student ---- */
+
+  if (url.pathname === "/google/file") {
+    try {
+      const file = await fetchGoogleFile(await getSharedContext(true), { url: url.searchParams.get("url") ?? "" });
+      res.writeHead(200, { "content-type": file.contentType, "content-length": file.body.length, "cache-control": "no-store" });
+      return res.end(file.body);
     } catch (e) {
       return send(res, 500, { error: e.message });
     }

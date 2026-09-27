@@ -241,6 +241,27 @@ export async function readPage(ctx, { domain, path }) {
   }
 }
 
+/**
+ * Download a Google Doc, Slides deck, Sheet or Drive file as the student.
+ *
+ * Teachers post these in Schoology shared only inside the school, so an
+ * anonymous request gets a sign-in page. This browser signs in to Schoology
+ * through the school's Google account, so its request client carries that
+ * Google session and reads what the student can read. Only Google's own
+ * export and download links are accepted — this is not a general proxy.
+ */
+const GOOGLE_FILE =
+  /^https:\/\/(?:docs\.google\.com\/(?:document|presentation|spreadsheets)\/d\/[\w-]{20,}\/export(?:\/txt|\?format=(?:txt|csv|pdf))|drive\.google\.com\/uc\?export=download&id=[\w-]{20,})$/;
+
+export async function fetchGoogleFile(ctx, { url }) {
+  if (!GOOGLE_FILE.test(url ?? "")) throw new Error("Only Google Docs, Slides, Sheets and Drive export links can be fetched.");
+  const res = await ctx.request.get(url, { timeout: 60_000, maxRedirects: 10 });
+  const contentType = res.headers()["content-type"] ?? "application/octet-stream";
+  if (!res.ok()) throw new Error(`Google returned ${res.status()} for that file.`);
+  if (contentType.includes("text/html")) throw new Error("Google wants a sign-in for that file that this browser doesn't have.");
+  return { body: await res.body(), contentType };
+}
+
 /** Content types worth rendering in the app rather than handing to a browser. */
 const INLINE = {
   pdf: "application/pdf",

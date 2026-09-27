@@ -42,6 +42,7 @@ const MATERIALS: Record<string, { kind: string; title: string; url: string; fold
     { kind: "document", title: "Forces lecture slides", url: "/course/7/materials/gp/222", folderId: null },
     { kind: "document", title: "PhET forces simulation", url: "/link?a=&path=https%3A%2F%2Fphet.colorado.edu%2Fen%2Fsimulations%2Fforces&nid=5", folderId: null },
     { kind: "document", title: "Forces review video", url: "/course/7/materials/link/view/224", folderId: null },
+    { kind: "document", title: "Forces slides (Google)", url: "/link?a=&path=https%3A%2F%2Fdocs.google.com%2Fpresentation%2Fd%2F1E7hR_Pd5XN2Ctl548ukMOJgZikUGAaPHN_kiN7IauPk%2Fedit&nid=9", folderId: null },
   ],
   "23": [{ kind: "assignment", title: "HW: Free-body diagrams", url: "/assignment/102", folderId: null }],
 };
@@ -67,6 +68,12 @@ const setup = (async () => {
     if (url.pathname === "/course/page") {
       const page = PAGES[url.searchParams.get("path") ?? ""];
       return page ? json(page) : json({ error: "not a page" }, 500);
+    }
+    if (url.pathname === "/google/file") {
+      // Stands in for a school-only Google file, read through the sync service's signed-in browser.
+      if (url.searchParams.get("url") !== "https://docs.google.com/presentation/d/1E7hR_Pd5XN2Ctl548ukMOJgZikUGAaPHN_kiN7IauPk/export/txt") return json({ error: "not allowed" }, 500);
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      return res.end("Slide deck: Newton's first law, inertia, and net force.");
     }
     if (url.pathname === "/course/document") {
       const id = url.searchParams.get("path")!.split("/").pop();
@@ -119,6 +126,10 @@ test("opens every subfolder of the matching unit, reads files, Pages and link vi
   assert.match(found.texts.get(source("Forces lecture slides").n)!, /Slide 1: Newton's second law: F = ma/);
   assert.match(found.texts.get(source("Forces review video").n)!, /net force and free-body diagrams/);
   assert.match(found.texts.get(source("Daily Agenda M 9/14").n)!, /third law pair/);
+  const google = source("Forces slides (Google)");
+  assert.ok(google.read, "school-only Google file read through the sync service");
+  assert.equal(google.url, "https://docs.google.com/presentation/d/1E7hR_Pd5XN2Ctl548ukMOJgZikUGAaPHN_kiN7IauPk/edit");
+  assert.match(found.texts.get(google.n)!, /inertia, and net force/);
   const phet = source("PhET forces simulation");
   assert.equal(phet.read, false);
   assert.equal(phet.url, "https://phet.colorado.edu/en/simulations/forces");

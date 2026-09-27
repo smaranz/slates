@@ -9,7 +9,18 @@ import { SET_MODEL, writeRound, writeSet, type WrittenSet } from "./write";
  * the page doesn't cancel them; the set on disk says where each one is.
  */
 
-const running = new Map<string, Promise<void>>();
+/*
+ * On globalThis because Next bundles each route on its own: the route that
+ * starts a build and the one that reads it would otherwise each see their own
+ * empty map, and a live build would look abandoned.
+ */
+const running: Map<string, Promise<void>> = ((globalThis as typeof globalThis & { __slatesStudyRunning?: Map<string, Promise<void>> }).__slatesStudyRunning ??= new Map());
+
+/** Keeps a working set's updatedAt fresh while the agent is quiet (writing, thinking), so it never reads as stale. */
+function heartbeat(id: string): () => void {
+  const timer = setInterval(() => void updateSet(id, (current) => ({ ...current })), 60_000);
+  return () => clearInterval(timer);
+}
 /**
  * A set that says it's building but has had no word for this long was cut off
  * by a restart. The study agent reports every step, so a long quiet stretch
@@ -46,6 +57,7 @@ export async function startBuild(request: BuildRequest): Promise<StudySet> {
   });
 
   const job = (async () => {
+    const stopBeat = heartbeat(target.id);
     try {
       const found = await gather(request, (step) => void updateSet(target.id, (current) => ({ ...current, step })));
       const material = [...found.texts].map(([n, text]) => ({ n, title: found.sources[n - 1]!.title, text }));
@@ -61,6 +73,8 @@ export async function startBuild(request: BuildRequest): Promise<StudySet> {
       await research(request, found.sources, material, found.notice);
     } catch (error) {
       await updateSet(target.id, (current) => ({ ...current, status: "failed", step: "", error: messageOf(error) }));
+    } finally {
+      stopBeat();
     }
   })().finally(() => running.delete(target.id));
   running.set(target.id, job);
