@@ -255,11 +255,34 @@ const GOOGLE_FILE =
 
 export async function fetchGoogleFile(ctx, { url }) {
   if (!GOOGLE_FILE.test(url ?? "")) throw new Error("Only Google Docs, Slides, Sheets and Drive export links can be fetched.");
-  const res = await ctx.request.get(url, { timeout: 60_000, maxRedirects: 10 });
+  const download = () => ctx.request.get(url, { timeout: 60_000, maxRedirects: 10 });
+  let res = await download();
+  if (!res.ok() || (res.headers()["content-type"] ?? "").includes("text/html")) {
+    // Google gives docs.google.com its own cookies only on a real visit, so open
+    // the file once in a tab and let the school sign-in carry over, then retry.
+    const page = await ctx.newPage();
+    try {
+      await page.goto(viewUrlFor(url), { waitUntil: "domcontentloaded", timeout: 45_000 });
+      await page.waitForTimeout(2500);
+      if (/accounts\.google\.com/.test(page.url())) {
+        throw new Error("The sync browser isn't signed in to your school Google account, so school-only Google files can't be read.");
+      }
+    } finally {
+      await page.close().catch(() => {});
+    }
+    res = await download();
+  }
   const contentType = res.headers()["content-type"] ?? "application/octet-stream";
   if (!res.ok()) throw new Error(`Google returned ${res.status()} for that file.`);
   if (contentType.includes("text/html")) throw new Error("Google wants a sign-in for that file that this browser doesn't have.");
   return { body: await res.body(), contentType };
+}
+
+/** The page a person would open for an export link, which is what sets up Google's session for it. */
+function viewUrlFor(url) {
+  const doc = /docs\.google\.com\/(document|presentation|spreadsheets)\/d\/([\w-]+)/.exec(url);
+  if (doc) return `https://docs.google.com/${doc[1]}/d/${doc[2]}/edit`;
+  return `https://drive.google.com/file/d/${/[?&]id=([\w-]+)/.exec(url)?.[1] ?? ""}/view`;
 }
 
 /** Content types worth rendering in the app rather than handing to a browser. */
