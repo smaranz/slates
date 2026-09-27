@@ -32,7 +32,7 @@ Scanned PDFs (no text layer, or only a scanner app's stamp) and photos are read 
 
 ## Schoology updates
 
-Teachers' posts to their classes are read by `scraper/updates.mjs` from `/home/feed?page=N` (JSON wrapping the feed's markup) through the sync browser's session, with full text from each post's "Show More" link cached in `~/.slates/update-bodies.json`. Schoology answers a burst of requests with 429, so they're spaced out, and a sync whose first page holds nothing new reuses the last read. Posts land in the snapshot as `updates`, matched to a class by the course page id in its `url`. School shows them in `web/components/UpdatesView.tsx`; `web/lib/updates.ts` keeps what counts as new (`npx tsx --test lib/updates.test.ts`).
+Teachers' posts to their classes are read by `scraper/updates.mjs` from `/home/feed?page=N` (JSON wrapping the feed's markup) through the sync browser's session, with full text from each post's "Show More" link cached in `~/.slates/update-bodies.json`. Schoology answers a burst of requests with 429, so they're spaced out, and a sync whose first page holds nothing new reuses the last read. Posts land in the snapshot as `updates`, matched to a class by the course page id in its `url`. School shows them in the Updates feed and, the way Schoology files them, on each class's page, whose menu (Materials, Updates, Grades) lives in `web/components/ClassesView.tsx`. `web/lib/updates.ts` keeps what counts as new: a baseline the feed moves, plus the ids a class page has shown (`npx tsx --test lib/updates.test.ts`).
 
 ## Working here
 

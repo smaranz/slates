@@ -43,8 +43,8 @@ export default function MobileNav() {
     () => s.snapshot.messages.filter((m) => m.unread && !s.msgRead[m.id]).length,
     [s.msgRead, s.snapshot.messages]
   );
-  const [updatesSeenAt] = useUpdatesSeen();
-  const newUpdates = unseenCount(s.snapshot.updates, updatesSeenAt);
+  const { seen: updatesSeen } = useUpdatesSeen();
+  const newUpdates = unseenCount(s.snapshot.updates, updatesSeen);
   const moreActive = SECONDARY.some((item) => item.view === s.view);
 
   useEffect(() => {

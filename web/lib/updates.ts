@@ -6,7 +6,21 @@ import type { Update } from "./types";
 
 /* ── what counts as new ────────────────────────────────────────────────── */
 
-const SEEN_KEY = "slates.updates.seenAt.v1";
+/**
+ * Everything up to `baseline` has been seen, and so have the posts in `ids`
+ * after it. Posts are read either all at once in the Updates feed, which moves
+ * the baseline, or one class at a time on its page, which adds their ids — so
+ * reading Spanish's posts doesn't also clear History's.
+ */
+export interface Seen {
+  baseline: number;
+  ids: string[];
+}
+
+const SEEN_KEY = "slates.updates.seen.v2";
+/** Just a timestamp: what the first version kept. */
+const OLD_KEY = "slates.updates.seenAt.v1";
+const MAX_IDS = 400;
 
 /**
  * Until Updates has been opened once, only the last week counts as new, so the
@@ -26,37 +40,65 @@ function subscribe(onChange: () => void) {
   };
 }
 
-function readSeen(): string | null {
+function readRaw(): string | null {
   try {
-    return window.localStorage.getItem(SEEN_KEY);
+    const raw = window.localStorage.getItem(SEEN_KEY);
+    if (raw !== null) return raw;
+    const old = Number(window.localStorage.getItem(OLD_KEY));
+    return old ? JSON.stringify({ baseline: old, ids: [] }) : null;
   } catch {
     return null;
   }
 }
 
-/** When you last looked, and a way to move that forward to the newest post you've now seen. */
-export function useUpdatesSeen(): [number, (upTo: number) => void] {
-  const raw = useSyncExternalStore(subscribe, readSeen, () => null);
-  const seenAt = useMemo(() => {
-    const n = raw === null ? NaN : Number(raw);
-    return Number.isFinite(n) ? n : FIRST_RUN;
-  }, [raw]);
-
-  const markSeen = useCallback((upTo: number) => {
-    try {
-      if (upTo <= (Number(window.localStorage.getItem(SEEN_KEY)) || 0)) return;
-      window.localStorage.setItem(SEEN_KEY, String(upTo));
-    } catch {
-      /* storage blocked — the badge comes back next load */
-    }
-    listeners.forEach((fn) => fn());
-  }, []);
-
-  return [seenAt, markSeen];
+export function parseSeen(raw: string | null): Seen {
+  try {
+    const value = raw ? (JSON.parse(raw) as Partial<Seen>) : null;
+    return {
+      baseline: typeof value?.baseline === "number" && Number.isFinite(value.baseline) ? value.baseline : FIRST_RUN,
+      ids: Array.isArray(value?.ids) ? value.ids.filter((id): id is string => typeof id === "string") : [],
+    };
+  } catch {
+    return { baseline: FIRST_RUN, ids: [] };
+  }
 }
 
-export function unseenCount(updates: Update[] | undefined, seenAt: number): number {
-  return (updates ?? []).filter((u) => u.at > seenAt).length;
+function write(update: (seen: Seen) => Seen) {
+  try {
+    const next = update(parseSeen(readRaw()));
+    window.localStorage.setItem(SEEN_KEY, JSON.stringify({ baseline: next.baseline, ids: next.ids.slice(-MAX_IDS) }));
+  } catch {
+    /* storage blocked — the badge comes back next load */
+  }
+  listeners.forEach((fn) => fn());
+}
+
+export function isUnseen(u: Update, seen: Seen): boolean {
+  return u.at > seen.baseline && !seen.ids.includes(u.id);
+}
+
+export function unseenCount(updates: Update[] | undefined, seen: Seen): number {
+  return (updates ?? []).filter((u) => isUnseen(u, seen)).length;
+}
+
+export function useUpdatesSeen() {
+  const raw = useSyncExternalStore(subscribe, readRaw, () => null);
+  const seen = useMemo(() => parseSeen(raw), [raw]);
+
+  /** Read all of them: nothing up to the newest post is new any more. */
+  const markAllSeen = useCallback((newest: number) => {
+    write((prev) => (newest > prev.baseline ? { baseline: newest, ids: [] } : prev));
+  }, []);
+
+  /** Read these, and only these. */
+  const markSeen = useCallback((posts: Update[]) => {
+    write((prev) => {
+      const fresh = posts.filter((u) => isUnseen(u, prev)).map((u) => u.id);
+      return fresh.length ? { ...prev, ids: [...prev.ids, ...fresh] } : prev;
+    });
+  }, []);
+
+  return { seen, markAllSeen, markSeen };
 }
 
 /* ── where a post came from ────────────────────────────────────────────── */
@@ -114,17 +156,24 @@ export function byDay(updates: Update[], now = new Date()): { label: string; ite
   return out;
 }
 
-/* ── opening Updates on one class ──────────────────────────────────────── */
+/* ── opening a class on its Updates ────────────────────────────────────── */
 
-let pendingFilter: string | null = null;
+/*
+ * Read by the class page as it mounts and cleared once it has, rather than
+ * taken in one go: React may run a state initializer twice, and a one-shot
+ * read would lose the second time round.
+ */
+let openOnUpdatesFor: string | null = null;
 
-/** Set before switching to Updates, so it opens on that class. */
-export function filterUpdatesNext(key: string) {
-  pendingFilter = key;
+/** Set before opening a class from the feed, so its page opens on Updates rather than Materials. */
+export function openClassOnUpdatesNext(courseId: string) {
+  openOnUpdatesFor = courseId;
 }
 
-export function takeUpdatesFilter(): string | null {
-  const key = pendingFilter;
-  pendingFilter = null;
-  return key;
+export function opensOnUpdates(courseId: string): boolean {
+  return openOnUpdatesFor === courseId;
+}
+
+export function clearOpenOnUpdates() {
+  openOnUpdatesFor = null;
 }

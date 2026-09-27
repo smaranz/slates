@@ -25,7 +25,7 @@ export default function Sidebar() {
   // empty — the two halves keep separate essays.
   const essayCount = useCounselor().essays.filter(inScope("school")).length;
   const { clear, openSettings } = useMode();
-  const [updatesSeenAt] = useUpdatesSeen();
+  const { seen: updatesSeen } = useUpdatesSeen();
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
@@ -51,10 +51,10 @@ export default function Sidebar() {
       { label: "Tutor", path: ICON.tutor, view: "tutor", count: 0 },
       { label: "Study", path: ICON.bands, view: "study", count: 0 },
       { label: "Essays", path: ICON.essay, view: "essays", count: essayCount },
-      { label: "Updates", path: ICON.updates, view: "updates", count: unseenCount(s.snapshot.updates, updatesSeenAt) },
+      { label: "Updates", path: ICON.updates, view: "updates", count: unseenCount(s.snapshot.updates, updatesSeen) },
       { label: "Messages", path: ICON.messages, view: "messages", count: unread },
     ];
-  }, [s, essayCount, updatesSeenAt]);
+  }, [s, essayCount, updatesSeen]);
 
   return (
     <aside

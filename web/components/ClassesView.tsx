@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
+import { clearOpenOnUpdates, opensOnUpdates, unseenCount, useUpdatesSeen } from "@/lib/updates";
+import CourseView from "./CourseView";
 import DocumentViewer from "./DocumentViewer";
-import { UpdatesPeek } from "./UpdatesView";
+import { ClassUpdates } from "./UpdatesView";
 import { Badge, ClockIcon, Dot, Icon, ICON, Spinner } from "./ui";
 
 /**
@@ -26,6 +28,7 @@ export default function ClassesView() {
 function ClassList() {
   const s = useStore();
   const courses = s.snapshot.courses;
+  const { seen } = useUpdatesSeen();
 
   return (
     <div className="scroll">
@@ -43,6 +46,7 @@ function ClassList() {
           const next = open
             .filter((a) => a.dateOffset !== null)
             .sort((x, y) => (x.dateOffset ?? 0) - (y.dateOffset ?? 0))[0];
+          const newPosts = unseenCount(s.snapshot.updates?.filter((u) => u.courseId === c.id), seen);
 
           return (
             <button
@@ -83,6 +87,12 @@ function ClassList() {
                   >
                     <ClockIcon />
                     Next: {next.title.length > 46 ? `${next.title.slice(0, 45)}…` : next.title}
+                  </span>
+                )}
+                {newPosts > 0 && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: NEW_TONE }}>
+                    <Icon path={ICON.updates} size={12} />
+                    {newPosts === 1 ? "1 new update" : `${newPosts} new updates`}
                   </span>
                 )}
               </span>
@@ -126,6 +136,11 @@ interface Crumb {
   title: string;
 }
 
+/** The blue Slates marks unread with, as on Messages. */
+const NEW_TONE = "oklch(0.72 0.16 250)";
+
+type Section = "materials" | "updates" | "grades";
+
 const KIND_LABEL: Record<string, string> = {
   folder: "Folder",
   document: "File",
@@ -146,6 +161,10 @@ function ClassDetail() {
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<OpenFile | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [section, setSection] = useState<Section>(() => (courseId && opensOnUpdates(courseId) ? "updates" : "materials"));
+  const { seen } = useUpdatesSeen();
+
+  useEffect(() => clearOpenOnUpdates(), []);
 
   const here = trail[trail.length - 1];
   const folderId = here.folderId;
@@ -225,33 +244,138 @@ function ClassDetail() {
   };
 
   if (!course) return null;
-  if (file) {
-    return (
-      <FileViewer
-        file={file}
-        domain={s.snapshot.domain}
-        trail={trail}
-        /* The top bar already owns the only Back button on screen; in here the
-           trail is what walks you out, exactly as it does in a folder. */
-        onCrumb={(i) => {
-          setFile(null);
-          setTrail((prev) => prev.slice(0, i + 1));
-        }}
-      />
-    );
-  }
 
+  const posts = (s.snapshot.updates ?? []).filter((u) => u.courseId === course.id);
+  const newPosts = unseenCount(posts, seen);
+  const graded = !!course.grade || (s.snapshot.gradebook[course.id]?.length ?? 0) > 0;
+
+  /*
+   * The class's own menu down the side, the way Schoology lays a course out:
+   * Materials, Updates and Grades are three views of one class, so they sit
+   * together here rather than in three different parts of Slates.
+   */
+  return (
+    <div className="class-page">
+      <nav className="class-menu" aria-label={course.name}>
+        <MenuItem
+          icon={ICON.folder}
+          label="Materials"
+          on={section === "materials"}
+          onClick={() => {
+            // Materials again from inside Materials is the way back to its top.
+            if (section === "materials") {
+              setFile(null);
+              setTrail((prev) => prev.slice(0, 1));
+            }
+            setSection("materials");
+          }}
+        />
+        <MenuItem
+          icon={ICON.updates}
+          label="Updates"
+          on={section === "updates"}
+          onClick={() => setSection("updates")}
+          aside={newPosts ? `${newPosts} new` : posts.length ? String(posts.length) : ""}
+          fresh={newPosts > 0}
+        />
+        {graded && (
+          <MenuItem icon={ICON.grades} label="Grades" on={section === "grades"} onClick={() => setSection("grades")} aside={course.grade} />
+        )}
+        {course.period && (
+          <div className="class-menu-info">
+            <span className="section-label">Information</span>
+            <span>{course.period}</span>
+          </div>
+        )}
+      </nav>
+
+      <div className="class-pane">
+        {section === "updates" ? (
+          <ClassUpdates courseId={course.id} />
+        ) : section === "grades" ? (
+          <CourseView />
+        ) : file ? (
+          <FileViewer
+            file={file}
+            domain={s.snapshot.domain}
+            trail={trail}
+            /* The top bar already owns the only Back button on screen; in here the
+               trail is what walks you out, exactly as it does in a folder. */
+            onCrumb={(i) => {
+              setFile(null);
+              setTrail((prev) => prev.slice(0, i + 1));
+            }}
+          />
+        ) : (
+          <MaterialsList
+            course={course}
+            trail={trail}
+            onCrumb={(i) => setTrail((prev) => prev.slice(0, i + 1))}
+            items={items}
+            loading={loading}
+            error={error}
+            opening={opening}
+            known={known}
+            onOpen={(item) => void openItem(item)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  on,
+  onClick,
+  aside,
+  fresh = false,
+}: {
+  icon: string;
+  label: string;
+  on: boolean;
+  onClick: () => void;
+  aside?: string;
+  fresh?: boolean;
+}) {
+  return (
+    <button type="button" className="class-menu-item" aria-current={on ? "page" : undefined} onClick={onClick}>
+      <Icon path={icon} size={15} />
+      <span className="truncate">{label}</span>
+      {aside && <span className="class-menu-aside" style={fresh ? { color: NEW_TONE, fontWeight: 600 } : undefined}>{aside}</span>}
+    </button>
+  );
+}
+
+function MaterialsList({
+  course,
+  trail,
+  onCrumb,
+  items,
+  loading,
+  error,
+  opening,
+  known,
+  onOpen,
+}: {
+  course: { dot: string };
+  trail: Crumb[];
+  onCrumb: (index: number) => void;
+  items: Material[];
+  loading: boolean;
+  error: string | null;
+  opening: string | null;
+  known: (item: Material) => { id: string } | undefined;
+  onOpen: (item: Material) => void;
+}) {
   return (
     <div className="scroll">
       <div className="col" style={{ gap: 14 }}>
-        {trail.length === 1 && <UpdatesPeek courseId={course.id} />}
-
         {/* The top bar already carries the class name, colour and the way out,
             so this row is the trail through the folders instead. */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Trail trail={trail} onCrumb={(i) => setTrail((prev) => prev.slice(0, i + 1))} />
-          <span style={{ flex: 1 }} />
-          {course.period && <span style={{ fontSize: 12, color: "var(--faint)" }}>{course.period}</span>}
+          <Trail trail={trail} onCrumb={onCrumb} />
         </div>
 
         {loading && (
@@ -275,7 +399,7 @@ function ClassDetail() {
                 key={item.url}
                 type="button"
                 className="palette-row"
-                onClick={() => void openItem(item)}
+                onClick={() => onOpen(item)}
                 style={{
                   border: "1px solid var(--line)",
                   background: "var(--surface)",
