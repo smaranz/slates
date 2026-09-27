@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { AccountCapacity, CapacitySnapshot } from "@/lib/ai-usage/coding/capacity";
 import { TOOL_LABEL } from "@/lib/ai-usage/coding/types";
+import { usageFetch } from "@/lib/desktop-bridge";
 import { Spinner } from "../ui";
 import { TOOL_COLOR, ToolMark, tokens, usd } from "./UsageApp";
 
@@ -33,7 +34,7 @@ function AccountRow({ a, onMeasured }: { a: AccountCapacity; onMeasured: () => v
     setMeasuring(true);
     setMeasureError(null);
     try {
-      const res = await fetch("/api/usage/coding", {
+      const res = await usageFetch("/api/usage/coding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "calibrate", homeId: a.measureHomeId }),
@@ -150,7 +151,7 @@ export default function CapacityView({ refreshToken }: { refreshToken: number })
     let alive = true;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch("/api/usage/coding?view=capacity");
+        const res = await usageFetch("/api/usage/coding?view=capacity");
         if (!res.ok) throw new Error("Couldn't size your plans.");
         const next = (await res.json()) as CapacitySnapshot;
         if (alive) {

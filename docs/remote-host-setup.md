@@ -165,8 +165,11 @@ portal when the commit changed. Only what's pushed reaches the host.
 - Your marks, tutor chats and counselor record live in each device's browser
   storage, which is tied to the address. The Mac's copy is carried to the host's
   address once; the phone starts fresh there, and devices don't share them yet.
-- AI Usage is hidden when the host isn't a Mac: it reads the host's coding-tool
-  logs with macOS-only commands.
+- AI Usage reads coding-tool logs with macOS-only commands, so it follows the
+  Mac rather than the host. The Mac's desktop app shows it from the Mac itself,
+  starting a small portal there only while AI Usage is in use, and counts
+  Slates' own AI calls from the host's ledger. On the phone, or in a browser
+  pointed at a host that isn't a Mac, it's hidden.
 - Optional extras need installing on the host too: the essay AI detector and
   lesson videos (ffmpeg and HyperFrames). On Windows the detector installs with
   `powershell -ExecutionPolicy Bypass -File detector\install.ps1 -Gpu gfx1200`,

@@ -62,7 +62,7 @@ module.exports = {
   appId: "com.slates.app",
   productName: "Slates",
   directories: { output: "dist", buildResources: "build" },
-  files: ["main.mjs", "splash.html", "package.json"],
+  files: ["main.mjs", "preload.cjs", "splash.html", "package.json"],
   extraResources: [
     { from: "../web/.next/standalone", to: "web" },
     // Not in the standalone bundle — Next leaves the static chunks out of it

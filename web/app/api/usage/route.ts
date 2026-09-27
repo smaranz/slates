@@ -4,6 +4,7 @@ import {
   deactivateSubscriptions,
   deletePlan,
   linkApiPlan,
+  readEvents,
   setActivePlan,
 } from "@/lib/ai-usage/store";
 import { buildSnapshot } from "@/lib/ai-usage/snapshot";
@@ -26,6 +27,10 @@ function isProvider(v: unknown): v is UsageProvider {
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
+  // For AI Usage on a Mac whose Slates runs here (lib/ai-usage/coding/scan.ts).
+  if (url.searchParams.get("view") === "events") {
+    return Response.json({ events: readEvents().filter((e) => e.unit === "tokens") });
+  }
   const rangeParam = url.searchParams.get("range") ?? "30d";
   const range: UsageRange = RANGES.includes(rangeParam as UsageRange)
     ? (rangeParam as UsageRange)

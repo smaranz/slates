@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readEvents, USAGE_DIR } from "../store";
+import type { UsageEvent } from "../types";
 import { allHomes, dotDir, type Home } from "./accounts";
 import { appSession, fetchEvents } from "./cursor";
 import { DEVIN_DB, DEVIN_OVERLAP, devinReqs, devinSql } from "./devin";
@@ -529,6 +530,44 @@ function refreshCursor(idx: IndexData, force: boolean): Promise<void> {
   return cursorRunning;
 }
 
+/**
+ * Slates' own calls, when this Mac points at a host (SLATES_HOST): they run
+ * there, so they're in its ledger. Waited on like Cursor — by Refresh and the
+ * first read only — and an unreachable host keeps the last copy.
+ */
+const HOST_LEDGER_MS = 60_000;
+let hostLedger: UsageEvent[] = [];
+let hostLedgerAt = 0;
+let hostLedgerRead: Promise<void> | null = null;
+
+async function readHostLedger(host: string): Promise<void> {
+  try {
+    const token = process.env.SLATES_HOST_TOKEN;
+    const res = await fetch(`${host}/api/usage?view=events`, {
+      headers: { accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(8_000),
+    });
+    const body = res.ok ? ((await res.json()) as { events?: unknown }) : null;
+    if (Array.isArray(body?.events)) hostLedger = body.events as UsageEvent[];
+  } catch {
+    // Asleep or off the network.
+  }
+}
+
+async function hostEvents(force: boolean): Promise<UsageEvent[]> {
+  const host = process.env.SLATES_HOST?.trim().replace(/\/+$/, "");
+  if (!host) return [];
+  if (force || Date.now() - hostLedgerAt > HOST_LEDGER_MS) {
+    const first = !hostLedgerAt;
+    hostLedgerRead ??= readHostLedger(host).finally(() => {
+      hostLedgerAt = Date.now();
+      hostLedgerRead = null;
+    });
+    if (force || first) await hostLedgerRead;
+  }
+  return hostLedger;
+}
+
 /** Bring the index up to date (throttled) and return every request. */
 export async function scanAll(force = false): Promise<ScanResult> {
   const started = Date.now();
@@ -565,8 +604,9 @@ export async function scanAll(force = false): Promise<ScanResult> {
     if (store.reqs.length) groups.push({ tool: "cursor", homeId: null, accountKey: `cursor:${email}`, reqs: store.reqs });
   }
 
-  const slates = readEvents()
-    .filter((e) => e.unit === "tokens")
+  const seen = new Set<string>();
+  const slates = [...readEvents(), ...(await hostEvents(force))]
+    .filter((e) => e.unit === "tokens" && !seen.has(e.id) && seen.add(e.id))
     .map<RawReq>((e) => [
       e.id,
       e.at,

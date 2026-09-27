@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUsageRefreshMinutes } from "@/lib/app-prefs";
+import { usageFetch } from "@/lib/desktop-bridge";
 import { useMode } from "@/lib/mode";
 import {
   LINKABLE_TOOLS,
@@ -561,11 +562,11 @@ export default function UsageApp() {
       setError(null);
       try {
         const [s, r] = await Promise.all([
-          fetch(`/api/usage/coding?${query(force ? { force: "1" } : {})}`).then((res) => {
+          usageFetch(`/api/usage/coding?${query(force ? { force: "1" } : {})}`).then((res) => {
             if (!res.ok) throw new Error("Couldn't read usage logs.");
             return res.json() as Promise<CodingSnapshot>;
           }),
-          fetch(`/api/usage/coding?${query({ view: "requests", offset: "0", limit: String(PAGE) })}`).then(
+          usageFetch(`/api/usage/coding?${query({ view: "requests", offset: "0", limit: String(PAGE) })}`).then(
             (res) => res.json() as Promise<CodingRequestPage>
           ),
         ]);
@@ -584,12 +585,12 @@ export default function UsageApp() {
   const loadLimits = useCallback(async (fresh = false) => {
     try {
       const res = fresh
-        ? await fetch("/api/usage/coding", {
+        ? await usageFetch("/api/usage/coding", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "refresh-limits" }),
           })
-        : await fetch("/api/usage/coding?view=limits");
+        : await usageFetch("/api/usage/coding?view=limits");
       if (res.ok) setLimits((await res.json()) as Record<string, AccountLimits>);
     } catch {
       // Cards keep saying "checking" until the next try.
@@ -646,7 +647,7 @@ export default function UsageApp() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/usage/coding", {
+      const res = await usageFetch("/api/usage/coding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -675,7 +676,7 @@ export default function UsageApp() {
     if (!page) return;
     setMoreBusy(true);
     try {
-      const res = await fetch(`/api/usage/coding?${query({ view: "requests", offset: String(page.rows.length), limit: String(PAGE) })}`);
+      const res = await usageFetch(`/api/usage/coding?${query({ view: "requests", offset: String(page.rows.length), limit: String(PAGE) })}`);
       const next = (await res.json()) as CodingRequestPage;
       setPage({ total: next.total, rows: [...page.rows, ...next.rows] });
     } finally {

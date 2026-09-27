@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
+import { servedLocally } from "./desktop-bridge";
 import type { Mode } from "./mode";
 
 /**
@@ -99,7 +100,7 @@ function loadHostApps() {
     .then((r) => (r.ok ? r.json() : null))
     .then((body: { unavailable?: unknown } | null) => {
       const list = Array.isArray(body?.unavailable) ? body.unavailable : [];
-      hostApps = { known: true, unavailable: APPS.map((a) => a.mode).filter((m) => list.includes(m)) };
+      hostApps = { known: true, unavailable: APPS.map((a) => a.mode).filter((m) => list.includes(m) && !servedLocally(m)) };
     })
     .catch(() => {
       hostApps = { known: true, unavailable: [] };

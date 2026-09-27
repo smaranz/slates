@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell, dialog } from "electron";
+import { app, BrowserWindow, session, shell, dialog, ipcMain } from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -166,10 +166,23 @@ const ATTACH = process.env.SLATES_ATTACH === "1";
  */
 const REMOTE = (process.env.SLATES_HOST || readUserEnv().SLATES_HOST || "").trim().replace(/\/+$/, "");
 
+/**
+ * AI Usage stays on this Mac when the rest of Slates doesn't.
+ *
+ * It reads the coding tools installed on the computer you're using (Claude
+ * Code, Codex, Cursor, Devin…), which a host elsewhere can't see. So in remote
+ * mode the window gets a bridge (preload.cjs), and the first time AI Usage asks
+ * for data this starts the bundled portal here, without the sync service or
+ * its Chrome, and stops it once AI Usage has sat unused for a while.
+ */
+const LOCAL_APPS = REMOTE && process.platform === "darwin" ? ["usage"] : [];
+const LOCAL_PATHS = /^\/api\/usage\/coding(?:\?|$)/;
+const LOCAL_IDLE_MS = 10 * 60_000;
+
 const children = [];
 let win = null;
 
-function run(name, command, args, cwd) {
+function run(name, command, args, cwd, extraEnv = {}) {
   const child = spawn(command, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -186,6 +199,7 @@ function run(name, command, args, cwd) {
       // without it, handing it a .mjs makes it try to launch a second app.
       // Using it means the scraper needs no system Node install.
       ...(command === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+      ...extraEnv,
     },
   });
   const log = (buf) => process.stdout.write(`[${name}] ${buf}`);
@@ -525,6 +539,9 @@ function createWindow() {
       // guest runs in its own process on its own session and never inherits
       // Node; this only permits the tag to exist at all.
       webviewTag: true,
+      ...(LOCAL_APPS.length
+        ? { preload: path.join(HERE, "preload.cjs"), additionalArguments: [`--slates-local-apps=${LOCAL_APPS.join(",")}`] }
+        : {}),
     },
   });
 
@@ -617,9 +634,83 @@ async function startLocally() {
   if (win && !win.isDestroyed()) await win.loadURL(`http://localhost:${PORTAL}`);
 }
 
+let localPortal = null;
+let localReady = false;
+let localStarting = null;
+let localIdle = null;
+
+async function startLocalPortal() {
+  if (localReady) return;
+  if (!(await answers(PORTAL, 800))) {
+    const base = app.isPackaged ? process.resourcesPath : ROOT;
+    // The host runs the agents' routines; this one only answers AI Usage.
+    const env = { SLATES_USAGE_ONLY: "1" };
+    const child = app.isPackaged
+      ? run("usage", nodeBinary() || process.execPath, [path.join(base, "web", "server.js")], path.join(base, "web"), env)
+      : run("usage", "npm", ["run", "start"], path.join(ROOT, "web"), env);
+    localPortal = child;
+    child.on("exit", () => {
+      if (localPortal !== child) return;
+      localPortal = null;
+      localReady = false;
+    });
+    await waitForPort(PORTAL, "AI Usage", 60_000);
+  }
+  localReady = true;
+}
+
+function idleLocalPortal() {
+  clearTimeout(localIdle);
+  localIdle = setTimeout(() => {
+    const child = localPortal;
+    localPortal = null;
+    localReady = false;
+    if (!child) return;
+    child.kill("SIGTERM");
+    const i = children.indexOf(child);
+    if (i >= 0) children.splice(i, 1);
+  }, LOCAL_IDLE_MS);
+}
+
+function sameOrigin(a, b) {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Passes the window's AI Usage requests to the portal on this Mac; only the host's own pages may ask. */
+function serveLocalApps() {
+  ipcMain.handle("slates:local-fetch", async (event, req) => {
+    const target = typeof req?.path === "string" ? req.path : "";
+    if (!sameOrigin(event.senderFrame?.url ?? "", REMOTE)) throw new Error("Only Slates' own pages can ask for that.");
+    if (!LOCAL_PATHS.test(target)) throw new Error("That isn't answered on this Mac.");
+    const post = req.method === "POST";
+
+    await (localStarting ??= startLocalPortal().finally(() => (localStarting = null)));
+    idleLocalPortal();
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORTAL}${target}`, {
+        method: post ? "POST" : "GET",
+        headers: post ? { "content-type": "application/json" } : {},
+        body: post && typeof req.body === "string" ? req.body : undefined,
+        signal: AbortSignal.timeout(120_000),
+      });
+      return { status: res.status, body: await res.text() };
+    } catch (e) {
+      localReady = false;
+      throw e;
+    } finally {
+      idleLocalPortal();
+    }
+  });
+}
+
 
 app.whenReady().then(async () => {
   try {
+    if (LOCAL_APPS.length) serveLocalApps();
     createWindow();
     await new Promise((r) => setTimeout(r, 50)); // let the first paint land
 
