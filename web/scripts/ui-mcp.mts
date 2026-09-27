@@ -8,12 +8,22 @@
  * opening Slates to copy it across. So this serves the same registries over
  * stdio, straight from lib/ui-registries.ts, with no dev server in between.
  *
+ * The same server also serves the ~/.slates/media library and ElevenLabs
+ * generation. Unlike the web app, nothing loads its ElevenLabs settings, so it
+ * fills missing values from ~/.slates/.env and web/.env.local.
+ *
  *   claude mcp add slates-ui -- npx tsx /abs/path/web/scripts/ui-mcp.mts
  *
  * Like the API route, a registry is only ever named by id and a component
  * only by an index-shaped name, so this can't be steered into fetching an
  * arbitrary URL.
  */
+
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { parseEnv } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -30,6 +40,7 @@ import {
   type RegistryItem,
   type UiRegistry,
 } from "../lib/ui-registries";
+import { registerMediaTools } from "../lib/media/mcp";
 
 /** Registry item names: what the index publishes, and nothing path-shaped. */
 const NAME = /^[a-z0-9][a-z0-9-_.]{0,80}$/i;
@@ -102,9 +113,25 @@ function failure(err: unknown, registry?: UiRegistry) {
   return { ...text(err instanceof Error ? err.message : String(err)), isError: true };
 }
 
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+async function loadEnvFile(file: string): Promise<void> {
+  try {
+    const values = parseEnv(await fs.readFile(file, "utf8"));
+    for (const [name, value] of Object.entries(values)) {
+      if (process.env[name] === undefined) process.env[name] = value;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+await loadEnvFile(path.join(os.homedir(), ".slates", ".env"));
+await loadEnvFile(path.resolve(SCRIPT_DIR, "..", ".env.local"));
+
 /* ── the server ────────────────────────────────────────────────────────── */
 
-const server = new McpServer({ name: "slates-ui", version: "0.1.0" });
+const server = new McpServer({ name: "slates-ui", version: "0.2.0" });
 
 server.registerTool(
   "list_registries",
@@ -262,5 +289,7 @@ server.registerTool(
     }
   },
 );
+
+registerMediaTools(server);
 
 await server.connect(new StdioServerTransport());

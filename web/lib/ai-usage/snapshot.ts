@@ -13,6 +13,7 @@ import {
   type PublicPlan,
   type UsageAgent,
   type UsageProvider,
+  type UsageUnitTotals,
   type UsageRange,
   type UsageSnapshot,
 } from "./types";
@@ -49,6 +50,10 @@ function dayKey(at: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function emptyUnitTotals(): UsageUnitTotals {
+  return { tokens: 0, characters: 0, images: 0, seconds: 0 };
+}
+
 export function buildSnapshot(range: UsageRange = "30d"): UsageSnapshot {
   const now = Date.now();
   const start = rangeStart(range, now);
@@ -59,36 +64,45 @@ export function buildSnapshot(range: UsageRange = "30d"): UsageSnapshot {
   let outputTokens = 0;
   let costUsd = 0;
   let listUsd = 0;
+  const unitTotals = emptyUnitTotals();
 
-  const agentMap = new Map<UsageAgent, { input: number; output: number; cost: number; calls: number }>();
-  for (const a of ALL_AGENTS) agentMap.set(a, { input: 0, output: 0, cost: 0, calls: 0 });
+  const agentMap = new Map<UsageAgent, { input: number; output: number; cost: number; calls: number; unitTotals: UsageUnitTotals }>();
+  for (const a of ALL_AGENTS) agentMap.set(a, { input: 0, output: 0, cost: 0, calls: 0, unitTotals: emptyUnitTotals() });
 
-  const modelMap = new Map<string, { tokens: number; cost: number; calls: number }>();
+  const modelMap = new Map<string, { tokens: number; cost: number; calls: number; unitTotals: UsageUnitTotals }>();
   const dayMap = new Map<string, DayBucket>();
 
   for (const e of events) {
-    inputTokens += e.inputTokens;
-    outputTokens += e.outputTokens;
+    const quantity = e.inputTokens + e.outputTokens;
+    unitTotals[e.unit] += quantity;
+    if (e.unit === "tokens") {
+      inputTokens += e.inputTokens;
+      outputTokens += e.outputTokens;
+    }
     costUsd += e.costUsd;
     listUsd += e.listUsd;
 
-    const ag = agentMap.get(e.agent) ?? { input: 0, output: 0, cost: 0, calls: 0 };
-    ag.input += e.inputTokens;
-    ag.output += e.outputTokens;
+    const ag = agentMap.get(e.agent) ?? { input: 0, output: 0, cost: 0, calls: 0, unitTotals: emptyUnitTotals() };
+    ag.unitTotals[e.unit] += quantity;
+    if (e.unit === "tokens") {
+      ag.input += e.inputTokens;
+      ag.output += e.outputTokens;
+    }
     ag.cost += e.costUsd;
     ag.calls += 1;
     agentMap.set(e.agent, ag);
 
-    const tokens = e.inputTokens + e.outputTokens;
-    const mo = modelMap.get(e.model) ?? { tokens: 0, cost: 0, calls: 0 };
-    mo.tokens += tokens;
+    const mo = modelMap.get(e.model) ?? { tokens: 0, cost: 0, calls: 0, unitTotals: emptyUnitTotals() };
+    mo.unitTotals[e.unit] += quantity;
+    if (e.unit === "tokens") mo.tokens += quantity;
     mo.cost += e.costUsd;
     mo.calls += 1;
     modelMap.set(e.model, mo);
 
     const key = dayKey(e.at);
-    const day = dayMap.get(key) ?? { day: key, tokens: 0, costUsd: 0, calls: 0 };
-    day.tokens += tokens;
+    const day = dayMap.get(key) ?? { day: key, tokens: 0, costUsd: 0, calls: 0, unitTotals: emptyUnitTotals() };
+    day.unitTotals[e.unit] += quantity;
+    if (e.unit === "tokens") day.tokens += quantity;
     day.costUsd += e.costUsd;
     day.calls += 1;
     dayMap.set(key, day);
@@ -107,6 +121,7 @@ export function buildSnapshot(range: UsageRange = "30d"): UsageSnapshot {
       inputTokens: row.input,
       outputTokens: row.output,
       tokens: row.input + row.output,
+      unitTotals: row.unitTotals,
       costUsd: row.cost,
       calls: row.calls,
       providers,
@@ -114,8 +129,8 @@ export function buildSnapshot(range: UsageRange = "30d"): UsageSnapshot {
   });
 
   const byModel: ModelRow[] = [...modelMap.entries()]
-    .map(([model, v]) => ({ model, tokens: v.tokens, costUsd: v.cost, calls: v.calls }))
-    .sort((a, b) => b.tokens - a.tokens)
+    .map(([model, v]) => ({ model, tokens: v.tokens, unitTotals: v.unitTotals, costUsd: v.cost, calls: v.calls }))
+    .sort((a, b) => b.tokens - a.tokens || b.costUsd - a.costUsd)
     .slice(0, 20);
 
   const days = [...dayMap.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
@@ -134,6 +149,7 @@ export function buildSnapshot(range: UsageRange = "30d"): UsageSnapshot {
       inputTokens,
       outputTokens,
       tokens: inputTokens + outputTokens,
+      unitTotals,
       costUsd,
       listUsd,
       calls: events.length,

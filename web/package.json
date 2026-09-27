@@ -11,6 +11,7 @@
     "lint": "eslint",
     "test:notifications": "tsx --test lib/notification-plan.test.ts",
     "test:math": "tsx --test lib/math-text.test.ts lib/math-text.render.test.ts",
+    "test:media": "tsx --test lib/media/*.test.ts lib/ai-usage/rates.test.ts",
     "cursor:login": "node scripts/cursor-login.mjs",
     "counselor:ingest": "node scripts/ingest-knowledge.mjs",
     "detector:install": "bash ../detector/install.sh",

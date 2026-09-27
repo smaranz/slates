@@ -230,7 +230,7 @@ Every key is optional in isolation — the app runs on sample data with none of 
 | `OPENAI_API_KEY` | GPT tutor models + assignment time estimates |
 | `OPENROUTER_API_KEY` | DeepSeek, GLM, Qwen, Gemini, MiniMax |
 | `NEXT_PUBLIC_DESMOS_API_KEY` | Live, interactive graphs from the tutor |
-| `ELEVENLABS_API_KEY` | Narration for AI-generated teaching videos |
+| `ELEVENLABS_API_KEY` | Narration, tutor illustrations, and Media Gen Studio (images, video, voice, sound, music) |
 | `OPENAI_API_KEY` | Also powers the counselor, its library index, and voice calls |
 | `NEXT_PUBLIC_SLATES_EXTENSION_ID` | Real Schoology sync (unset = sample data) |
 | Claude | `claude auth login` — no key lives in the env |

@@ -24,16 +24,17 @@ import {
  */
 
 /**
- * Four rooms off the launcher — school work, applications, the component
- * shelf, and the ledger for every AI call Slates makes. "Halves" stopped
- * fitting when the UI shelf earned its own door; usage is the same idea.
+ * Five rooms off the launcher — school work, applications, the component shelf,
+ * the ledger for every AI call Slates makes, and the media studio. "Halves"
+ * stopped fitting when the UI shelf earned its own door; usage and media are the
+ * same idea.
  */
-export type Mode = "school" | "counselor" | "ui" | "usage";
+export type Mode = "school" | "counselor" | "ui" | "usage" | "media";
 
 const KEY = "slates.mode.v1";
 
 /** Every mode, in one place. */
-const MODES: Mode[] = ["school", "counselor", "ui", "usage"];
+const MODES: Mode[] = ["school", "counselor", "ui", "usage", "media"];
 
 function isMode(value: string | null): value is Mode {
   return !!value && (MODES as string[]).includes(value);

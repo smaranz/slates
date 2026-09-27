@@ -24,11 +24,21 @@ export type UsageAgent =
   | "voice"
   | "lesson"
   | "narration"
-  | "image";
+  | "image"
+  | "media";
 
 export type PlanKind = "api" | "subscription";
 
-export type UsageUnit = "tokens" | "characters" | "images";
+export type UsageUnit = "tokens" | "characters" | "images" | "seconds";
+export type UsageUnitTotals = Record<UsageUnit, number>;
+
+export function formatUsageQuantity(value: number, unit: UsageUnit): string {
+  const amount = Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
+  if (unit === "seconds") return `${amount} s`;
+  if (unit === "characters") return `${amount} characters`;
+  if (unit === "images") return `${amount} images`;
+  return `${amount} tokens`;
+}
 
 export type UsageRange = "today" | "7d" | "30d" | "all";
 
@@ -87,6 +97,7 @@ export interface AgentRow {
   inputTokens: number;
   outputTokens: number;
   tokens: number;
+  unitTotals: UsageUnitTotals;
   costUsd: number;
   calls: number;
   providers: {
@@ -99,6 +110,7 @@ export interface AgentRow {
 export interface ModelRow {
   model: string;
   tokens: number;
+  unitTotals: UsageUnitTotals;
   costUsd: number;
   calls: number;
 }
@@ -106,6 +118,7 @@ export interface ModelRow {
 export interface DayBucket {
   day: string;
   tokens: number;
+  unitTotals: UsageUnitTotals;
   costUsd: number;
   calls: number;
 }
@@ -122,6 +135,7 @@ export interface UsageSnapshot {
     inputTokens: number;
     outputTokens: number;
     tokens: number;
+    unitTotals: UsageUnitTotals;
     costUsd: number;
     listUsd: number;
     calls: number;
@@ -148,6 +162,7 @@ export const ALL_AGENTS: UsageAgent[] = [
   "lesson",
   "narration",
   "image",
+  "media",
 ];
 
 export const AGENT_LABEL: Record<UsageAgent, string> = {
@@ -163,6 +178,7 @@ export const AGENT_LABEL: Record<UsageAgent, string> = {
   lesson: "Lesson",
   narration: "Narration",
   image: "Image",
+  media: "Media Gen Studio",
 };
 
 /** Which providers each agent can draw credentials from. */
@@ -179,6 +195,7 @@ export const AGENT_PROVIDERS: Record<UsageAgent, UsageProvider[]> = {
   lesson: ["openai"],
   narration: ["elevenlabs"],
   image: ["elevenlabs"],
+  media: ["elevenlabs"],
 };
 
 export const PROVIDER_LABEL: Record<UsageProvider, string> = {

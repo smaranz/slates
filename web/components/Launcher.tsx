@@ -9,7 +9,7 @@ import { useMode, type Mode } from "@/lib/mode";
 import { Icon, ICON } from "./ui";
 
 /**
- * The first thing you see: two doors, a mark on each, nothing else.
+ * The first thing you see: a door for each app, a mark on each, nothing else.
  *
  * Both names say what they are, so anything written underneath would only be
  * saying it again. The marks are line drawings rather than icons — three
@@ -22,6 +22,7 @@ const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolea
   { mode: "counselor", title: "Counselor", accent: "oklch(0.8 0.13 300)", mark: (h) => <RingsMark hovered={h} /> },
   { mode: "ui", title: "UI", accent: "oklch(0.78 0.15 165)", mark: (h) => <StackMark hovered={h} /> },
   { mode: "usage", title: "AI Usage", accent: "oklch(0.82 0.12 85)", mark: (h) => <MeterMark hovered={h} /> },
+  { mode: "media", title: "Media Gen Studio", accent: "oklch(0.8 0.13 25)", mark: (h) => <MediaMark hovered={h} /> },
 ];
 
 export default function Launcher() {
@@ -223,6 +224,45 @@ function MeterMark({ hovered }: { hovered: boolean }) {
         initial={false}
         animate={{ opacity: hovered ? 0.7 : 0.35 }}
       />
+    </svg>
+  );
+}
+
+function MediaMark({ hovered }: { hovered: boolean }) {
+  const heights = hovered ? [13, 20, 15] : [7, 11, 8];
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      <motion.rect
+        x="4"
+        y="5"
+        width="46"
+        height="44"
+        rx="9"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        initial={false}
+        animate={{ opacity: hovered ? 0.8 : 0.48 }}
+      />
+      <motion.path
+        d="M15 18.5v17l14-8.5z"
+        fill="var(--accent)"
+        initial={false}
+        animate={{ opacity: hovered ? 1 : 0.78, scale: hovered ? 1.06 : 1 }}
+        transition={{ type: "spring", stiffness: 260, damping: 22 }}
+        style={{ transformOrigin: "22px 27px" }}
+      />
+      {[0, 1, 2].map((i) => (
+        <motion.rect
+          key={i}
+          x={33 + i * 5}
+          width="2.5"
+          rx="1.25"
+          fill="var(--accent)"
+          initial={false}
+          animate={{ y: 37 - heights[i]!, height: heights[i]! }}
+          transition={{ type: "spring", stiffness: 260, damping: 22, delay: i * 0.04 }}
+        />
+      ))}
     </svg>
   );
 }

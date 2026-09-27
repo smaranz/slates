@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { useHiddenApps } from "@/lib/app-prefs";
 import { useMode, type Mode } from "@/lib/mode";
-import { GeneralSettings, UiSettings, UsageSettings } from "./AppSettings";
+import { GeneralSettings, MediaSettings, UiSettings, UsageSettings } from "./AppSettings";
 import MobileRuntimeProvider from "./MobileRuntime";
 import SettingsView from "./SettingsView";
 import ProfileView from "./counselor/ProfileView";
@@ -21,7 +21,7 @@ import { Icon, ICON } from "./ui";
  * facts about the person using Slates, not about whichever side they happened
  * to open.
  *
- * So it lives at the home screen, above both, and is reached from there.
+ * So it lives at the home screen, above every app, and is reached from there.
  *
  * General comes first — which apps Slates shows at all — then one tab per
  * app. Name, photo, and local data sit on School with the Schoology
@@ -35,6 +35,7 @@ const TABS: { id: "general" | Mode; label: string }[] = [
   { id: "counselor", label: "Counselor" },
   { id: "ui", label: "UI" },
   { id: "usage", label: "AI Usage" },
+  { id: "media", label: "Media Gen Studio" },
 ];
 
 type Tab = (typeof TABS)[number]["id"];
@@ -85,6 +86,8 @@ export default function UnifiedSettings() {
           <UiSettings />
         ) : tab === "usage" ? (
           <UsageSettings />
+        ) : tab === "media" ? (
+          <MediaSettings />
         ) : (
           <SettingsView />
         )}

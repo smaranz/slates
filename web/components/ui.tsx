@@ -96,6 +96,7 @@ export const ICON = {
   chevronDown: "M6 9h12l-6 6z",
   /** A filled square — stop, as every player draws it. */
   stop: "M6.5 6h11a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5z",
+  play: "M8 5v14l11-7z",
   /** A panel with a list rail down its left side. */
   sidebar: "M3 4h18v16H3V4zm2 2v12h4V6H5zm6 0v12h8V6h-8z",
   trash: "M9 3h6v2h5v2H4V5h5V3zM6 8h12l-1 13H7L6 8zm2.2 2 .7 9h6.2l.7-9H8.2z",

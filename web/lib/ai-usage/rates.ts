@@ -6,12 +6,12 @@
  * marked covered so costUsd stays 0 (included in the local login).
  */
 
-export type RateUnit = "tokens" | "characters" | "images";
+export type RateUnit = "tokens" | "characters" | "images" | "seconds";
 
 export interface ModelRate {
-  /** USD per 1M input tokens, or per 1K characters, or flat per image. */
+  /** USD per 1M input tokens, per 1K characters, flat per image, or per second. */
   input: number;
-  /** USD per 1M output tokens. Unused for characters/images. */
+  /** USD per 1M output tokens. Unused for characters, images, and seconds. */
   output: number;
   unit: RateUnit;
 }
@@ -41,16 +41,26 @@ const TOKEN_RATES: { match: string; rate: ModelRate }[] = [
   { match: "gemini-3.5-flash-lite", rate: { input: 0.05, output: 0.2, unit: "tokens" } },
 ];
 
-const ELEVENLABS_CHARS: ModelRate = { input: 0.18, output: 0, unit: "characters" };
 const ELEVENLABS_IMAGE: ModelRate = { input: 0.04, output: 0, unit: "images" };
+const ELEVENLABS_SECONDS_ZERO: ModelRate = { input: 0, output: 0, unit: "seconds" };
+const ELEVENLABS_SECONDS_SFX: ModelRate = { input: 0.002, output: 0, unit: "seconds" };
+const ELEVENLABS_SECONDS_MUSIC: ModelRate = { input: 0.0025, output: 0, unit: "seconds" };
 
 export function rateForModel(model: string, unit?: RateUnit): ModelRate {
   if (unit === "images") return ELEVENLABS_IMAGE;
-  if (unit === "characters") return ELEVENLABS_CHARS;
+  if (unit === "characters") {
+    return { input: /flash|turbo/i.test(model) ? 0.05 : 0.1, output: 0, unit: "characters" };
+  }
+  if (unit === "seconds") {
+    const lower = model.toLowerCase();
+    if (lower.startsWith("music_")) return ELEVENLABS_SECONDS_MUSIC;
+    if (lower.startsWith("eleven_text_to_sound")) return ELEVENLABS_SECONDS_SFX;
+    return ELEVENLABS_SECONDS_ZERO;
+  }
 
   const lower = model.toLowerCase();
   if (/gpt-image|eleven.*image|image-flow/i.test(lower)) return ELEVENLABS_IMAGE;
-  if (/eleven_multilingual|elevenlabs|tts/i.test(lower)) return ELEVENLABS_CHARS;
+  if (/eleven_multilingual|elevenlabs|tts/i.test(lower)) return rateForModel(model, "characters");
 
   for (const row of TOKEN_RATES) {
     if (lower.includes(row.match)) return row.rate;
@@ -85,7 +95,7 @@ export function estimatePrice(input: PriceInput): PriceResult {
   let listUsd = 0;
   if (rate.unit === "characters") {
     listUsd = (inTok / 1000) * rate.input;
-  } else if (rate.unit === "images") {
+  } else if (rate.unit === "images" || rate.unit === "seconds") {
     listUsd = inTok * rate.input;
   } else {
     listUsd = (inTok / 1_000_000) * rate.input + (outTok / 1_000_000) * rate.output;

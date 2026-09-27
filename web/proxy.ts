@@ -12,7 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 
 /** GET endpoints that open as documents — a new tab, or the system browser. */
-const DOCUMENTS = new Set(["/api/tutor/files", "/api/materials/file"]);
+const DOCUMENTS = new Set(["/api/tutor/files", "/api/materials/file", "/api/media/file"]);
 
 const EXTRA_HOSTS = new Set(
   (process.env.SLATES_ALLOWED_HOSTS ?? "")

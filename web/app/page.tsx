@@ -26,6 +26,7 @@ import UnifiedSettings from "@/components/UnifiedSettings";
 import CounselorApp from "@/components/counselor/CounselorApp";
 import UiApp from "@/components/UiApp";
 import UsageApp from "@/components/usage/UsageApp";
+import MediaApp from "@/components/media/MediaApp";
 
 export default function Page() {
   const { mode, ready, settingsOpen } = useMode();
@@ -35,14 +36,15 @@ export default function Page() {
   // Nothing renders until the saved choice has been read. A frame of the
   // launcher before jumping into School would be a flash of the wrong app.
   if (!ready || (mode === "usage" && !host.known)) return <div className="shell" />;
-  // Settings sits above both halves rather than inside either, so it takes
-  // over the window from wherever it was opened.
+  // Settings sits above every app rather than inside one, so it takes over
+  // the window from wherever it was opened.
   if (settingsOpen) return <UnifiedSettings />;
   // A remembered app that has since been hidden lands on the launcher instead.
   if (!mode || hiddenApps.includes(mode)) return <Launcher />;
   if (mode === "counselor") return <CounselorApp />;
   if (mode === "ui") return <UiApp />;
   if (mode === "usage") return <UsageApp />;
+  if (mode === "media") return <MediaApp />;
   return <School />;
 }
 

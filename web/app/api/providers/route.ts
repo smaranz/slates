@@ -100,7 +100,7 @@ export async function GET() {
     {
       backend: "elevenlabs",
       label: "ElevenLabs",
-      powers: "Narration for teaching videos",
+      powers: "Narration, tutor illustrations, and Media Gen Studio",
       configured: hasSecret("elevenlabs"),
       detail: "Linked in AI Usage, or ELEVENLABS_API_KEY in the environment.",
     },

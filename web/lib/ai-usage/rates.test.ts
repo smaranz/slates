@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { estimatePrice, rateForModel } from "./rates";
 import { activatePlan, linkPlan, removePlan, useEnv } from "./plans";
-import type { UsagePlan } from "./types";
+import { formatUsageQuantity, type UsagePlan } from "./types";
 
 test("known model uses the rate card", () => {
   const price = estimatePrice({
@@ -28,15 +28,31 @@ test("unknown model falls back to the default rate", () => {
   assert.equal(price.listUsd, 2);
 });
 
-test("elevenlabs characters bill per thousand", () => {
-  const price = estimatePrice({
+test("elevenlabs character rates follow model family", () => {
+  const standard = estimatePrice({
     model: "eleven_multilingual_v2",
     inputTokens: 2000,
     unit: "characters",
   });
-  assert.equal(price.unit, "characters");
-  assert.equal(price.listUsd, 0.36);
-  assert.equal(price.costUsd, 0.36);
+  assert.equal(standard.unit, "characters");
+  assert.equal(standard.listUsd, 0.2);
+  assert.equal(standard.costUsd, 0.2);
+
+  const fast = estimatePrice({ model: "eleven_flash_v2_5", inputTokens: 2000, unit: "characters" });
+  assert.equal(fast.listUsd, 0.1);
+});
+
+test("elevenlabs seconds use model-specific list prices", () => {
+  assert.equal(estimatePrice({ model: "music_v2_5", inputTokens: 10, unit: "seconds" }).listUsd, 0.025);
+  assert.equal(estimatePrice({ model: "eleven_text_to_sound_v2", inputTokens: 3, unit: "seconds" }).listUsd, 0.006);
+  const covered = estimatePrice({ model: "veo-3.1-fast-generate-001", inputTokens: 4, unit: "seconds", covered: true });
+  assert.equal(covered.listUsd, 0);
+  assert.equal(covered.costUsd, 0);
+});
+
+test("usage quantities keep their unit", () => {
+  assert.equal(formatUsageQuantity(12, "seconds"), "12 s");
+  assert.equal(formatUsageQuantity(2000, "characters"), "2000 characters");
 });
 
 test("cursor covered calls keep listUsd but costUsd is zero", () => {

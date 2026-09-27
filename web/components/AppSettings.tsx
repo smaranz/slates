@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   APPS,
@@ -11,14 +11,16 @@ import {
   useUsageRefreshMinutes,
 } from "@/lib/app-prefs";
 import { UI_REGISTRIES } from "@/lib/ui-registries";
+import { MCP_COMMAND } from "@/lib/media/mcp-command";
 import SlatesKeys from "./usage/SlatesKeys";
 import { Toggle } from "./ui";
 
 /**
  * The settings tabs that aren't School's or Counselor's: which apps Slates
- * shows at all, and what the UI shelf and AI Usage keep as preferences. Each
- * used to be either nowhere (the shelf) or tucked inside its own page (the
- * usage keys), which is the scattering the one settings screen exists to end.
+ * shows at all, the UI shelf and AI Usage preferences, and Media's ElevenLabs
+ * connection and coding-agent tools. Each used to be either nowhere (the
+ * shelf) or tucked inside its own page (the usage keys), which is the
+ * scattering the one settings screen exists to end.
  */
 
 function Page({ children }: { children: React.ReactNode }) {
@@ -97,8 +99,6 @@ export function GeneralSettings() {
 
 /* ── UI ────────────────────────────────────────────────────────────────── */
 
-const MCP_COMMAND = "claude mcp add slates-ui -- npx tsx <slates>/web/scripts/ui-mcp.mts";
-
 export function UiSettings() {
   const [hidden, setShown] = useHiddenRegistries();
   const [copied, setCopied] = useState(false);
@@ -120,7 +120,7 @@ export function UiSettings() {
 
       <Card
         title="Coding agents"
-        note="The same libraries are served to coding agents over a local MCP server, slates-ui: search_components, get_component (full source, dependencies, and the install command), install_command, and list_registries. It reads every library, whatever the shelf shows."
+        note="The same libraries are served to coding agents over slates-ui: search_components, get_component (full source, dependencies, and the install command), install_command, and list_registries. It reads every library, whatever the shelf shows, and also serves the media library: list_media, get_media, save_media, generate_image, generate_video, generate_speech, generate_sound_effect, generate_music, and list_media_models."
       >
         <div className="app-settings-code">
           <code>{MCP_COMMAND}</code>
@@ -137,6 +137,46 @@ export function UiSettings() {
           >
             {copied ? "Copied" : "Copy"}
           </button>
+        </div>
+      </Card>
+    </Page>
+  );
+}
+
+export function MediaSettings() {
+  const [connection, setConnection] = useState<{ status: "checking" | "connected" | "error"; note?: string }>({ status: "checking" });
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/media/voices", { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "ElevenLabs isn't connected.");
+        if (active) setConnection({ status: "connected", note: `${body.voices?.length ?? 0} voices available.` });
+      })
+      .catch((error: unknown) => {
+        if (active) setConnection({ status: "error", note: error instanceof Error ? error.message : String(error) });
+      });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <Page>
+      <Card title="ElevenLabs" note="Link a key in AI Usage, or set ELEVENLABS_API_KEY in ~/.slates/.env and restart Slates.">
+        <p style={{ margin: 0, color: connection.status === "connected" ? "var(--good)" : connection.status === "error" ? "var(--warn)" : "var(--muted)", fontSize: 13 }}>
+          {connection.status === "checking" ? "Checking connection…" : connection.status === "connected" ? `Connected · ${connection.note}` : connection.note}
+        </p>
+      </Card>
+      <Card title="Coding agents" note="The same slates-ui server serves the media library: list_media, get_media, save_media, generate_image, generate_video, generate_speech, generate_sound_effect, generate_music, and list_media_models.">
+        <div className="app-settings-code">
+          <code>{MCP_COMMAND}</code>
+          <button type="button" className="btn btn--quiet" style={{ height: 26, padding: "0 10px", fontSize: 11 }} onClick={() => {
+            void navigator.clipboard?.writeText(MCP_COMMAND).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
+          }}>{copied ? "Copied" : "Copy"}</button>
         </div>
       </Card>
     </Page>

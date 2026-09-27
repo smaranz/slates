@@ -76,6 +76,7 @@ export const APPS: { mode: Mode; title: string; blurb: string }[] = [
   { mode: "counselor", title: "Counselor", blurb: "College list, applications, and essays" },
   { mode: "ui", title: "UI", blurb: "Component registries, read as code" },
   { mode: "usage", title: "AI Usage", blurb: "Every coding tool, every account" },
+  { mode: "media", title: "Media Gen Studio", blurb: "Images, video, voice, sound and music with ElevenLabs" },
 ];
 
 /* ── which apps the host can serve ─────────────────────────────────────── */
