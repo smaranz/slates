@@ -4,22 +4,14 @@
    desktop app zooms 1440p-class displays to 120% (desktop/main.mjs), which
    leaves about 2130px; a browser at 100% gets the full 2560. Layouts built
    for a laptop's 1500px sat in a narrow strip there, with rows the width of
-   the screen, so these give them the room: grades and one class's scores in
-   columns, and a wider calendar, tutor and study page. Classes stay one per
-   row, as the student asked.
+   the screen, so these give them the room: one class's scores in columns,
+   and a wider calendar, tutor and study page. Classes and grades stay one
+   per row, as the student asked.
 
    Loaded after globals.css. Widths the components set inline are overridden
    with !important, the way the phone layout in globals.css does it.          */
 
 @media (min-width: 1800px) {
-  /* Grades: classes two across, instead of one column with its categories floating in the middle. */
-  .grades-list {
-    display: grid !important;
-    max-width: 1760px !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
-
   /* One class: its grade over time and categories beside the scores that make them. */
   .course-page {
     display: grid !important;
@@ -92,13 +84,8 @@
   }
 }
 
-/* A browser at 100% on a 1440p screen: room for a third column of grades. */
+/* A browser at 100% on a 1440p screen. */
 @media (min-width: 2400px) {
-  .grades-list {
-    max-width: 2240px !important;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .calendar-frame {
     max-width: 1920px !important;
   }
