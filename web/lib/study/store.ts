@@ -14,7 +14,9 @@ import type { StudySet } from "./types";
  * handouts without going back to Schoology.
  */
 
-const ID = /^\d{1,24}$/;
+/** A Schoology item id, or "c…" for a test the student added by hand. */
+const ID = /^(?:\d{1,24}|c[a-z0-9]{10,30})$/;
+const FILE = /^(?:\d{1,24}|c[a-z0-9]{10,30})\.json$/;
 
 export function isStudyId(id: string): boolean {
   return ID.test(id);
@@ -83,7 +85,7 @@ export async function listSets(): Promise<StudySet[]> {
   }
   const sets = await Promise.all(
     names
-      .filter((name) => /^\d{1,24}\.json$/.test(name))
+      .filter((name) => FILE.test(name))
       .map((name) => getSet(name.slice(0, -5)).catch(() => null)),
   );
   return sets.filter((set): set is StudySet => !!set);

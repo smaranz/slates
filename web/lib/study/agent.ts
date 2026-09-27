@@ -224,6 +224,7 @@ function brief(build: AgentBuild, sources: StudySource[], absolute: (url: string
   const text = new Map(build.material.map((entry) => [entry.n, entry.text]));
   const read = sources.filter((source) => source.read);
   const unread = sources.filter((source) => !source.read);
+  const chose = !!(build.request.picks?.length || build.request.uploads?.length || build.request.notes?.trim());
   return [
     `You are the study agent in Slates. Build a study set for a high-school student's upcoming ${target.testKind}: "${target.title}" in ${course.name}${target.due ? ` (${target.due})` : ""}.`,
     "",
@@ -236,12 +237,18 @@ function brief(build: AgentBuild, sources: StudySource[], absolute: (url: string
     "- slates_board: the student's classes, grades and assignments. list_skills / get_skill: the student's saved instructions; check for one about study guides.",
     "- add_source to cite outside pages, and save_study_set to hand in the finished set.",
     "",
-    "WHAT SLATES ALREADY FOUND IN SCHOOLOGY",
+    "WHAT SLATES ALREADY HAS",
     read.length
       ? `SOURCES:\n${read.map((source) => `[${source.n}] ${source.title} — ${source.where}${source.url ? ` — ${absolute(source.url)}` : ""}\n${text.get(source.n) ?? ""}`).join("\n\n")}`
       : "Nothing readable was posted for this test.",
     unread.length
       ? `\nFOUND BUT NOT READ (open the ones that could matter):\n${unread.map((source) => `[${source.n}] ${source.title} — ${source.where}${source.url ? ` — ${absolute(source.url)}` : ""}${source.note ? ` (${source.note})` : ""}`).join("\n")}`
+      : "",
+    chose
+      ? "\nThe student chose some of this themselves (marked “picked by you”, “uploaded by you” or “written by you”). Treat it as what the test is on."
+      : "",
+    build.request.auto === false
+      ? "They asked Slates to build from what they chose, so only look in Schoology or on the web for more if it can't cover the test."
       : "",
     "",
     "YOUR JOB",

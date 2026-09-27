@@ -99,6 +99,41 @@ export interface StudySet {
   /** A "more practice" round is being written. */
   practicing?: boolean;
   practiceError?: string;
+  /** A test the student added by hand rather than one found on the board, and its date as yyyy-mm-dd. */
+  custom?: boolean;
+  date?: string;
+  /** What the student chose for the last build, so a rebuild starts from the same material. */
+  inputs?: StudyInputs;
+}
+
+/** A Schoology Materials item the student picked for a set. */
+export interface StudyPick {
+  title: string;
+  /** The item's link exactly as Materials lists it. */
+  url: string;
+  /** Where it sits, e.g. "Materials › Unit 2 › Notes". */
+  where?: string;
+}
+
+/** A file the student uploaded for a set, as the host keeps it. */
+export interface StudyUpload {
+  id: string;
+  name: string;
+  ext: string;
+  bytes: number;
+  /** Characters of text Slates read from it; 0, with `error`, when it couldn't. */
+  chars: number;
+  at: number;
+  error?: string;
+}
+
+/** The material a student chose for a build. */
+export interface StudyInputs {
+  picks: StudyPick[];
+  uploads: { id: string; name: string }[];
+  notes: string;
+  /** Whether Slates also looked through the class for the unit's material. */
+  auto: boolean;
 }
 
 /** One board item as the builder needs it — sent by the browser, which holds the board. */
@@ -120,6 +155,17 @@ export interface BuildRequest {
   domain?: string;
   /** Other work in the same class, for the unit's homework and review sheets. */
   related: StudyItemInput[];
+  /** Schoology Materials items the student picked; read right after the test's own write-up. */
+  picks?: StudyPick[];
+  /** Files the student uploaded, by the ids /api/study/upload gave them. */
+  uploads?: string[];
+  /** The student's own notes on what the test covers. */
+  notes?: string;
+  /** Also look through the class for the unit's material, review sheets and homework. On unless it's false. */
+  auto?: boolean;
+  /** A test the student added by hand: its id is a custom one (see isStudyId) and this is its date, yyyy-mm-dd. */
+  custom?: boolean;
+  date?: string;
 }
 
 export function mastery(set: Pick<StudySet, "questions" | "cards" | "progress">): number | null {

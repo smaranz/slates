@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { StudySummary } from "@/app/api/study/route";
-import type { BuildRequest, StudyAnswer, StudySet } from "@/lib/study/types";
+import type { BuildRequest, StudyAnswer, StudySet, StudyUpload } from "@/lib/study/types";
 
 /** The host's study sets, kept fresh while any of them is building. */
 
@@ -11,6 +11,34 @@ async function json<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status}).`);
   return body;
+}
+
+/** One entry in a class's Schoology Materials, as /api/study/materials lists it. */
+export interface MaterialEntry {
+  kind: string;
+  title: string;
+  url: string;
+  folderId: string | null;
+  readable: boolean;
+}
+
+export async function listMaterials(courseId: string, folderId: string | null): Promise<MaterialEntry[]> {
+  const query = `course=${encodeURIComponent(courseId)}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ""}`;
+  return (await json<{ items: MaterialEntry[] }>(await fetch(`/api/study/materials?${query}`, { cache: "no-store" }))).items;
+}
+
+/** Files up to 25 MB, the same limit the host enforces (lib/study/uploads.ts). */
+export const MAX_UPLOAD_MB = 25;
+export const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
+
+export async function uploadFile(file: File): Promise<StudyUpload> {
+  const form = new FormData();
+  form.append("file", file);
+  return (await json<{ upload: StudyUpload }>(await fetch("/api/study/upload", { method: "POST", body: form }))).upload;
+}
+
+export async function removeUpload(id: string): Promise<void> {
+  await fetch(`/api/study/upload?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
 }
 
 export function useStudySets() {

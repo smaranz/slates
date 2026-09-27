@@ -8,6 +8,7 @@ import type { ItemAttachment } from "../types";
 import { classify } from "./detect";
 import { googleExport, NeedsGoogleSignIn, readGoogle } from "./google";
 import type { BuildRequest, SourceKind, StudyItemInput, StudySource } from "./types";
+import { readUpload } from "./uploads";
 
 /**
  * Go into Schoology and find what a test is actually on.
@@ -55,7 +56,12 @@ interface Candidate {
   /** Any other readable Schoology link: a document, Page, link view or Google file. */
   item?: string;
   note?: string;
+  /** The student chose it, so no cap on Materials files applies and it keeps more of its text. */
+  picked?: boolean;
 }
+
+/** Text kept from one thing the student chose: more than an automatic find, because they chose it. */
+const PICKED_CHARS = 30_000;
 
 const STOP = new Set(
   ("the a an and or of to in on for with from by at as is are be this that these those your you my our their it its into " +
@@ -275,16 +281,70 @@ function subfolderRank(title: string): number {
 }
 
 /** Whether Slates can read an item's words itself; the study agent can still open the rest in its browser. */
-function readable(url: string): boolean {
+export function readable(url: string): boolean {
   const outside = unwrapLink(url);
   if (/^https?:\/\//i.test(outside)) return googleExport(outside) !== null;
   return /^\/(?:course\/\d+\/materials\/gp\/\d+$|attachment\/\d+\/|page\/\d+|course\/\d+\/materials\/(?:link\/view|page)\/\d+)/.test(url);
 }
 
+/** The student's own material: their notes on the test, files they uploaded, and Materials items they picked. */
+async function chosenCandidates(request: BuildRequest): Promise<Candidate[]> {
+  const out: Candidate[] = [];
+  if (request.notes?.trim()) {
+    out.push({ title: "Your notes on what it covers", kind: "writeup", where: "Written by you", url: null, priority: 99, text: request.notes.trim(), picked: true });
+  }
+  for (const id of request.uploads ?? []) {
+    const upload = await readUpload(id).catch(() => null);
+    const base = { kind: "handout" as const, where: "Uploaded by you", url: null, priority: 98 };
+    if (!upload) out.push({ ...base, title: "An uploaded file", note: "The file is no longer on this computer. Upload it again." });
+    else if (upload.error || !upload.text) out.push({ ...base, title: upload.name, note: upload.error ?? "Had no text Slates could read." });
+    else out.push({ ...base, title: upload.name, text: upload.text, picked: true });
+  }
+  for (const pick of request.picks ?? []) {
+    const outside = unwrapLink(pick.url);
+    const external = /^https?:\/\//i.test(outside);
+    out.push({
+      title: pick.title,
+      kind: /\b(review|study guide|practice (test|quiz|exam)|test prep)\b/i.test(pick.title) ? "review" : "material",
+      where: `${pick.where || "Materials"} · picked by you`,
+      url: external ? outside : pick.url,
+      priority: 97,
+      picked: true,
+      ...(readable(pick.url)
+        ? { item: pick.url }
+        : { note: external ? "A link to another site; the study agent can open it in its browser." : "Slates can't read this kind of item." }),
+    });
+  }
+  return out;
+}
+
+/** One candidate per file or link. When the student picked something Slates also found, their pick stays. */
+function dedupe(candidates: Candidate[]): Candidate[] {
+  const out: Candidate[] = [];
+  const byKey = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const key = candidate.item ?? candidate.attachment;
+    if (!key) {
+      out.push(candidate);
+      continue;
+    }
+    const earlier = byKey.get(key);
+    if (!earlier) {
+      byKey.set(key, candidate);
+      out.push(candidate);
+    } else if (candidate.picked && !earlier.picked) {
+      out[out.indexOf(earlier)] = candidate;
+      byKey.set(key, candidate);
+    }
+  }
+  return out;
+}
+
 export async function gather(request: BuildRequest, onStep: (step: string) => void): Promise<Gathered> {
   const { target, course } = request;
+  const auto = request.auto !== false;
   const targetDay = target.dateOffset ?? 0;
-  const unit = request.related
+  const unit = (auto ? request.related : [])
     .filter((item) => item.id !== target.id)
     .filter((item) => item.dateOffset == null || (item.dateOffset <= targetDay && item.dateOffset >= targetDay - UNIT_DAYS));
   const reviews = unit.filter((item) => /\b(review|study guide|practice (test|quiz|exam)|test prep)\b/i.test(item.title));
@@ -303,6 +363,7 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
     candidates.push({ title: target.title, kind: "writeup", where: "The test’s description in Schoology", url: target.url ?? null, priority: 100, text: target.brief });
   }
   candidates.push(...attachmentCandidates(target, "handout", "Attached to the test", 95));
+  candidates.push(...(await chosenCandidates(request)));
   for (const review of reviews) {
     if (review.brief?.trim()) candidates.push({ title: review.title, kind: "review", where: "Review assignment", url: review.url ?? null, priority: 92, text: review.brief });
     candidates.push(...attachmentCandidates(review, "review", `Attached to “${review.title}”`, 91));
@@ -314,16 +375,18 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
   }
 
   let notice: string | undefined;
-  onStep(`Looking through ${course.name} in Schoology`);
-  try {
-    const found = await materialCandidates(course.id, context, onStep);
-    candidates.push(...found.candidates);
-    if (!found.matched.length && !found.candidates.length) notice = "No folder in this class’s Materials matched the test, so this is built from the test, its unit’s homework and review sheets.";
-  } catch (error) {
-    notice = `Couldn’t open this class’s Materials (${error instanceof Error ? error.message : String(error)}), so this is built from what’s on your board.`;
+  if (auto) {
+    onStep(`Looking through ${course.name} in Schoology`);
+    try {
+      const found = await materialCandidates(course.id, context, onStep);
+      candidates.push(...found.candidates);
+      if (!found.matched.length && !found.candidates.length) notice = "No folder in this class’s Materials matched the test, so this is built from the test, its unit’s homework and review sheets.";
+    } catch (error) {
+      notice = `Couldn’t open this class’s Materials (${error instanceof Error ? error.message : String(error)}), so this is built from what’s on your board.`;
+    }
   }
 
-  const ordered = candidates.sort((a, b) => b.priority - a.priority);
+  const ordered = dedupe(candidates).sort((a, b) => b.priority - a.priority);
   const readableCount = ordered.filter((candidate) => candidate.text || candidate.attachment || candidate.item).length;
   onStep(readableCount ? `Reading ${readableCount} ${readableCount === 1 ? "item" : "items"} from Schoology` : "Nothing readable was posted for this test");
 
@@ -346,14 +409,14 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
       let text = candidate.text ?? "";
       if (candidate.attachment) text = await readAttachment(candidate.attachment, cache);
       if (candidate.item) {
-        if (materialFiles >= MAX_MATERIAL_FILES) {
+        if (!candidate.picked && materialFiles >= MAX_MATERIAL_FILES) {
           source.note = "Left out — there was already enough to study from.";
           continue;
         }
-        materialFiles += 1;
+        if (!candidate.picked) materialFiles += 1;
         text = (await readSchoologyItem(candidate.item)).text;
       }
-      text = text.trim().slice(0, Math.min(PER_DOC.chars, BUDGET - used));
+      text = text.trim().slice(0, Math.min(candidate.picked ? PICKED_CHARS : PER_DOC.chars, BUDGET - used));
       if (!text) {
         source.note = "Had no text Slates could read.";
         continue;

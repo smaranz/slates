@@ -3,12 +3,15 @@ import { z } from "zod";
 import { settle, startBuild } from "@/lib/study/jobs";
 import { deleteSet, getSet, isStudyId, listSets } from "@/lib/study/store";
 import { mastery, type BuildRequest, type StudySet } from "@/lib/study/types";
+import { deleteUpload, isUploadId } from "@/lib/study/uploads";
 
-/** Study sets: list them, read one, build one from Schoology, or throw one away. */
+/** Study sets: list them, read one, build one from Schoology and the student's own material, or throw one away. */
 
 export const dynamic = "force-dynamic";
 
 const numericId = z.string().regex(/^\d{1,24}$/);
+/** A Schoology item id, or a "c…" id for a test the student added by hand. */
+const setId = z.string().refine(isStudyId, "Not a study set id.");
 
 const Attachment = z.object({
   kind: z.enum(["file", "link", "page"]),
@@ -30,11 +33,20 @@ const Item = z.object({
   attachments: z.array(Attachment).max(40).optional(),
 });
 
+/** A Materials link as the class lists it: a Schoology path, or an outside https link. */
+const link = z.string().max(2000).regex(/^(?:\/[^\s]*|https:\/\/[^\s]+)$/);
+
 const Build = z.object({
-  target: Item.extend({ courseId: numericId, testKind: z.enum(["test", "quiz", "exam"]) }),
+  target: Item.extend({ id: setId, courseId: numericId, testKind: z.enum(["test", "quiz", "exam"]) }),
   course: z.object({ id: numericId, name: z.string().min(1).max(200) }),
   domain: z.string().regex(/^[\w.-]+\.schoology\.com$/).optional(),
   related: z.array(Item).max(300),
+  picks: z.array(z.object({ title: z.string().min(1).max(500), url: link, where: z.string().max(300).optional() })).max(40).optional(),
+  uploads: z.array(z.string().refine(isUploadId, "Not an upload id.")).max(20).optional(),
+  notes: z.string().max(4000).optional(),
+  auto: z.boolean().optional(),
+  custom: z.boolean().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 function summary(set: StudySet) {
@@ -43,6 +55,11 @@ function summary(set: StudySet) {
     courseId: set.courseId,
     course: set.course,
     title: set.title,
+    kind: set.kind,
+    due: set.due,
+    custom: !!set.custom,
+    date: set.date ?? null,
+    inputs: set.inputs ?? null,
     status: set.status,
     step: set.step,
     error: set.error,
@@ -78,6 +95,9 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!isStudyId(id)) return Response.json({ error: "Not found." }, { status: 404 });
+  // Files the student uploaded for this set go with it.
+  const set = await getSet(id).catch(() => null);
+  for (const upload of set?.inputs?.uploads ?? []) if (isUploadId(upload.id)) await deleteUpload(upload.id).catch(() => {});
   await deleteSet(id);
   return Response.json({ ok: true });
 }

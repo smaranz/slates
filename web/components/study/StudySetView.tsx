@@ -92,30 +92,61 @@ function Sources({ set, domain }: { set: StudySet; domain: string }) {
 export default function StudySetView({
   id,
   domain,
+  inert,
   onBack,
   onRebuild,
+  onChangeMaterial,
+  onDelete,
 }: {
   id: string;
   domain: string;
+  /** While the build sheet is open over it. */
+  inert?: boolean;
   onBack: () => void;
-  onRebuild: () => void;
+  /** Builds it again from the same material. */
+  onRebuild: (set: StudySet) => void;
+  /** Opens the build sheet on what it was built from. */
+  onChangeMaterial: (set: StudySet) => void;
+  onDelete: (set: StudySet) => Promise<void> | void;
 }) {
   const { set, error, load, saveProgress, morePractice } = useStudySet(id);
   const [tab, setTab] = useState<Tab>("guide");
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"rebuild" | "delete" | null>(null);
+
+  function confirm(action: "rebuild" | "delete"): boolean {
+    if (confirming === action) {
+      setConfirming(null);
+      return true;
+    }
+    setConfirming(action);
+    window.setTimeout(() => setConfirming((current) => (current === action ? null : current)), 4000);
+    return false;
+  }
 
   function rebuild() {
-    if (set?.status === "ready" && !confirming) {
-      setConfirming(true);
-      window.setTimeout(() => setConfirming(false), 4000);
-      return;
-    }
-    setConfirming(false);
-    onRebuild();
+    if (!set) return;
+    if (set.status === "ready" && !confirm("rebuild")) return;
+    setConfirming(null);
+    onRebuild(set);
     window.setTimeout(() => void load(), 600);
   }
 
+  const chosen = set?.inputs
+    ? [
+        set.inputs.picks.length && `${set.inputs.picks.length} picked from Materials`,
+        set.inputs.uploads.length && `${set.inputs.uploads.length} uploaded`,
+        set.inputs.notes && "your notes",
+      ].filter(Boolean)
+    : [];
+
   const read = set?.sources.filter((source) => source.read).length ?? 0;
+  const readSources = set?.sources.filter((source) => source.read) ?? [];
+  const yours = (where: string) => /^(Uploaded|Written) by you$/.test(where);
+  const places = [
+    readSources.some((source) => source.kind !== "web" && !yours(source.where)) && "Schoology",
+    readSources.some((source) => yours(source.where)) && "your own material",
+    readSources.some((source) => source.kind === "web") && "the web",
+  ].filter((place): place is string => !!place);
   const tabs: { id: Tab; label: string }[] = set
     ? [
         { id: "guide", label: "Guide" },
@@ -126,7 +157,7 @@ export default function StudySetView({
     : [];
 
   return (
-    <div className="scroll centered">
+    <div className="scroll centered" inert={inert}>
       <div className="col study-set">
         <header className="study-set-head">
           <button type="button" className="ui-back" onClick={onBack}>
@@ -134,15 +165,34 @@ export default function StudySetView({
           </button>
           {set && (
             <div className="study-set-title">
-              <span className="study-row-course">{set.course.replace(/\s+-\s+\d+$/, "")}</span>
+              <span className="study-set-kicker">
+                {set.course.replace(/\s+-\s+\d+$/, "")}
+                {set.custom ? " · Added by you" : ""}
+              </span>
               <h1>{set.title}</h1>
-              {set.due && <span className="study-muted">{set.due.replace(/\s+at$/i, "")}</span>}
+              <span className="study-muted">
+                {[set.due.replace(/\s+at$/i, ""), chosen.length ? `Built with ${chosen.join(", ")}` : ""].filter(Boolean).join(" · ")}
+              </span>
             </div>
           )}
           {set && set.status !== "gathering" && set.status !== "writing" && (
-            <button type="button" className={`btn btn--quiet${confirming ? " is-confirming" : ""}`} onClick={rebuild}>
-              <Icon path={ICON.retry} size={12} /> {confirming ? "Rebuild? This clears your progress" : "Rebuild"}
-            </button>
+            <div className="study-set-actions">
+              <button type="button" className="btn btn--quiet" onClick={() => onChangeMaterial(set)}>
+                <Icon path={ICON.folder} size={12} /> Change material
+              </button>
+              <button type="button" className={`btn btn--quiet${confirming === "rebuild" ? " is-confirming" : ""}`} onClick={rebuild}>
+                <Icon path={ICON.retry} size={12} /> {confirming === "rebuild" ? "Rebuild? This clears your progress" : "Rebuild"}
+              </button>
+              <button
+                type="button"
+                className={`btn btn--quiet study-delete${confirming === "delete" ? " is-confirming" : ""}`}
+                aria-label={confirming === "delete" ? "Really delete this study set?" : "Delete this study set"}
+                onClick={() => confirm("delete") && void onDelete(set)}
+              >
+                <Icon path={ICON.trash} size={12} />
+                {confirming === "delete" ? " Delete it?" : ""}
+              </button>
+            </div>
           )}
         </header>
 
@@ -156,6 +206,7 @@ export default function StudySetView({
             <p className="study-notice is-bad" role="alert"><Icon path={ICON.alert} size={13} /> {set.error ?? "The build failed."}</p>
             <div className="study-card-actions is-left">
               <button type="button" className="btn btn--primary" onClick={rebuild}>Try again</button>
+              <button type="button" className="btn btn--quiet" onClick={() => onChangeMaterial(set)}>Change material</button>
             </div>
           </div>
         )}
@@ -177,7 +228,7 @@ export default function StudySetView({
                 <TutorMarkdown text={set.guide} className="study-md" />
                 <p className="study-muted study-guide-foot">
                   {set.builder === "agent" ? "Researched and written by the study agent" : "Written"} from {read} {read === 1 ? "source" : "sources"}
-                  {set.sources.some((source) => source.read && source.kind === "web") ? ", in Schoology and on the web" : " in Schoology"}.{" "}
+                  {places.length ? `: ${places.length === 1 ? places[0] : `${places.slice(0, -1).join(", ")} and ${places.at(-1)}`}` : ""}.{" "}
                   <button type="button" className="study-link" onClick={() => setTab("sources")}>See which</button>
                 </p>
               </article>

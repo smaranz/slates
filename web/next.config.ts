@@ -32,6 +32,14 @@ const nextConfig: NextConfig = {
   // The floating dev-mode badge (route info, build activity) — off, not just
   // repositioned, so it never shows up over the composer or a card corner.
   devIndicators: false,
+  experimental: {
+    /*
+     * proxy.ts runs on every request, and Next buffers each request body for
+     * it — 10 MB by default, silently cutting off the rest. Study Studio takes
+     * uploads up to 25 MB (lib/study/uploads.ts), so the buffer sits above that.
+     */
+    proxyClientMaxBodySize: "30mb",
+  },
 };
 
 export default nextConfig;

@@ -2,7 +2,8 @@ import { ensureBrowser } from "@/lib/agent/browser";
 import { studyWithAgent } from "./agent";
 import { gather } from "./gather";
 import { getMaterial, getSet, saveMaterial, saveSet, updateSet } from "./store";
-import type { BuildRequest, StudyAnswer, StudySet } from "./types";
+import type { BuildRequest, StudyAnswer, StudyInputs, StudySet } from "./types";
+import { readUpload } from "./uploads";
 import { SET_MODEL, writeRound, writeSet, type WrittenSet } from "./write";
 
 /**
@@ -33,11 +34,22 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message.split("\n")[0]! : String(error);
 }
 
+/** What the student chose for this build, with upload names so the set can show them later. */
+async function inputsOf(request: BuildRequest): Promise<StudyInputs | undefined> {
+  const chose = !!(request.picks?.length || request.uploads?.length || request.notes?.trim()) || request.auto === false;
+  if (!chose) return undefined;
+  const uploads = await Promise.all(
+    (request.uploads ?? []).map(async (id) => ({ id, name: (await readUpload(id).catch(() => null))?.name ?? "Uploaded file" })),
+  );
+  return { picks: request.picks ?? [], uploads, notes: request.notes?.trim() ?? "", auto: request.auto !== false };
+}
+
 export async function startBuild(request: BuildRequest): Promise<StudySet> {
   const { target, course } = request;
   const existing = await getSet(target.id);
   if (running.has(target.id) && existing) return existing;
 
+  const inputs = await inputsOf(request);
   const set = await saveSet({
     id: target.id,
     courseId: course.id,
@@ -45,8 +57,11 @@ export async function startBuild(request: BuildRequest): Promise<StudySet> {
     title: target.title,
     kind: target.testKind,
     due: target.due ?? "",
+    ...(request.custom ? { custom: true } : {}),
+    ...(request.date ? { date: request.date } : {}),
+    ...(inputs ? { inputs } : {}),
     status: "gathering",
-    step: `Looking through ${course.name} in Schoology`,
+    step: request.auto === false ? "Reading the material you chose" : `Looking through ${course.name} in Schoology`,
     createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
     sources: [],

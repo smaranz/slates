@@ -26,6 +26,8 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 
 Sets live in `~/.slates/study` on the host. `web/lib/study/gather.ts` reads the unit through the sync service (Materials folders and every subfolder of the matching unit, Pages and link views via `/course/page`, files via `/course/document` + `/course/file`); the study agent (`web/lib/study/agent.ts`) then researches with the Agent app's browser and tools. School-only Google files are read with the Agent browser's Google sign-in (`web/lib/study/google.ts`); the sync browser has no Google session. `npx tsx --test lib/study/*.test.ts` in `web/`.
 
+Students can also choose a set's material before it builds (`web/components/study/StudyBuildSheet.tsx`): Materials items picked through `/api/study/materials`, files uploaded through `/api/study/upload` (kept in `~/.slates/study/uploads`, text read on arrival, 25 MB cap, hence `proxyClientMaxBodySize` in `web/next.config.ts`), notes on what the test covers, and whether the automatic Schoology search runs. `gather` reads those right after the test's own write-up; the choices are kept on the set as `inputs` so a rebuild reuses them. A test the student adds by hand gets a `c…` set id (`web/lib/study/store.ts`). `web/lib/study/choose.test.ts` covers it.
+
 ## Working here
 
 - In `web/`: `npx tsc --noEmit`, `npx eslint <paths>`, `npx tsx --test <file>.test.ts`. Tests that load a `server-only` module need a stub, since only Next provides it: point `NODE_PATH` at a folder holding an empty `server-only` package.
