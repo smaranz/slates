@@ -51,3 +51,6 @@ mobile/node_modules/
 /*.png
 web/body.json
 web/tooltest-tmp.mts
+
+# Python bytecode from the AI detector
+__pycache__/
