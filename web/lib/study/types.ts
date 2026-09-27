@@ -1,0 +1,120 @@
+import type { ItemAttachment } from "../types";
+import type { TestKind } from "./detect";
+
+/** Shared study-set shapes; safe in the browser and on the server. */
+
+export type SourceKind = "writeup" | "handout" | "review" | "material" | "homework";
+
+export interface StudySource {
+  /** Citation number used in the guide and on cards, from 1. */
+  n: number;
+  title: string;
+  kind: SourceKind;
+  /** Where in Schoology it came from, e.g. "Materials › Unit 2 › Notes". */
+  where: string;
+  /** Schoology href, relative to the school's domain; null when there is none. */
+  url: string | null;
+  /** Characters read from it; 0 when it was only listed. */
+  chars: number;
+  read: boolean;
+  /** Why it couldn't be read, when it couldn't. */
+  note?: string;
+}
+
+export interface StudyCard {
+  id: string;
+  front: string;
+  back: string;
+  topic: string;
+  source?: number;
+}
+
+export interface StudyQuestion {
+  id: string;
+  /** 1 for the set's own questions, then one more per "more practice" round. */
+  round: number;
+  type: "mcq" | "short";
+  prompt: string;
+  choices?: string[];
+  answer?: number;
+  explanation?: string;
+  rubric?: string;
+  sample?: string;
+  topic: string;
+  source?: number;
+}
+
+export interface StudyAnswer {
+  correct: boolean | null;
+  picked?: number;
+  text?: string;
+  feedback?: string;
+  at: number;
+}
+
+export interface StudyProgress {
+  cards: Record<string, "again" | "good">;
+  answers: Record<string, StudyAnswer>;
+}
+
+export type StudyStatus = "gathering" | "writing" | "ready" | "failed";
+
+export interface StudySet {
+  /** The test's Schoology id. */
+  id: string;
+  courseId: string;
+  course: string;
+  title: string;
+  kind: TestKind;
+  due: string;
+  status: StudyStatus;
+  /** What the build is doing right now, for the list and the set view. */
+  step: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+  builtAt?: number;
+  model?: string;
+  sources: StudySource[];
+  /** Something the student should know about how the set was built, e.g. Materials was unreachable. */
+  notice?: string;
+  /** Two or three sentences on what the test covers. */
+  overview: string;
+  /** The study guide, in Markdown, citing sources as [n]. */
+  guide: string;
+  cards: StudyCard[];
+  questions: StudyQuestion[];
+  progress: StudyProgress;
+  /** A "more practice" round is being written. */
+  practicing?: boolean;
+  practiceError?: string;
+}
+
+/** One board item as the builder needs it — sent by the browser, which holds the board. */
+export interface StudyItemInput {
+  id: string;
+  title: string;
+  kind?: string;
+  brief?: string;
+  due?: string;
+  dateOffset?: number | null;
+  url?: string | null;
+  attachments?: ItemAttachment[];
+}
+
+export interface BuildRequest {
+  target: StudyItemInput & { courseId: string; testKind: TestKind };
+  course: { id: string; name: string };
+  /** Other work in the same class, for the unit's homework and review sheets. */
+  related: StudyItemInput[];
+}
+
+export function mastery(set: Pick<StudySet, "questions" | "cards" | "progress">): number | null {
+  const answered = set.questions.filter((q) => set.progress.answers[q.id]?.correct != null);
+  const cards = set.cards.filter((c) => set.progress.cards[c.id]);
+  const total = answered.length + cards.length;
+  if (!total) return null;
+  const right = answered.filter((q) => set.progress.answers[q.id]!.correct).length
+    + cards.filter((c) => set.progress.cards[c.id] === "good").length;
+  return Math.round((right / total) * 100);
+}

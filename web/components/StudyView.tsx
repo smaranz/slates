@@ -1,523 +1,280 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { StudySummary } from "@/app/api/study/route";
 import { useStore } from "@/lib/store";
-import {
-  byWhenItMatters,
-  courseNameOf,
-  ingest,
-  useStudy,
-  type StudyModule,
-  type StudySession,
-} from "@/lib/study";
-import type { Quiz, QuizFRQuestion } from "@/lib/tutor-quiz";
-import type { Assignment } from "@/lib/types";
-import QuizCard from "./QuizCard";
-import { Icon, ICON } from "./ui";
+import { studyTargets, type StudyTarget } from "@/lib/study/detect";
+import type { BuildRequest, StudyItemInput } from "@/lib/study/types";
+import type { Assignment, Course, SyncSnapshot } from "@/lib/types";
+import StudySetView from "./study/StudySetView";
+import { useStudySets } from "./study/useStudySets";
+import { Icon, ICON, Spinner } from "./ui";
 
 /**
- * Study Studio — one prepared module per real assessment on the board.
+ * Study Studio: every test and quiz coming up, and a study set for any of them
+ * built from what the teacher actually posted in Schoology.
  *
- * The premise is the thing a general tutor cannot copy: Slates already knows
- * the test exists, what the teacher wrote about it, what was handed out with
- * it, when it is, and how this student has been scoring in that class. So the
- * studio never asks "what do you want to study?" — it lists the tests you
- * actually have and builds a module for the one you pick.
- *
- * Deliberately not a chat. The tutor view is the place for a conversation; a
- * module is a fixed artifact you sit down with, and it stays put between
- * sittings so returning to it is continuing rather than restarting.
+ * The list is found, not typed in — Slates already knows which items are tests
+ * (see lib/study/detect.ts). Building a set is the student's call, because it
+ * reads the class's files and spends a model run on them.
  */
 
-/* --------------------------------------------------------------- utilities */
-
-/** How much runway is left, worded the way a student would say it. */
-function runway(offset: number | null | undefined): { text: string; tone: string } {
-  if (offset === null || offset === undefined) return { text: "No date", tone: "var(--muted)" };
-  if (offset < 0) return { text: offset === -1 ? "Yesterday" : `${-offset} days ago`, tone: "var(--muted)" };
-  if (offset === 0) return { text: "Today", tone: "var(--bad)" };
-  if (offset === 1) return { text: "Tomorrow", tone: "var(--bad)" };
-  if (offset <= 3) return { text: `In ${offset} days`, tone: "var(--warn, var(--bad))" };
-  return { text: `In ${offset} days`, tone: "var(--muted)" };
+export function courseLabel(course: Pick<Course, "name" | "short"> | undefined): string {
+  if (!course) return "Class";
+  return course.short?.trim() || course.name.replace(/\s+-\s+\d+$/, "");
 }
 
-function minutesOf(module: StudyModule): number {
-  return module.plan?.steps.reduce((sum, s) => sum + s.minutes, 0) ?? 0;
+export function whenLabel(offset: number | null): { day: string; date: string; relative: string } {
+  if (offset === null) return { day: "", date: "No date", relative: "No date yet" };
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() + offset);
+  return {
+    day: offset === 0 ? "Today" : offset === 1 ? "Tmrw" : day.toLocaleDateString(undefined, { weekday: "short" }),
+    date: day.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    relative: offset === 0 ? "today" : offset === 1 ? "tomorrow" : `in ${offset} days`,
+  };
 }
 
-function saidPlainly(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
+function itemInput(assignment: Assignment): StudyItemInput {
+  return {
+    id: assignment.id,
+    title: assignment.title.slice(0, 500),
+    kind: assignment.kind,
+    brief: assignment.brief?.slice(0, 20_000),
+    due: assignment.due?.slice(0, 200),
+    dateOffset: assignment.dateOffset,
+    url: assignment.url || null,
+    attachments: assignment.attachments?.slice(0, 40),
+  };
 }
 
-/* -------------------------------------------------------------- the studio */
+function requestFor(target: StudyTarget, snapshot: SyncSnapshot): BuildRequest {
+  const course = snapshot.courses.find((entry) => entry.id === target.courseId);
+  return {
+    target: {
+      ...(target.assignment ? itemInput(target.assignment) : { id: target.id, title: target.title, due: target.due, dateOffset: target.dateOffset, url: target.url }),
+      courseId: target.courseId,
+      testKind: target.kind,
+    },
+    course: { id: target.courseId, name: course?.name ?? "this class" },
+    related: snapshot.assignments.filter((entry) => entry.courseId === target.courseId && entry.id !== target.id).slice(0, 300).map(itemInput),
+  };
+}
+
+const KIND_LABEL = { test: "Test", quiz: "Quiz", exam: "Exam" } as const;
+
+function Row({
+  target,
+  course,
+  summary,
+  onBuild,
+  onOpen,
+}: {
+  target: StudyTarget;
+  course: string;
+  summary: StudySummary | undefined;
+  onBuild: () => void;
+  onOpen: () => void;
+}) {
+  const when = whenLabel(target.dateOffset);
+  const building = summary?.status === "gathering" || summary?.status === "writing";
+  return (
+    <li className="study-row">
+      <div className={`study-when${target.dateOffset !== null && target.dateOffset <= 1 ? " is-soon" : ""}`}>
+        <strong>{when.day || "—"}</strong>
+        <span>{when.date}</span>
+      </div>
+      <button type="button" className="study-row-main" onClick={summary ? onOpen : onBuild} disabled={!summary && building}>
+        <span className="study-row-course">{course}</span>
+        <span className="study-row-title">{target.title}</span>
+        <span className="study-row-meta">{KIND_LABEL[target.kind]} · {when.relative} · {target.because}</span>
+      </button>
+      <div className="study-row-side">
+        {building ? (
+          <span className="study-row-status"><Spinner size={12} /> {summary!.step || "Building"}</span>
+        ) : summary?.status === "failed" ? (
+          <>
+            <span className="study-row-status is-bad">Couldn’t build</span>
+            <button type="button" className="btn btn--quiet" onClick={onBuild}>Try again</button>
+          </>
+        ) : summary?.status === "ready" ? (
+          <>
+            <span className="study-row-status">
+              {summary.cards} cards · {summary.questions} questions{summary.mastery !== null ? ` · ${summary.mastery}% right` : ""}
+            </span>
+            <button type="button" className="btn btn--quiet" onClick={onOpen}>Open</button>
+          </>
+        ) : (
+          <button type="button" className="btn btn--primary" onClick={onBuild}>Build study set</button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function Picker({ snapshot, taken, onPick }: { snapshot: SyncSnapshot; taken: Set<string>; onPick: (assignment: Assignment) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const choices = snapshot.assignments
+    .filter((assignment) => !taken.has(assignment.id) && !assignment.grade && (assignment.dateOffset === null || assignment.dateOffset >= 0))
+    .sort((a, b) => (a.dateOffset ?? 999) - (b.dateOffset ?? 999));
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !wrap.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  return (
+    <div className="study-picker" ref={wrap}>
+      <button type="button" className="btn btn--quiet" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <Icon path={ICON.plus} size={12} /> Study for something else
+      </button>
+      {open && (
+        <div className="study-picker-pop" role="listbox" aria-label="Pick an assignment">
+          {choices.length === 0 && <p className="study-muted">Nothing else is coming up.</p>}
+          {choices.map((assignment) => (
+            <button key={assignment.id} type="button" role="option" aria-selected={false} className="study-picker-item" onClick={() => { setOpen(false); onPick(assignment); }}>
+              <span>{assignment.title}</span>
+              <span className="study-muted">{courseLabel(snapshot.courses.find((course) => course.id === assignment.courseId))} · {whenLabel(assignment.dateOffset).relative}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function StudyView() {
   const s = useStore();
-  const study = useStudy();
+  const study = useStudySets();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
 
-  /*
-   * Keep the studio in step with the board. Runs on every snapshot change
-   * rather than once on mount: a sync that lands while the studio is open
-   * should make a newly posted test appear, not wait for a navigation.
-   */
-  useEffect(() => {
-    ingest(s.snapshot.assignments);
-  }, [s.snapshot.assignments]);
+  const targets = useMemo(() => studyTargets(s.snapshot), [s.snapshot]);
+  const byId = useMemo(() => new Map(study.sets.map((set) => [set.id, set])), [study.sets]);
+  const courseOf = (id: string) => courseLabel(s.snapshot.courses.find((course) => course.id === id));
 
-  const byId = useMemo(
-    () => new Map(s.snapshot.assignments.map((a) => [a.id, a])),
-    [s.snapshot.assignments]
-  );
+  async function build(target: StudyTarget) {
+    setBuildError(null);
+    try {
+      await study.build(requestFor(target, s.snapshot));
+    } catch (error) {
+      setBuildError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
-  /*
-   * Modules paired with their live assignment, soonest first. The assignment
-   * may be gone — an unpublished item, a new term — and the module survives
-   * that, so everything downstream treats it as optional.
-   */
-  const rows = useMemo(() => {
-    return study.modules
-      .map((module) => ({ module, assignment: byId.get(module.assignmentId) }))
-      /*
-       * Only what's still ahead. A test already sat is not something to study
-       * for, and leaving them here turns the studio into an archive you have
-       * to look past to find the one that matters.
-       *
-       * The check is on the live assignment, so a module goes quiet on its own
-       * the day after its test without anything being deleted — the plan and
-       * its sessions stay in storage, and reappear if the date ever moves back.
-       */
-      .filter(({ assignment }) => (assignment?.dateOffset ?? 0) >= 0)
-      .sort(byWhenItMatters);
-  }, [study.modules, byId]);
+  function buildOther(assignment: Assignment) {
+    void build({
+      id: assignment.id,
+      courseId: assignment.courseId,
+      title: assignment.title,
+      kind: "test",
+      because: "You picked this one",
+      dateOffset: assignment.dateOffset,
+      due: assignment.due,
+      url: assignment.url || null,
+      assignment,
+    });
+  }
 
-  const open = openId ? rows.find((r) => r.module.id === openId) : undefined;
-
-  if (open) {
+  if (openId) {
     return (
-      <ModuleView
-        key={`${open.module.id}:${open.module.plan?.generator.at ?? 0}`}
-        module={open.module}
-        assignment={open.assignment}
-        onBack={() => setOpenId(null)}
+      <StudySetView
+        id={openId}
+        domain={s.snapshot.domain}
+        onBack={() => {
+          setOpenId(null);
+          void study.refresh();
+        }}
+        onRebuild={() => {
+          const target = targets.find((entry) => entry.id === openId);
+          const assignment = s.snapshot.assignments.find((entry) => entry.id === openId);
+          if (target) void build(target);
+          else if (assignment) buildOther(assignment);
+        }}
       />
     );
   }
 
-  return (
-    <div className="scroll centered">
-      <div className="col" style={{ maxWidth: 1100, gap: 14 }}>
-      <header className="study-head">
-        <div>
-          <h1 className="study-title">Study Studio</h1>
-          <p className="study-sub">
-            Every test and quiz on your board, each with a module built from what your teacher
-            actually posted.
-          </p>
-        </div>
-      </header>
-
-      {rows.length === 0 ? (
-        <div className="study-empty">
-          <Icon path={ICON.bands} size={22} />
-          <p>Nothing coming up.</p>
-          <span>
-            When a teacher posts a test or quiz, it shows up here with a module you can build in
-            a click.
-          </span>
-        </div>
-      ) : (
-        <div className="study-grid">
-          {rows.map(({ module, assignment }) => (
-            <ModuleCard
-              key={module.id}
-              module={module}
-              assignment={assignment}
-              course={courseNameOf(s.snapshot.courses, module.courseId)}
-              sessions={study.sessionsFor(module.id)}
-              onOpen={() => setOpenId(module.id)}
-            />
-          ))}
-        </div>
-      )}
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------------------------------------------- the card */
-
-function ModuleCard({
-  module,
-  assignment,
-  course,
-  sessions,
-  onOpen,
-}: {
-  module: StudyModule;
-  assignment: Assignment | undefined;
-  course: string;
-  sessions: StudySession[];
-  onOpen: () => void;
-}) {
-  const when = runway(assignment?.dateOffset);
-  const built = module.plan !== null;
-
-  return (
-    <button type="button" className="study-card" onClick={onOpen}>
-      <div className="study-card-top">
-        <span className="study-card-course">{course}</span>
-        <span className="study-card-when" style={{ color: when.tone }}>
-          {when.text}
-        </span>
-      </div>
-
-      <h2 className="study-card-title">{module.title}</h2>
-
-      <div className="study-card-foot">
-        {module.building ? (
-          <span className="study-chip study-chip--busy">
-            <span className="study-spinner" aria-hidden />
-            Building
-          </span>
-        ) : module.error ? (
-          <span className="study-chip study-chip--bad">Couldn&rsquo;t build</span>
-        ) : built ? (
-          <>
-            <span className="study-chip">{saidPlainly(minutesOf(module))}</span>
-            {module.plan?.practice && (
-              <span className="study-chip">
-                {module.plan.practice.questions.length} practice
-              </span>
-            )}
-            {sessions.length > 0 && (
-              <span className="study-chip study-chip--quiet">
-                {sessions.length === 1 ? "1 session" : `${sessions.length} sessions`}
-              </span>
-            )}
-          </>
-        ) : (
-          <span className="study-chip study-chip--new">Not built yet</span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-/* ---------------------------------------------------------------- the module */
-
-function ModuleView({
-  module,
-  assignment,
-  onBack,
-}: {
-  module: StudyModule;
-  assignment: Assignment | undefined;
-  onBack: () => void;
-}) {
-  const s = useStore();
-  const study = useStudy();
-  const [quiz, setQuiz] = useState<Quiz | null>(module.plan?.practice ?? null);
-
-  /*
-   * The unmount cleanup below reads the answers as they stood at the end, and
-   * a cleanup closes over the render that registered it — so the live set is
-   * mirrored into a ref for it to read.
-   */
-  const quizRef = useRef<Quiz | null>(quiz);
-  useEffect(() => {
-    quizRef.current = quiz;
-  }, [quiz]);
-
-  /*
-   * A sitting starts when the module is opened and ends when it is left. The
-   * recap is written from what actually happened in the practice, not from a
-   * model call — a summary of nothing would be worse than no summary.
-   */
-  useEffect(() => {
-    if (!module.plan) return;
-    const id = study.startSession(module.id);
-    const openedAt = Date.now();
-    return () => {
-      const answered = countAnswered(quizRef.current);
-      const seconds = Math.round((Date.now() - openedAt) / 1000);
-
-      /*
-       * A sitting counts if practice was attempted or the module was actually
-       * open for a while. Anything less was a glance, and a list of glances is
-       * not a study history.
-       */
-      if (answered === 0 && seconds < 60) {
-        study.dropSession(id);
-        return;
-      }
-
-      const correct = countCorrect(quizRef.current);
-      study.endSession(
-        id,
-        answered > 0
-          ? `Worked ${answered} practice question${answered === 1 ? "" : "s"}, ${correct} right.`
-          : `Read through the plan for ${saidPlainly(Math.max(1, Math.round(seconds / 60)))}.`,
-        { answered, correct }
-      );
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [module.id, module.plan !== null]);
-
-  const build = useCallback(async () => {
-    study.setModule(module.id, { building: true, error: undefined });
-
-    /*
-     * Everything Slates knows about this assessment, gathered here rather than
-     * on the server: the snapshot lives in the browser, and shipping the whole
-     * board to a route so it can pick one item out would be silly.
-     */
-    const grades = s.snapshot.assignments
-      .filter((a) => a.courseId === module.courseId && a.grade && a.id !== module.assignmentId)
-      .sort((a, b) => (a.dateOffset ?? 0) - (b.dateOffset ?? 0))
-      .slice(-15)
-      .map((a) => ({
-        title: a.title,
-        score: `${a.grade!.earned}/${a.grade!.possible}`,
-        category: a.code || undefined,
-      }));
-
-    try {
-      const res = await fetch("/api/study/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: module.title,
-          course: courseNameOf(s.snapshot.courses, module.courseId),
-          due: module.due,
-          kind: assignment?.kind,
-          brief: assignment?.brief,
-          points: assignment?.points ?? null,
-          assessment: assignment?.assessment
-            ? {
-                timeLimitMin: assignment.assessment.timeLimitMin ?? null,
-                questionPoints: assignment.assessment.questionPoints ?? null,
-              }
-            : null,
-          attachments: assignment?.attachments?.map((a) => a.title).filter(Boolean),
-          grades,
-        }),
-      });
-
-      const data = (await res.json()) as { plan?: StudyModule["plan"]; error?: string };
-      if (!res.ok || !data.plan) throw new Error(data.error ?? `Request failed (${res.status})`);
-
-      /* Storing the plan changes this view's key, which remounts it with the
-         new practice — so there is nothing to set here. */
-      study.setModule(module.id, { plan: data.plan, building: false, error: undefined });
-    } catch (err) {
-      study.setModule(module.id, {
-        building: false,
-        error: err instanceof Error ? err.message : "Building the module failed.",
-      });
-    }
-  }, [module, assignment, s.snapshot, study]);
-
-  /*
-   * Free response is marked here rather than in the tutor. A module is a
-   * sitting, not a thread: sending the student to another view to read one
-   * paragraph of feedback would end the sitting to answer a question about it.
-   */
-  const [marking, setMarking] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-
-  const mark = useCallback(
-    async (question: QuizFRQuestion, answer: string) => {
-      setMarking(true);
-      setFeedback(null);
-      try {
-        const res = await fetch("/api/study/feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: question.prompt,
-            answer,
-            rubric: question.rubric,
-            assessment: module.title,
-          }),
-        });
-        const data = (await res.json()) as { feedback?: string; error?: string };
-        if (!res.ok || !data.feedback) throw new Error(data.error ?? "Marking it failed.");
-        setFeedback(data.feedback);
-      } catch (err) {
-        setFeedback(err instanceof Error ? err.message : "Marking it failed.");
-      } finally {
-        setMarking(false);
-      }
-    },
-    [module.title]
-  );
-
-  const past = study.sessionsFor(module.id);
-  const when = runway(assignment?.dateOffset);
+  const groups = [
+    { label: "This week", rows: targets.filter((target) => target.dateOffset !== null && target.dateOffset <= 6) },
+    { label: "Later", rows: targets.filter((target) => target.dateOffset !== null && target.dateOffset > 6) },
+    { label: "No date yet", rows: targets.filter((target) => target.dateOffset === null) },
+  ].filter((group) => group.rows.length);
+  const targetIds = new Set(targets.map((target) => target.id));
+  const others = study.sets.filter((set) => !targetIds.has(set.id));
 
   return (
     <div className="scroll centered">
-      <div className="col" style={{ maxWidth: 820, gap: 14 }}>
-      <button type="button" className="study-back" onClick={onBack}>
-        <Icon path={ICON.chevronLeft} size={14} />
-        All modules
-      </button>
-
-      <header className="study-module-head">
-        <div className="study-module-meta">
-          <span>{courseNameOf(s.snapshot.courses, module.courseId)}</span>
-          <span style={{ color: when.tone }}>{when.text}</span>
-          {module.due && <span>{module.due}</span>}
-        </div>
-        <h1 className="study-module-title">{module.title}</h1>
-        {assignment && (
-          <button
-            type="button"
-            className="study-link"
-            onClick={() => s.openAssignment(assignment.id)}
-          >
-            Open the assignment
-            <Icon path={ICON.external} size={12} />
-          </button>
-        )}
-      </header>
-
-      {!module.plan ? (
-        <div className="study-build">
-          <p>
-            {module.building
-              ? "Claude Opus 5 is reading the write-up, the handouts and your grades in this class."
-              : "Nothing built yet. Slates will read the teacher’s write-up, whatever was posted with it, and your marks in this class, then put together a plan and practice on the same skills."}
+      <div className="col study-home">
+        <div className="study-home-bar">
+          <p className="study-muted">
+            {targets.length
+              ? `${targets.length} ${targets.length === 1 ? "test or quiz" : "tests and quizzes"} coming up, found on your board and in your grades.`
+              : "No tests or quizzes coming up on your board or in your grades."}
           </p>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={build}
-            disabled={module.building}
-          >
-            {module.building ? "Building…" : "Build the module"}
-          </button>
-          {module.error && <p className="study-error">{module.error}</p>}
+          <Picker snapshot={s.snapshot} taken={targetIds} onPick={buildOther} />
         </div>
-      ) : (
-        <div className="study-module-body">
-          <Section title="What it covers">
-            <ul className="study-covers">
-              {module.plan.covers.map((c, i) => (
-                <li key={i}>{c}</li>
+
+        {(buildError || study.error) && (
+          <p className="study-notice is-bad" role="alert"><Icon path={ICON.alert} size={13} /> {buildError ?? study.error}</p>
+        )}
+
+        {groups.map((group) => (
+          <section key={group.label} className="study-group" aria-label={group.label}>
+            <h2>{group.label}</h2>
+            <ul className="study-rows">
+              {group.rows.map((target) => (
+                <Row
+                  key={target.id}
+                  target={target}
+                  course={courseOf(target.courseId)}
+                  summary={byId.get(target.id)}
+                  onBuild={() => void build(target)}
+                  onOpen={() => setOpenId(target.id)}
+                />
               ))}
             </ul>
-          </Section>
+          </section>
+        ))}
 
-          {module.plan.weakTopics.length > 0 && (
-            <Section title="Worth extra time">
-              <ul className="study-weak">
-                {module.plan.weakTopics.map((w, i) => (
-                  <li key={i}>
-                    <strong>{w.topic}</strong>
-                    <span>{w.evidence}</span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          <Section title={`The plan · ${saidPlainly(minutesOf(module))}`}>
-            <ol className="study-steps">
-              {module.plan.steps.map((step, i) => (
-                <li key={i}>
-                  <div className="study-step-head">
-                    <span className="study-step-title">{step.title}</span>
-                    <span className="study-step-min">{step.minutes} min</span>
+        {others.length > 0 && (
+          <section className="study-group" aria-label="Other study sets">
+            <h2>Other study sets</h2>
+            <ul className="study-rows">
+              {others.map((set) => (
+                <li key={set.id} className="study-row">
+                  <div className="study-when"><strong>—</strong><span>Done</span></div>
+                  <button type="button" className="study-row-main" onClick={() => setOpenId(set.id)}>
+                    <span className="study-row-course">{courseOf(set.courseId)}</span>
+                    <span className="study-row-title">{set.title}</span>
+                    <span className="study-row-meta">{set.cards} cards · {set.questions} questions{set.mastery !== null ? ` · ${set.mastery}% right` : ""}</span>
+                  </button>
+                  <div className="study-row-side">
+                    <button type="button" className="btn btn--quiet" onClick={() => void study.remove(set.id)}>Delete</button>
                   </div>
-                  <p>{step.detail}</p>
                 </li>
               ))}
-            </ol>
-          </Section>
+            </ul>
+          </section>
+        )}
 
-          {quiz && (
-            <Section title="Practice">
-              <QuizCard
-                quiz={quiz}
-                busy={marking}
-                onSelect={(qi, choice) =>
-                  setQuiz((q) => (q ? patchQuestion(q, qi, { selected: choice }) : q))
-                }
-                onReveal={(qi) =>
-                  setQuiz((q) => (q ? patchQuestion(q, qi, { revealed: true }) : q))
-                }
-                onRequestFeedback={mark}
-              />
-              {marking && <p className="study-marking">Marking your answer\u2026</p>}
-              {feedback && <p className="study-feedback">{feedback}</p>}
-            </Section>
-          )}
-
-          {past.length > 0 && (
-            <Section title="Past sessions">
-              <ul className="study-sessions">
-                {past.slice(0, 6).map((session) => (
-                  <li key={session.id}>
-                    <span>{new Date(session.endedAt ?? 0).toLocaleDateString()}</span>
-                    <span>{session.recap}</span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          <footer className="study-module-foot">
-            <span className="study-built">
-              Built by {module.plan.generator.model} on{" "}
-              {new Date(module.plan.generator.at).toLocaleDateString()}
-            </span>
-            <button
-              type="button"
-              className="btn"
-              onClick={build}
-              disabled={module.building}
-            >
-              {module.building ? "Rebuilding…" : "Rebuild"}
-            </button>
-          </footer>
-          {module.error && <p className="study-error">{module.error}</p>}
-        </div>
-      )}
+        {!targets.length && !others.length && study.loaded && (
+          <p className="study-empty">
+            When a teacher posts a test or quiz, or adds one to the gradebook, it shows up here. You can also build a set for any assignment with “Study for something else”.
+          </p>
+        )}
       </div>
     </div>
   );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="study-section">
-      <span className="section-label">{title}</span>
-      {children}
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ scoring */
-
-function patchQuestion(quiz: Quiz, index: number, patch: Record<string, unknown>): Quiz {
-  return {
-    ...quiz,
-    questions: quiz.questions.map((q, i) => (i === index ? { ...q, ...patch } : q)),
-  };
-}
-
-function countAnswered(quiz: Quiz | null): number {
-  if (!quiz) return 0;
-  return quiz.questions.filter((q) => q.type === "mcq" && q.selected != null).length;
-}
-
-function countCorrect(quiz: Quiz | null): number {
-  if (!quiz) return 0;
-  return quiz.questions.filter((q) => q.type === "mcq" && q.selected === q.answer).length;
 }

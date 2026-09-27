@@ -58,7 +58,27 @@ function tidy(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-async function pdfText(bytes: ArrayBuffer): Promise<string> {
+/** How much of one document to read: the estimator wants a glance, Study Studio the whole handout. */
+export interface TextLimits {
+  chars: number;
+  pages: number;
+}
+
+const ESTIMATE_LIMITS: TextLimits = { chars: PER_DOC, pages: 5 };
+
+/** Formats a handout can be read from. */
+export const READABLE = ["pdf", "txt", "md", "csv", "docx", "pptx"];
+
+/** One document's text, or "" for a format with none. */
+export async function extractText(bytes: ArrayBuffer, ext: string, limits: TextLimits): Promise<string> {
+  if (ext === "pdf") return pdfText(bytes, limits);
+  if (ext === "docx") return docxText(bytes, limits);
+  if (ext === "pptx") return pptxText(bytes, limits);
+  if (["txt", "md", "csv"].includes(ext)) return tidy(new TextDecoder().decode(bytes)).slice(0, limits.chars);
+  return "";
+}
+
+async function pdfText(bytes: ArrayBuffer, limits: TextLimits): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   /*
@@ -83,18 +103,18 @@ async function pdfText(bytes: ArrayBuffer): Promise<string> {
   const pages: string[] = [];
   // The first few pages carry the instructions; a twenty-page reading does not
   // need to be transcribed to know it is a twenty-page reading.
-  const limit = Math.min(doc.numPages, 5);
+  const limit = Math.min(doc.numPages, limits.pages);
   for (let i = 1; i <= limit; i += 1) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
     pages.push(
       content.items.map((item) => ("str" in item ? (item as { str: string }).str : "")).join(" ")
     );
-    if (pages.join(" ").length > PER_DOC) break;
+    if (pages.join(" ").length > limits.chars) break;
   }
   const more = doc.numPages > limit ? ` [${doc.numPages} pages total]` : "";
   void doc.cleanup();
-  return tidy(pages.join(" ")).slice(0, PER_DOC) + more;
+  return tidy(pages.join(" ")).slice(0, limits.chars) + more;
 }
 
 /**
@@ -104,10 +124,35 @@ async function pdfText(bytes: ArrayBuffer): Promise<string> {
  * estimator is counting questions and reading instructions, and the heading
  * levels would be tokens spent on formatting it has no use for.
  */
-async function docxText(bytes: ArrayBuffer): Promise<string> {
+async function docxText(bytes: ArrayBuffer, limits: TextLimits): Promise<string> {
   const mammoth = (await import("mammoth")).default;
   const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
-  return tidy(value).slice(0, PER_DOC);
+  return tidy(value).slice(0, limits.chars);
+}
+
+/**
+ * A slide deck's words, slide by slide.
+ *
+ * Teachers post lectures as PowerPoint more than anything else. A .pptx is a
+ * zip of one XML file per slide, and the words sit in its `<a:t>` runs.
+ */
+async function pptxText(bytes: ArrayBuffer, limits: TextLimits): Promise<string> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(bytes);
+  const slides = Object.keys(zip.files)
+    .map((name) => ({ name, n: Number(/^ppt\/slides\/slide(\d+)\.xml$/.exec(name)?.[1]) }))
+    .filter((slide) => slide.n)
+    .sort((a, b) => a.n - b.n)
+    .slice(0, limits.pages);
+  const out: string[] = [];
+  for (const slide of slides) {
+    const xml = await zip.file(slide.name)!.async("string");
+    const words = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join(" ");
+    const text = tidy(words.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'"));
+    if (text) out.push(`Slide ${slide.n}: ${text}`);
+    if (out.join(" ").length > limits.chars) break;
+  }
+  return out.join("\n").slice(0, limits.chars);
 }
 
 export interface DocumentRef {
@@ -146,7 +191,7 @@ export async function readAttachments(
     // Only files Schoology hosts, and only ones likely to carry text.
     if (!/^\/attachment\/\d+\//.test(ref.url)) continue;
     const ext = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(ref.url)?.[1]?.toLowerCase();
-    if (!ext || !["pdf", "txt", "md", "csv", "docx"].includes(ext)) {
+    if (!ext || !READABLE.includes(ext)) {
       // Remembered as empty so it is not retried on every sync.
       cache[ref.url] = { text: "", at: Date.now() };
       dirty = true;
@@ -159,13 +204,7 @@ export async function readAttachments(
         signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) throw new Error(String(res.status));
-      const bytes = await res.arrayBuffer();
-      const text =
-        ext === "pdf"
-          ? await pdfText(bytes)
-          : ext === "docx"
-            ? await docxText(bytes)
-            : tidy(new TextDecoder().decode(bytes)).slice(0, PER_DOC);
+      const text = await extractText(await res.arrayBuffer(), ext, ESTIMATE_LIMITS);
       cache[ref.url] = { text, at: Date.now() };
       dirty = true;
       if (text) out.set(ref.url, text);
