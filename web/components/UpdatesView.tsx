@@ -50,7 +50,7 @@ export default function UpdatesView() {
 
   return (
     <div className="scroll">
-      <div className="col" style={{ gap: 18 }}>
+      <div className="col" style={{ maxWidth: 820, gap: 18 }}>
         {sources.length > 1 && (
           <div role="group" aria-label="Show updates from" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             <Chip on={active === "all"} onClick={() => setFilter("all")}>
@@ -237,6 +237,7 @@ export function UpdatesPeek({ courseId }: { courseId: string }) {
           fontSize: 13.5,
           lineHeight: 1.5,
           color: "var(--text-2)",
+          whiteSpace: "pre-line",
           display: "-webkit-box",
           WebkitLineClamp: 3,
           WebkitBoxOrient: "vertical",

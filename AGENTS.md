@@ -30,6 +30,10 @@ Students can also choose a set's material before it builds (`web/components/stud
 
 Scanned PDFs (no text layer, or only a scanner app's stamp) and photos are read off the page by a vision model (`web/lib/study/scan.ts`): GPT-6 Luna, through OpenRouter first and then straight from OpenAI, falling through when a key is missing or refused. That covers uploads and Schoology files alike, and the text is kept, so each file is read once. On the host the OpenAI key in `.env` is refused (401) and OpenRouter's works. `web/lib/study/scan.test.ts` swaps the model for a fake.
 
+## Schoology updates
+
+Teachers' posts to their classes are read by `scraper/updates.mjs` from `/home/feed?page=N` (JSON wrapping the feed's markup) through the sync browser's session, with full text from each post's "Show More" link cached in `~/.slates/update-bodies.json`. Schoology answers a burst of requests with 429, so they're spaced out, and a sync whose first page holds nothing new reuses the last read. Posts land in the snapshot as `updates`, matched to a class by the course page id in its `url`. School shows them in `web/components/UpdatesView.tsx`; `web/lib/updates.ts` keeps what counts as new (`npx tsx --test lib/updates.test.ts`).
+
 ## Working here
 
 - In `web/`: `npx tsc --noEmit`, `npx eslint <paths>`, `npx tsx --test <file>.test.ts`. Tests that load a `server-only` module need a stub, since only Next provides it: point `NODE_PATH` at a folder holding an empty `server-only` package.
