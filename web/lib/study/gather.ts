@@ -364,7 +364,7 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
       source.read = true;
     } catch (error) {
       source.note = error instanceof NeedsGoogleSignIn
-        ? `A Google file shared only inside your school. ${error.message}`
+        ? error.message
         : `Couldn’t be read: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
       if (error instanceof NeedsGoogleSignIn) lockedGoogle += 1;
     }

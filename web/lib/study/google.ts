@@ -54,7 +54,7 @@ export async function readGoogle(url: string, limits: TextLimits): Promise<strin
     if (text) return text;
     throw new Error("Slates can't read text from that kind of Google Drive file.");
   }
-  throw new NeedsGoogleSignIn("Shared only inside your school; sign in to your school Google account in Agent › Computer and rebuild.");
+  throw new NeedsGoogleSignIn("A Google file shared only inside your school. Sign in to your school Google account once in Agent › Computer, then rebuild.");
 }
 
 /**

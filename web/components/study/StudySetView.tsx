@@ -136,7 +136,7 @@ export default function StudySetView({
             <div className="study-set-title">
               <span className="study-row-course">{set.course.replace(/\s+-\s+\d+$/, "")}</span>
               <h1>{set.title}</h1>
-              {set.due && <span className="study-muted">{set.due}</span>}
+              {set.due && <span className="study-muted">{set.due.replace(/\s+at$/i, "")}</span>}
             </div>
           )}
           {set && set.status !== "gathering" && set.status !== "writing" && (
