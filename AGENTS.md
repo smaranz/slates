@@ -28,7 +28,7 @@ Sets live in `~/.slates/study` on the host. `web/lib/study/gather.ts` reads the 
 
 Students can also choose a set's material before it builds (`web/components/study/StudyBuildSheet.tsx`): Materials items picked through `/api/study/materials`, files uploaded through `/api/study/upload` (kept in `~/.slates/study/uploads`, text read on arrival, 25 MB cap, hence `proxyClientMaxBodySize` in `web/next.config.ts`), notes on what the test covers, and whether the automatic Schoology search runs. `gather` reads those right after the test's own write-up; the choices are kept on the set as `inputs` so a rebuild reuses them. A test the student adds by hand gets a `c…` set id (`web/lib/study/store.ts`). `web/lib/study/choose.test.ts` covers it.
 
-Scanned PDFs (no text layer, or only a scanner app's stamp) and photos are read off the page by a vision model (`web/lib/study/scan.ts`): Gemini through OpenRouter first, then OpenAI, falling through when a key is missing or refused. That covers uploads and Schoology files alike, and the text is kept, so each file is read once. On the host the OpenAI key in `.env` is refused (401) and OpenRouter's works. `web/lib/study/scan.test.ts` swaps the model for a fake.
+Scanned PDFs (no text layer, or only a scanner app's stamp) and photos are read off the page by a vision model (`web/lib/study/scan.ts`): GPT-6 Luna, through OpenRouter first and then straight from OpenAI, falling through when a key is missing or refused. That covers uploads and Schoology files alike, and the text is kept, so each file is read once. On the host the OpenAI key in `.env` is refused (401) and OpenRouter's works. `web/lib/study/scan.test.ts` swaps the model for a fake.
 
 ## Working here
 

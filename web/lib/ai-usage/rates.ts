@@ -23,6 +23,7 @@ const TOKEN_RATES: { match: string; rate: ModelRate }[] = [
   { match: "gpt-5.6-sol", rate: { input: 5, output: 30, unit: "tokens" } },
   { match: "gpt-5.6-terra", rate: { input: 1.25, output: 10, unit: "tokens" } },
   { match: "gpt-5.6-luna", rate: { input: 0.15, output: 0.6, unit: "tokens" } },
+  { match: "gpt-6-luna", rate: { input: 0.1, output: 0.5, unit: "tokens" } },
   { match: "gpt-realtime-2.1-mini", rate: { input: 10, output: 20, unit: "tokens" } },
   { match: "gpt-4o-mini-transcribe", rate: { input: 0.5, output: 0, unit: "tokens" } },
   { match: "claude-opus-5-5", rate: { input: 4, output: 20, unit: "tokens" } },

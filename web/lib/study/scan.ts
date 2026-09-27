@@ -10,13 +10,13 @@ import { extractText, READABLE, type TextLimits } from "../attachment-text";
  */
 
 /**
- * Who reads a scan, in order: Gemini through OpenRouter reads a PDF's pages as
- * images, and OpenAI is the fallback. The next one is tried when a key is
- * missing or refused.
+ * Who reads a scan: GPT-6 Luna, which takes a PDF's pages as images. Through
+ * OpenRouter first, since that's the key that works on the host, then straight
+ * from OpenAI; the second is tried when the first key is missing or refused.
  */
 export const SCAN_READERS = [
-  { backend: "openrouter", model: "google/gemini-3.7-flash" },
-  { backend: "openai", model: "gpt-5.6-luna" },
+  { backend: "openrouter", model: "openai/gpt-6-luna" },
+  { backend: "openai", model: "gpt-6-luna" },
 ] as const;
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
 /** Everything Study Studio can take words from, from a text layer or off the page. */
@@ -69,7 +69,8 @@ async function readWithModel(file: { data: Uint8Array; mediaType: string; name: 
             ],
           },
         ],
-        ...(backend === "openai" ? { providerOptions: { openai: { reasoningEffort: "low" } } } : {}),
+        // Copying words off a page needs little thought; low effort keeps a scan to seconds.
+        providerOptions: backend === "openai" ? { openai: { reasoningEffort: "low" } } : { openrouter: { reasoning: { effort: "low" } } },
         abortSignal: AbortSignal.timeout(180_000),
       });
       noteFromUsage("study", model, backend, usage);
