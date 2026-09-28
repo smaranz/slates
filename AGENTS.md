@@ -13,7 +13,7 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 ## Deploying to the PC
 
 1. Commit on the Mac. If `main` is pushed, run `git pull --ff-only` on the PC. If not, ship a bundle: `git bundle create /tmp/slates.bundle <pc-head>..main`, copy it over with `scp`, then on the PC run `git fetch <bundle> main` and `git merge --ff-only FETCH_HEAD`.
-2. Restart: `node bin\slates.js host --stop`, then `Start-ScheduledTask -TaskName "Slates host"`. It reinstalls when the lockfile changed and rebuilds when HEAD changed (a few minutes of downtime), then logs "portal ready".
+2. Restart: `node bin\slates.js host --stop`, then `Start-ScheduledTask -TaskName "Slates host"`. It reinstalls when the lockfile changed and rebuilds when HEAD changed (a few minutes of downtime), then logs "portal ready". A restart ends any agent turn in progress (agents run inside the portal), so check `GET /api/agent` for one `working` first and tell the student. A cut-off agent says so in its chat and picks up on its next message (`web/lib/agent/runs.ts`).
 3. Check from the Mac: `curl -H "sec-fetch-site: same-origin" https://smaran.tail55de6b.ts.net/api/host` (open to anyone; other paths need Tailscale on or a device key).
 
 ## The desktop app

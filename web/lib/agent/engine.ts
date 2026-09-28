@@ -9,6 +9,7 @@ import { Agent, Cursor, JsonlLocalAgentStore, type SDKImage } from "@cursor/sdk"
 import { noteUsage } from "@/lib/ai-usage/note";
 import { browserMcp, ensureBrowser } from "./browser";
 import { publish } from "./hub";
+import { hasCutOffTurn } from "./runs";
 import { nextRunAfter } from "./schedule";
 import {
   agents, chatEvents, ensureDirs, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, skills, updateAgent, WORKSPACE,
@@ -317,6 +318,15 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     updateAgent(profile.id, (agent) => ({ ...agent, runtimeId: sdk!.agentId }));
   }
 
+  // A turn the host's restart cut off still counts as going, and the SDK
+  // refuses this one until it's expired. The student and the agent both hear
+  // why the work stopped, and the send below forces past it.
+  const cutOff = profile.runtimeId === sdk.agentId && (await hasCutOffTurn(runtimeStore, sdk.agentId));
+  if (cutOff) {
+    addNote(profile.id, "Your previous turn was cut off partway through: Slates restarted on the PC. Anything it was doing may be unfinished, and programs it started may have stopped. Check before carrying on.");
+    post(job.chatId, { id: newId("evt"), at: Date.now(), type: "notice", text: `${profile.name}'s last turn was cut off when Slates restarted on the PC, so it's picking up from here.` });
+  }
+
   const segments: string[] = [];
   let text: Extract<ChatEvent, { type: "agent" }> | null = null;
   let thinking: Extract<ChatEvent, { type: "thinking" }> | null = null;
@@ -380,9 +390,10 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const send = (force: boolean) => sdk!.send(message, { mode: "agent", onDelta, ...(force ? { local: { force: true } } : {}) });
   let run;
   try {
-    run = await send(false);
+    run = await send(cutOff);
   } catch (error) {
-    if (!/busy/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    // One turn per agent runs here, so a turn the SDK still thinks is going is a leftover.
+    if (!/busy|already has active run/i.test(error instanceof Error ? error.message : String(error))) throw error;
     run = await send(true);
   }
   active.cancel = () => run.cancel();
