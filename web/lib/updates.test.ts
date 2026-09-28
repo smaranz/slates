@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Update } from "./types";
-import { byDay, dayLabel, parseSeen, sourceKey, sourcesOf, unseenCount } from "./updates";
+import { byDay, dayLabel, parseSeen, unseenCount } from "./updates";
 
 const now = new Date(2026, 8, 27, 10, 0, 0, 0);
 
@@ -49,26 +49,10 @@ test("posts group under one heading per day, newest first", () => {
   );
 });
 
-test("a class is one source by id, a group by its name, the latest poster first", () => {
-  const list = sourcesOf([
-    post("a", new Date(2026, 8, 20), "8467908634", "Spanish 3 - 4330: AbarcaN p1 T1"),
-    post("b", new Date(2026, 8, 25)),
-    post("c", new Date(2026, 8, 24), "8467908634", "Spanish 3 - 4330: AbarcaN p1 T1"),
-  ]);
-  assert.deepEqual(
-    list.map((s) => [s.key, s.count]),
-    [
-      ["r:CHS Hub: Gr10", 1],
-      ["c:8467908634", 2],
-    ]
-  );
-  assert.equal(sourceKey(post("d", now, "1")), "c:1");
-});
-
-test("a post is new until the feed is read past it or its class page shows it", () => {
+test("a post is new until its class page shows it", () => {
   const seen = { baseline: new Date(2026, 8, 24).getTime(), ids: ["a"] };
   const posts = [post("a", new Date(2026, 8, 25)), post("b", new Date(2026, 8, 26)), post("c", new Date(2026, 8, 23))];
-  // a was read on its class page, c is older than the last full read, b is new.
+  // a was read on its class page, c is older than the baseline, b is new.
   assert.equal(unseenCount(posts, seen), 1);
   assert.equal(unseenCount(undefined, seen), 0);
 });

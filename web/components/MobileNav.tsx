@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
-import { unseenCount, useUpdatesSeen } from "@/lib/updates";
 import { Icon, ICON } from "./ui";
 
 interface Destination {
@@ -24,7 +23,6 @@ const PRIMARY: Destination[] = [
 const SECONDARY: Destination[] = [
   { label: "Study", short: "Study", view: "study", path: ICON.bands },
   { label: "Classes", short: "Classes", view: "classes", path: ICON.classes },
-  { label: "Updates", short: "Updates", view: "updates", path: ICON.updates },
   { label: "Messages", short: "Messages", view: "messages", path: ICON.messages },
 ];
 
@@ -46,8 +44,6 @@ export default function MobileNav() {
     () => s.snapshot.messages.filter((m) => m.unread && !s.msgRead[m.id]).length,
     [s.msgRead, s.snapshot.messages]
   );
-  const { seen: updatesSeen } = useUpdatesSeen();
-  const newUpdates = unseenCount(s.snapshot.updates, updatesSeen);
   const moreActive = SECONDARY.some((item) => item.view === s.view);
 
   useEffect(() => {
@@ -96,7 +92,7 @@ export default function MobileNav() {
             <div className="mobile-more-list">
               {SECONDARY.map((item) => {
                 const active = item.view === s.view;
-                const count = item.view === "messages" ? unread : item.view === "updates" ? newUpdates : 0;
+                const count = item.view === "messages" ? unread : 0;
                 return (
                   <button
                     key={item.view}
@@ -163,7 +159,7 @@ export default function MobileNav() {
             <i />
             <i />
             <i />
-            {unread + newUpdates > 0 && <span className="mobile-nav-dot" />}
+            {unread > 0 && <span className="mobile-nav-dot" />}
           </span>
           <span>More</span>
         </button>

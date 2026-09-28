@@ -8,9 +8,8 @@ import type { Update } from "./types";
 
 /**
  * Everything up to `baseline` has been seen, and so have the posts in `ids`
- * after it. Posts are read either all at once in the Updates feed, which moves
- * the baseline, or one class at a time on its page, which adds their ids — so
- * reading Spanish's posts doesn't also clear History's.
+ * after it. Posts are read one class at a time on its page, which adds their
+ * ids — so reading Spanish's posts doesn't also clear History's.
  */
 export interface Seen {
   baseline: number;
@@ -85,11 +84,6 @@ export function useUpdatesSeen() {
   const raw = useSyncExternalStore(subscribe, readRaw, () => null);
   const seen = useMemo(() => parseSeen(raw), [raw]);
 
-  /** Read all of them: nothing up to the newest post is new any more. */
-  const markAllSeen = useCallback((newest: number) => {
-    write((prev) => (newest > prev.baseline ? { baseline: newest, ids: [] } : prev));
-  }, []);
-
   /** Read these, and only these. */
   const markSeen = useCallback((posts: Update[]) => {
     write((prev) => {
@@ -98,33 +92,7 @@ export function useUpdatesSeen() {
     });
   }, []);
 
-  return { seen, markAllSeen, markSeen };
-}
-
-/* ── where a post came from ────────────────────────────────────────────── */
-
-/** A class by its id; a group, or anything else, by its name. */
-export function sourceKey(u: Update): string {
-  return u.courseId ? `c:${u.courseId}` : `r:${u.realm}`;
-}
-
-export interface UpdateSource {
-  key: string;
-  courseId: string;
-  realm: string;
-  count: number;
-}
-
-/** Everywhere that has posted, the most recent first. */
-export function sourcesOf(updates: Update[]): UpdateSource[] {
-  const out = new Map<string, UpdateSource>();
-  for (const u of [...updates].sort((a, b) => b.at - a.at)) {
-    const key = sourceKey(u);
-    const hit = out.get(key);
-    if (hit) hit.count++;
-    else out.set(key, { key, courseId: u.courseId, realm: u.realm, count: 1 });
-  }
-  return [...out.values()];
+  return { seen, markSeen };
 }
 
 /* ── when ──────────────────────────────────────────────────────────────── */
@@ -154,26 +122,4 @@ export function byDay(updates: Update[], now = new Date()): { label: string; ite
     else out.push({ label, items: [u] });
   }
   return out;
-}
-
-/* ── opening a class on its Updates ────────────────────────────────────── */
-
-/*
- * Read by the class page as it mounts and cleared once it has, rather than
- * taken in one go: React may run a state initializer twice, and a one-shot
- * read would lose the second time round.
- */
-let openOnUpdatesFor: string | null = null;
-
-/** Set before opening a class from the feed, so its page opens on Updates rather than Materials. */
-export function openClassOnUpdatesNext(courseId: string) {
-  openOnUpdatesFor = courseId;
-}
-
-export function opensOnUpdates(courseId: string): boolean {
-  return openOnUpdatesFor === courseId;
-}
-
-export function clearOpenOnUpdates() {
-  openOnUpdatesFor = null;
 }

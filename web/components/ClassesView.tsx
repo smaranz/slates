@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useStore } from "@/lib/store";
 import { fmtMinutes } from "@/lib/format";
-import { clearOpenOnUpdates, opensOnUpdates, unseenCount, useUpdatesSeen } from "@/lib/updates";
+import { unseenCount, useUpdatesSeen } from "@/lib/updates";
+import ClassUpdates from "./ClassUpdates";
 import CourseView from "./CourseView";
 import DocumentViewer from "./DocumentViewer";
-import { ClassUpdates } from "./UpdatesView";
 import { Badge, ClockIcon, Dot, Icon, ICON, Spinner } from "./ui";
 
 /**
@@ -161,10 +161,8 @@ function ClassDetail() {
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<OpenFile | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
-  const [section, setSection] = useState<Section>(() => (courseId && opensOnUpdates(courseId) ? "updates" : "materials"));
+  const [section, setSection] = useState<Section>("materials");
   const { seen } = useUpdatesSeen();
-
-  useEffect(() => clearOpenOnUpdates(), []);
 
   const here = trail[trail.length - 1];
   const folderId = here.folderId;
