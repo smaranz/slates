@@ -27,6 +27,15 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 
 The Capacitor shell in `mobile/` opens the host's URL from `mobile/.env`, so web changes reach the phone with a host deploy; rebuild the app only for native or `capacitor.config.ts` changes. With the phone plugged in (`xcrun devicectl list devices` gives its id): `npx cap sync ios` in `mobile/`, then `xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'platform=iOS,id=<id>' -derivedDataPath /tmp/slates-ios-build -allowProvisioningUpdates DEVELOPMENT_TEAM=M7Y3TAH3UX PRODUCT_BUNDLE_IDENTIFIER=com.smaranz.slates build` and `xcrun devicectl device install app --device <id> /tmp/slates-ios-build/Build/Products/Debug-iphoneos/App.app`. The team is a free Personal Team: `com.slates.app` is registered to someone else (hence the override), the profile lapses after 7 days (reinstall to renew; the app keeps its data and pairing), and a phone holds only 3 such apps.
 
+## AI Usage: switching accounts
+
+The Switch accounts view (`web/components/usage/SwitchView.tsx`, server side in `web/lib/ai-usage/switch/`) changes the everyday sign-in of three tools, Janus-style: park the live login, put a saved one in its place.
+- Claude Code: keychain `Claude Code-credentials` plus only the account's keys of `~/.claude.json` (`CLAUDE_ACCOUNT_KEYS` in `core.ts`; projects and MCP servers stay). Parked accounts' limits renew their own token; the live one is never renewed.
+- agy: keychain `gemini`/`antigravity` (go-keyring) and `~/.gemini/antigravity-cli/antigravity-oauth-token`. A parked account is measured by running `agy -p /usage` in a throwaway home holding only its token file.
+- The Devin app: the `windsurf_auth` secrets in `~/Library/Application Support/Devin/User/globalStorage/state.vscdb`, moved still encrypted and written only while Devin is closed (a switch quits and reopens it, so never run one from inside a Devin session). Reading who's signed in and live limits (`GetUserStatus` with the login's own key) needs the "Devin Safe Storage" key, which is only read after the student presses Allow, since macOS prompts for it. Test writes against a copy with `SLATES_DEVIN_STATE_DB`.
+
+Saved logins are keychain items under `Slates accounts`; the rest is in `~/.slates/usage/switch` (0600). `npx tsx --test lib/ai-usage/switch/switch.test.ts` covers the order of operations against fakes.
+
 ## Study Studio
 
 Sets live in `~/.slates/study` on the host. `web/lib/study/gather.ts` reads the unit through the sync service (Materials folders and every subfolder of the matching unit, Pages and link views via `/course/page`, files via `/course/document` + `/course/file`); the study agent (`web/lib/study/agent.ts`) then researches with the Agent app's browser and tools. School-only Google files are read with the Agent browser's Google sign-in (`web/lib/study/google.ts`); the sync browser has no Google session. `npx tsx --test lib/study/*.test.ts` in `web/`.

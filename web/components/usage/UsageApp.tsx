@@ -21,6 +21,7 @@ import {
 } from "@/lib/ai-usage/coding/types";
 import { AnthropicLogo, CursorLogo, GeminiLogo, Icon, ICON, OpenAILogo, OpenCodeLogo, Spinner } from "../ui";
 import CapacityView from "./CapacityView";
+import SwitchView from "./SwitchView";
 
 /**
  * AI Usage — every coding CLI on this machine, every account, every request.
@@ -85,7 +86,7 @@ function when(at: number): string {
   return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
 }
 
-function ago(at: number): string {
+export function ago(at: number): string {
   const s = Math.max(0, (Date.now() - at) / 1000);
   if (s < 90) return "just now";
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
@@ -259,7 +260,7 @@ function Chart({ days, hourly, metric }: { days: CodingDay[]; hourly: boolean; m
 
 // ── accounts ──────────────────────────────────────────────────────────────
 
-function Limits({ limits }: { limits: AccountLimits | undefined }) {
+export function Limits({ limits }: { limits: AccountLimits | undefined }) {
   if (!limits) {
     return (
       <div className="ulimits ulimits--loading">
@@ -525,7 +526,7 @@ function LinkPanel({
 export default function UsageApp() {
   const { clear, openSettings } = useMode();
   const [range, setRange] = useState<CodingRange>("30d");
-  const [view, setView] = useState<"usage" | "capacity">("usage");
+  const [view, setView] = useState<"usage" | "switch" | "capacity">("usage");
   const [tool, setTool] = useState<CodingTool | "all">("all");
   const [account, setAccount] = useState<string | null>(null);
   const [metric, setMetric] = useState<"cost" | "tokens">("cost");
@@ -732,6 +733,7 @@ export default function UsageApp() {
                   onChange={setView}
                   options={[
                     { id: "usage", label: "Usage" },
+                    { id: "switch", label: "Switch accounts" },
                     { id: "capacity", label: "Max capacity" },
                   ]}
                 />
@@ -786,6 +788,8 @@ export default function UsageApp() {
 
             {view === "capacity" ? (
               <CapacityView refreshToken={snap?.generatedAt ?? 0} />
+            ) : view === "switch" ? (
+              <SwitchView refreshToken={snap?.generatedAt ?? 0} />
             ) : loading && !snap ? (
               <div className="usage-loading">
                 <Spinner size={18} />

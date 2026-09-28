@@ -13570,6 +13570,102 @@ textarea.input.study-notes {
   gap: 8px;
 }
 
+/* switch accounts: one section per tool, one card per account */
+
+.uswitch {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.uswitch-intro {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.uswitch-outcome {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklch, var(--good) 35%, transparent);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--good) 8%, var(--surface));
+  color: var(--good);
+}
+
+.uswitch-outcome strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.uswitch-outcome p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.uswitch-warn,
+.uswitch-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.uswitch-warn {
+  color: var(--warn);
+}
+
+.uswitch-wait {
+  color: var(--muted);
+}
+
+.uswitch-foot {
+  max-width: 72ch;
+  margin: 10px 0 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.uswitch-acct.is-live {
+  border-color: color-mix(in oklch, var(--tool) 50%, transparent);
+}
+
+.uswitch-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--sunken);
+}
+
+.uswitch-confirm p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.uswitch-confirm div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.uswitch-confirm .btn {
+  height: 30px;
+  padding: 0 12px;
+}
+
 /* link panel */
 
 .ulink {

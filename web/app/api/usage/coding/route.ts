@@ -13,6 +13,7 @@ import {
 import { forgetLimits } from "@/lib/ai-usage/coding/limits";
 import { allLimits, buildCodingSnapshot, capacity, requestPage } from "@/lib/ai-usage/coding/report";
 import { LINKABLE_TOOLS, TOOL_ORDER, type CodingRange, type CodingTool, type LinkableTool } from "@/lib/ai-usage/coding/types";
+import { allowDevin, isSwitchTool, SwitchBlocked, switchAction, switchState } from "@/lib/ai-usage/switch/service";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export async function GET(req: Request) {
   try {
     if (view === "limits") return Response.json(await allLimits());
     if (view === "capacity") return Response.json(await capacity());
+    if (view === "switch") return Response.json(await switchState({ limits: url.searchParams.get("limits") === "1" }));
     if (view === "requests") {
       const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 50));
@@ -115,10 +117,32 @@ export async function POST(req: Request) {
         return Response.json(await allLimits());
       }
 
+      // Switching the everyday sign-in of Claude Code, agy and the Devin app.
+      case "switch-refresh":
+        return Response.json(await switchState({ limits: true, force: true }));
+
+      case "switch-devin-key":
+        return Response.json(await allowDevin());
+
+      case "switch-save":
+      case "switch-activate":
+      case "switch-remove":
+      case "switch-sign-in": {
+        if (!isSwitchTool(body.tool)) return Response.json({ error: "Pick Claude Code, Antigravity or Devin." }, { status: 400 });
+        const outcome = await switchAction(
+          action.slice("switch-".length) as "save" | "activate" | "remove" | "sign-in",
+          body.tool,
+          typeof body.id === "string" ? body.id : undefined,
+          body.force === true
+        );
+        return Response.json(outcome);
+      }
+
       default:
         return Response.json({ error: "Unknown action." }, { status: 400 });
     }
   } catch (err) {
+    if (err instanceof SwitchBlocked) return Response.json({ error: err.message, blocked: true }, { status: 409 });
     return Response.json({ error: err instanceof Error ? err.message : "Update failed." }, { status: 500 });
   }
 }

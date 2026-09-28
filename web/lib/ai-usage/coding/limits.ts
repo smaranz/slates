@@ -122,6 +122,17 @@ const CLAUDE_LABELS: Record<string, string> = {
   seven_day_oauth_apps: "Weekly · apps",
 };
 
+/** Anthropic's plan usage for a Claude login, as Claude Code's /usage asks for it. */
+export function claudeUsage(accessToken: string): Promise<{ ok: boolean; status: number; body: unknown }> {
+  return getJson("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "Content-Type": "application/json",
+    },
+  });
+}
+
 async function claudeLimits(home: Home): Promise<AccountLimits> {
   const creds = await claudeCreds(home);
   const oauth = creds?.claudeAiOauth;
@@ -130,19 +141,19 @@ async function claudeLimits(home: Home): Promise<AccountLimits> {
   if (oauth.expiresAt && oauth.expiresAt < Date.now()) {
     return none("Login expired — open Claude Code as this account once to refresh it.", plan);
   }
-  const res = await getJson("https://api.anthropic.com/api/oauth/usage", {
-    headers: {
-      Authorization: `Bearer ${oauth.accessToken}`,
-      "anthropic-beta": "oauth-2025-04-20",
-      "Content-Type": "application/json",
-    },
-  });
+  const res = await claudeUsage(oauth.accessToken);
   if (res.status === 429 || res.status >= 500) throw new Throttled("Anthropic");
   if (!res.ok || !res.body || typeof res.body !== "object") {
     return none(res.status === 401 ? "Login expired — open Claude Code as this account once to refresh it." : `Anthropic answered ${res.status}.`, plan);
   }
+  const windows = claudeWindows(res.body as Record<string, unknown>);
+  return { windows, source: "live", fetchedAt: Date.now(), plan, note: windows.length ? null : "No limits reported for this plan." };
+}
+
+/** The windows in an answer from Anthropic's usage endpoint. */
+export function claudeWindows(body: Record<string, unknown>): LimitWindow[] {
   const windows: LimitWindow[] = [];
-  for (const [id, v] of Object.entries(res.body as Record<string, unknown>)) {
+  for (const [id, v] of Object.entries(body)) {
     if (!v || typeof v !== "object") continue;
     const w = v as Record<string, unknown>;
     const used = num(w.utilization);
@@ -157,7 +168,7 @@ async function claudeLimits(home: Home): Promise<AccountLimits> {
       resetsAt: toMs(w.resets_at),
     });
   }
-  return { windows, source: "live", fetchedAt: Date.now(), plan, note: windows.length ? null : "No limits reported for this plan." };
+  return windows;
 }
 
 // ── Codex ─────────────────────────────────────────────────────────────────
