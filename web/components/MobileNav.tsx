@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
 import { unseenCount, useUpdatesSeen } from "@/lib/updates";
 import { Icon, ICON } from "./ui";
@@ -36,6 +37,8 @@ const SECONDARY: Destination[] = [
  */
 export default function MobileNav() {
   const s = useStore();
+  // The desktop sidebar holds these two; on a phone it's hidden, so they live here.
+  const { clear, openSettings } = useMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
 
@@ -111,6 +114,20 @@ export default function MobileNav() {
                   </button>
                 );
               })}
+              <button type="button" className="mobile-more-row" onClick={openSettings}>
+                <span className="mobile-more-icon">
+                  <Icon path={ICON.settings} size={18} />
+                </span>
+                <span>Settings</span>
+                <span className="mobile-more-chevron" aria-hidden="true">›</span>
+              </button>
+              <button type="button" className="mobile-more-row" onClick={clear}>
+                <span className="mobile-more-icon">
+                  <Icon path={ICON.swap} size={18} />
+                </span>
+                <span>Switch app</span>
+                <span className="mobile-more-chevron" aria-hidden="true">›</span>
+              </button>
             </div>
           </section>
         </div>

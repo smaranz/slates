@@ -67,6 +67,48 @@ export default function CalendarView() {
   }, [offset, s.snapshot.assignments]);
 
   const selTasks = selected ? dated.filter((d) => d.date.toDateString() === selected) : [];
+  // A phone lists the chosen day under the month instead of in a popup, and
+  // opens on today, so the calendar says what's due without a tap.
+  const agendaDay = selected ?? new Date().toDateString();
+  const agendaTasks = dated.filter((d) => d.date.toDateString() === agendaDay);
+
+  const taskRow = ({ a }: (typeof dated)[number]) => {
+    const c = s.courseById(a.courseId);
+    return (
+      <button
+        key={a.id}
+        type="button"
+        className="calendar-task"
+        onClick={() => {
+          setSelected(null);
+          s.openAssignment(a.id);
+        }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 0",
+          border: 0,
+          borderTop: "1px solid var(--line)",
+          background: "transparent",
+          font: "inherit",
+          textAlign: "left",
+          cursor: "pointer",
+          width: "100%",
+        }}
+      >
+        <Dot color={c?.dot ?? "var(--muted)"} />
+        <span className="truncate" style={{ flex: 1, fontSize: 13, color: "var(--text)" }}>
+          {a.title}
+        </span>
+        {c && <Badge tone={c.tone}>{c.short}</Badge>}
+        <Badge tone={IMPACT_LABEL[a.impact].tone}>{IMPACT_LABEL[a.impact].label}</Badge>
+        <span className="tabular" style={{ flex: "0 0 54px", textAlign: "right", fontSize: 12, color: "var(--muted)" }}>
+          {fmtMinutes(a.minutes)}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div className="calendar-view" style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "0 24px 24px", display: "flex", justifyContent: "center" }}>
@@ -215,7 +257,7 @@ export default function CalendarView() {
                             );
                           })}
                           {cell.items.length > 2 && (
-                            <span style={{ fontSize: 10, color: "var(--faint)", textAlign: "left", paddingLeft: 10 }}>
+                            <span className="calendar-more" style={{ fontSize: 10, color: "var(--faint)", textAlign: "left", paddingLeft: 10 }}>
                               +{cell.items.length - 2}
                             </span>
                           )}
@@ -228,10 +270,16 @@ export default function CalendarView() {
             ))}
           </div>
         </div>
+
+        <section className="calendar-agenda" aria-live="polite">
+          <h2>{new Date(agendaDay).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</h2>
+          {agendaTasks.length ? agendaTasks.map(taskRow) : <p>Nothing due this day.</p>}
+        </section>
       </div>
 
       {selected && (
         <div
+          className="calendar-day-dialog"
           role="dialog"
           aria-modal="true"
           onClick={() => setSelected(null)}
@@ -291,44 +339,7 @@ export default function CalendarView() {
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 10 }}>
-              {selTasks.map(({ a }) => {
-                const c = s.courseById(a.courseId);
-                return (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => {
-                      setSelected(null);
-                      s.openAssignment(a.id);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "10px 0",
-                      borderTop: "1px solid var(--line)",
-                      border: 0,
-                      borderTopWidth: 1,
-                      borderTopStyle: "solid",
-                      background: "transparent",
-                      font: "inherit",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      width: "100%",
-                    }}
-                  >
-                    <Dot color={c?.dot ?? "var(--muted)"} />
-                    <span className="truncate" style={{ flex: 1, fontSize: 13, color: "var(--text)" }}>
-                      {a.title}
-                    </span>
-                    {c && <Badge tone={c.tone}>{c.short}</Badge>}
-                    <Badge tone={IMPACT_LABEL[a.impact].tone}>{IMPACT_LABEL[a.impact].label}</Badge>
-                    <span className="tabular" style={{ flex: "0 0 54px", textAlign: "right", fontSize: 12, color: "var(--muted)" }}>
-                      {fmtMinutes(a.minutes)}
-                    </span>
-                  </button>
-                );
-              })}
+              {selTasks.map(taskRow)}
             </div>
           </div>
         </div>

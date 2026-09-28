@@ -23,6 +23,7 @@ export function Dot({ color, size = 8, radius = 2 }: { color: string; size?: num
   return (
     <span
       style={{
+        display: "inline-block",
         width: size,
         height: size,
         flexShrink: 0,

@@ -63,6 +63,23 @@ const OPENERS = [
 const ACCEPTED_FILE_TYPES =
   "image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.pdf,.txt,.md,.markdown,.csv,.json,.js,.jsx,.ts,.tsx,.py,.html,.css,.xml,.yml,.yaml";
 
+const PHONE = "(max-width: 760px)";
+
+/**
+ * Whether the conversation list starts open. A phone opens on the
+ * conversation, since there the list is a drawer over it, and its open or
+ * shut isn't the preference the desktop remembers.
+ */
+function initialRail(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    if (window.matchMedia(PHONE).matches) return false;
+    return window.localStorage.getItem("slates.counselorDrawer") !== "closed";
+  } catch {
+    return true;
+  }
+}
+
 export default function ChatView() {
   const c = useCounselor();
   const school = useStore();
@@ -74,7 +91,7 @@ export default function ChatView() {
   const [streamingReplyIds, setStreamingReplyIds] = useState<Set<string>>(() => new Set());
   const replyThreadRef = useRef(new Map<string, string>());
   const [error, setError] = useState<string | null>(null);
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState(initialRail);
   const [pending, setPending] = useState<Attachment[]>([]);
   const [reading, setReading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -116,13 +133,9 @@ export default function ChatView() {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem("slates.counselorDrawer");
-      if (saved != null) setRailOpen(saved !== "closed");
+      if (window.matchMedia(PHONE).matches) return;
+      window.localStorage.setItem("slates.counselorDrawer", railOpen ? "open" : "closed");
     } catch {}
-  }, []);
-
-  useEffect(() => {
-    try { window.localStorage.setItem("slates.counselorDrawer", railOpen ? "open" : "closed"); } catch {}
   }, [railOpen]);
 
   useEffect(() => {

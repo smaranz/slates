@@ -237,7 +237,7 @@ export default function UiView() {
   }, []);
 
   return (
-    <div className="ui-shell">
+    <div className={`ui-shell${picked ? " has-picked" : ""}`}>
       {/* ── which component ── */}
       <section className="ui-list">
         <div className="ui-list-head">
@@ -295,6 +295,12 @@ export default function UiView() {
 
       {/* ── what it looks like, and what makes it look that way ── */}
       <section className="ui-code">
+        {/* A phone shows the list or one component, never both squeezed. */}
+        {picked && (
+          <button type="button" className="ui-mobile-back" onClick={() => setPicked(null)}>
+            <Icon path={ICON.chevronLeft} size={14} /> Components
+          </button>
+        )}
         {!picked && (
           <div className="ui-blank">
             <p>

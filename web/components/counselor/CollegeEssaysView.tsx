@@ -80,7 +80,8 @@ export default function CollegeEssaysView() {
   }, [essays]);
 
   return (
-    <div className="counselor-split">
+    /* Below 900px the list and an open essay take turns, as on the school side. */
+    <div className={`counselor-split ${essay ? "has-selection" : "is-list"}`}>
       <div className="counselor-list-pane">
         <div className="counselor-pane-head">
           <span className="section-label" style={{ flex: 1 }}>

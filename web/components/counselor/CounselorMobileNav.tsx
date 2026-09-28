@@ -28,7 +28,7 @@ const SECONDARY: Destination[] = [
 export default function CounselorMobileNav() {
   const counselor = useCounselor();
   const identity = useIdentity();
-  const { openSettings } = useMode();
+  const { clear, openSettings } = useMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
   const moreActive = SECONDARY.some((item) => item.view === counselor.view);
@@ -87,6 +87,12 @@ export default function CounselorMobileNav() {
               <button type="button" className="mobile-more-row" onClick={openSettings}>
                 <span className="mobile-more-icon"><Icon path={ICON.settings} size={18} /></span>
                 <span>Profile &amp; settings</span>
+                <span className="mobile-more-chevron" aria-hidden="true">›</span>
+              </button>
+              {/* The rail's brand leads home on a desktop; a phone has no rail. */}
+              <button type="button" className="mobile-more-row" onClick={clear}>
+                <span className="mobile-more-icon"><Icon path={ICON.swap} size={18} /></span>
+                <span>Switch app</span>
                 <span className="mobile-more-chevron" aria-hidden="true">›</span>
               </button>
             </div>

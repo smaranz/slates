@@ -81,6 +81,7 @@ export function AssignmentCard({
 
   return (
     <div
+      className="board-card"
       draggable={movable}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", a.id);
@@ -123,6 +124,7 @@ export function AssignmentCard({
           )}
           <button
             type="button"
+            className="board-card-open"
             onClick={() => s.openAssignment(a.id)}
             style={{
               display: "block",
@@ -310,7 +312,7 @@ export default function BoardView() {
                 transition: "background 120ms ease, border-color 120ms ease",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 4px" }}>
+              <div className="board-column-head" style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 4px" }}>
                 <Dot color={col.tone} size={10} radius={3} />
                 <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>{col.name}</span>
                 <span
@@ -352,6 +354,7 @@ export default function BoardView() {
 
               {items.length === 0 && (
                 <div
+                  className="board-column-empty"
                   style={{
                     borderRadius: 20,
                     border: `1px dashed ${target ? col.tone : "var(--line-strong)"}`,

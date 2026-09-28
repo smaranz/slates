@@ -2119,7 +2119,8 @@ button {
 .mobile-nav,
 .mobile-more-backdrop,
 .messages-back,
-.mobile-host-notice {
+.mobile-host-notice,
+.calendar-agenda {
   display: none;
 }
 
@@ -2142,6 +2143,23 @@ button {
   body {
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
+  }
+
+  /* Whatever scrolls up under the clock passes behind a strip of the page's
+     own colour, so the status bar stays readable. Sheets and dialogs sit over
+     it; the launcher's gradient runs under the clock instead. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 25;
+    height: var(--safe-top);
+    background: var(--bg);
+    pointer-events: none;
+  }
+
+  body:has(.launcher)::before {
+    display: none;
   }
 
   button,
@@ -2230,30 +2248,59 @@ button {
     padding-bottom: calc(16px + var(--safe-bottom));
   }
 
-  /* The board becomes a row of full, swipeable slates. Each column lands on
-     a snap point, so the due-date sequence still reads left to right without
-     crushing five columns into a phone viewport. */
-  .board-grid {
-    grid-template-columns: none !important;
-    grid-auto-flow: column;
-    grid-auto-columns: calc(100vw - (var(--mobile-gutter) * 2) - 22px);
-    overflow-x: auto;
-    overflow-y: visible;
-    scroll-snap-type: x mandatory;
-    scroll-padding-inline: 0;
-    scrollbar-width: none;
-    padding: 1px 22px 8px 1px;
-    -webkit-overflow-scrolling: touch;
+  /* Centred dialogs keep clear of the notch and the home indicator. */
+  .own-backdrop,
+  .counselor-dialog-backdrop {
+    padding: calc(12px + var(--safe-top)) 12px calc(12px + var(--safe-bottom));
   }
 
-  .board-grid::-webkit-scrollbar {
-    display: none;
+  /* The board reads top to bottom on a phone: Overdue, Today, Tomorrow,
+     Later, Turned in, one scroll. As a row of swipeable columns it opened on
+     whichever column came first — often an empty Today — with the work a
+     swipe away and nothing saying so. */
+  .board-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 22px !important;
   }
 
   .board-column {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-    padding: 12px !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    gap: 10px !important;
+  }
+
+  .board-column-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 calc(var(--mobile-gutter) * -1);
+    padding: 8px calc(var(--mobile-gutter) + 4px) !important;
+    background: var(--bg);
+  }
+
+  .board-column-empty {
+    padding: 12px 14px !important;
+    text-align: left !important;
+  }
+
+  /* The whole card opens it, not just the words of its title. */
+  .board-card {
+    position: relative;
+  }
+
+  .board-card-open::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+
+  .board-card .strip {
+    position: relative;
+    z-index: 1;
+    min-height: 44px;
   }
 
   /* Inbox is master/detail on larger screens and route-like on phones. */
@@ -2264,6 +2311,11 @@ button {
   .messages-list {
     width: 100% !important;
     border-right: 0 !important;
+  }
+
+  /* New message, clear of the header's rule. */
+  .messages-list > div:first-child {
+    padding-top: 12px !important;
   }
 
   .messages-detail {
@@ -2337,13 +2389,96 @@ button {
   }
 
   .calendar-events > span > span:last-child,
-  .calendar-events > span:last-child:not(:first-child) {
+  .calendar-events > .calendar-more {
+    display: none !important;
+  }
+
+  /* The month shrinks to fit its rows, and the chosen day's work (today, to
+     begin with) is listed under it rather than in a popup over it. */
+  .calendar-view {
+    overflow-y: auto !important;
+  }
+
+  .calendar-frame {
+    height: auto !important;
+  }
+
+  .calendar-slate {
+    flex: none !important;
+  }
+
+  .calendar-weeks {
+    flex: none !important;
+    grid-template-rows: repeat(6, 46px) !important;
+  }
+
+  .calendar-agenda {
+    display: block;
+    padding: 2px 4px 8px;
+  }
+
+  .calendar-agenda h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .calendar-agenda p {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* The name gets the first line to itself; its class and weight go under it. */
+  .calendar-agenda .calendar-task {
+    min-height: 50px;
+    flex-wrap: wrap;
+    row-gap: 6px !important;
+    column-gap: 8px !important;
+    padding: 12px 0 !important;
+  }
+
+  .calendar-task > .truncate {
+    flex: 1 1 calc(100% - 20px) !important;
+    font-size: 14px !important;
+    white-space: normal;
+  }
+
+  .calendar-task > .truncate + .badge {
+    margin-left: 16px;
+  }
+
+  .calendar-task > .tabular {
+    flex: 1 1 auto !important;
+  }
+
+  .calendar-day-dialog {
     display: none !important;
   }
 
   .gpt-header {
     min-height: calc(48px + var(--safe-top));
     padding: calc(5px + var(--safe-top)) 6px 5px;
+  }
+
+  /* The counselor's header also carries Multitask. Its word goes (screen
+     readers keep it), so New conversation stays on screen. */
+  .gpt-header .multitask-toggle {
+    position: relative;
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .gpt-header .multitask-toggle span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   /* The drawer stops being part of the layout and becomes a sheet over it. */
@@ -3226,6 +3361,39 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
     max-width: 380px;
+  }
+}
+
+/* A phone: the mark and Settings make a header row under the status bar,
+   where Settings used to sit behind the clock. */
+@media (max-width: 760px) {
+  .launcher {
+    gap: 0;
+    padding: calc(var(--safe-top) + 64px) 18px calc(var(--safe-bottom) + 20px);
+  }
+
+  .launcher-mark {
+    position: absolute;
+    top: calc(var(--safe-top) + 14px);
+    left: 20px;
+  }
+
+  .launcher .launcher-settings {
+    top: calc(var(--safe-top) + 6px);
+    right: 8px;
+    min-height: 44px;
+    padding: 0 14px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .launcher-grid {
+    gap: 12px;
+  }
+
+  .launcher-card {
+    gap: 14px;
+    border-radius: 22px;
   }
 }
 
@@ -7804,13 +7972,61 @@ a.counselor-source:hover {
   color: var(--bad);
 }
 
+/* Two lines on a phone: the assignment's name, then what it does to the grade
+   and its score. On one line the name got a dozen letters before the "…". */
 @media (max-width: 760px) {
-  .score-impact {
-    flex-basis: 54px;
-    font-size: 11px;
+  .score-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "tick name name name"
+      ". impact fields x";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 6px;
+    padding: 11px 0;
   }
+
+  .score-tick {
+    grid-area: tick;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  .score-row .score-name {
+    grid-area: name;
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.35;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .score-impact {
+    grid-area: impact;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .score-fields {
+    grid-area: fields;
+  }
+
   .score-field {
-    width: 38px;
+    width: 48px;
+    min-height: 34px;
+  }
+
+  .score-row > :last-child {
+    grid-area: x;
+  }
+
+  .score-x {
+    width: 34px;
+    height: 34px;
   }
 }
 
@@ -7917,21 +8133,40 @@ a.counselor-source:hover {
   color: var(--text);
 }
 
-@media (max-width: 620px) {
-  .settings-heading {
-    display: none;
+/* A phone: Done and the title under the status bar, then the tabs on a row
+   of their own that scrolls sideways — six don't fit beside Done. */
+@media (max-width: 760px) {
+  .settings-topbar {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    padding: calc(var(--safe-top) + 4px) var(--mobile-gutter) 10px;
+    background: var(--bg);
   }
 
-  /* Five tabs don't fit beside Done on a phone; they scroll instead. */
+  .settings-topbar > .btn {
+    height: 40px !important;
+  }
+
+  .settings-heading {
+    font-size: 17px;
+  }
+
   .settings-tabs {
+    flex: 1 1 100%;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
   }
 
+  .settings-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
   .settings-tab {
     flex-shrink: 0;
-    padding: 5px 12px;
+    min-height: 34px;
+    padding: 0 14px;
+    font-size: 14px;
   }
 }
 
@@ -9241,7 +9476,7 @@ a.counselor-source:hover {
   .master-plan-header {
     flex-direction: column;
     gap: 14px;
-    padding: 20px 18px 14px;
+    padding: calc(20px + var(--safe-top, 0px)) 18px 14px;
   }
   .master-plan-actions {
     margin-left: 0;
@@ -12136,8 +12371,27 @@ textarea.input.study-notes {
     font-size: 21px;
   }
 
+  /* Three buttons don't fit one row at 375pt; they wrap and share the width. */
   .study-top-actions {
-    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .study-top-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .study-picker > .btn {
+    width: 100%;
+  }
+
+  /* The sheet is the whole screen on a phone: its title clears the notch and
+     its buttons the home indicator. */
+  .study-sheet-head {
+    padding-top: calc(16px + var(--safe-top, 0px));
+  }
+
+  .study-sheet-foot {
+    padding-bottom: calc(14px + var(--safe-bottom, 0px));
   }
 
   .study-item {
@@ -12715,6 +12969,113 @@ textarea.input.study-notes {
   }
 
   .ui-top-sub {
+    display: none;
+  }
+}
+
+.ui-mobile-back {
+  display: none;
+}
+
+/* ── UI, AI Usage, Media Gen Studio and Agent on a phone ── */
+@media (max-width: 760px) {
+  /* The shared header, under the status bar rather than behind the notch. */
+  .ui-top {
+    align-items: center;
+    gap: 2px;
+    min-height: calc(52px + var(--safe-top));
+    padding: var(--safe-top) 6px 0;
+    background: var(--bg);
+  }
+
+  .ui-top-title {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-back {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0 10px;
+    font-size: 15px;
+  }
+
+  /* UI: the list, or one component — never both, and never wider than the screen. */
+  .ui-shell,
+  .ui-shell.has-picked {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+  }
+
+  .ui-shell .ui-list {
+    max-height: none;
+    border-bottom: 0;
+  }
+
+  .ui-shell.has-picked .ui-list,
+  .ui-shell:not(.has-picked) .ui-code {
+    display: none;
+  }
+
+  .ui-list-head {
+    padding: 10px var(--mobile-gutter);
+  }
+
+  .ui-list-scroll {
+    padding: 4px 8px calc(8px + var(--safe-bottom));
+  }
+
+  .ui-entry {
+    min-height: 54px;
+    justify-content: center;
+  }
+
+  .ui-code {
+    padding: 6px var(--mobile-gutter) calc(32px + var(--safe-bottom));
+  }
+
+  .ui-mobile-back {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    margin: 0 0 6px -8px;
+    border: 0;
+    border-radius: 9999px;
+    padding: 0 12px 0 6px;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 15px;
+  }
+
+  .ui-code-head {
+    flex-wrap: wrap;
+  }
+
+  .ui-pre {
+    max-height: none;
+  }
+
+  /* AI Usage and Media scroll to just above the home indicator. */
+  .usage-scroll {
+    padding: 14px var(--mobile-gutter) calc(40px + var(--safe-bottom));
+  }
+
+  .media-shell {
+    padding-bottom: var(--safe-bottom);
+  }
+}
+
+/* A keyboard shortcut is noise on a screen with no keyboard. */
+@media (hover: none) {
+  .media-generate kbd,
+  .media-mode kbd {
     display: none;
   }
 }
@@ -15042,17 +15403,18 @@ span.media-play {
   }
 
   .media-viewer-stage {
-    padding: 16px 52px;
+    padding: calc(16px + var(--safe-top, 0px)) 52px 16px;
   }
 
   .media-viewer-media {
-    max-height: calc(56dvh - 32px);
+    max-height: calc(56dvh - 32px - var(--safe-top, 0px));
   }
 
   .media-viewer-side {
     overflow: visible;
     border-top: 1px solid var(--line);
     border-left: 0;
+    padding-bottom: calc(18px + var(--safe-bottom, 0px));
   }
 }
 
@@ -15147,19 +15509,22 @@ span.media-play {
 
   .class-menu {
     flex-direction: row;
+    flex-shrink: 0;
     gap: 6px;
     width: auto;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 0 var(--mobile-gutter) 12px;
+    padding: 12px var(--mobile-gutter);
     scrollbar-width: none;
   }
 
   .class-menu-item {
     width: auto;
+    min-height: 40px;
     flex-shrink: 0;
     border: 1px solid var(--line);
-    padding: 6px 12px;
+    padding: 6px 14px;
+    font-size: 14px;
   }
 
   .class-menu-info {

@@ -1242,6 +1242,46 @@ textarea.field {
     padding-left: 12px;
   }
 
+  /* The composer, New agent and the side panels end above the home indicator. */
+  .composer {
+    padding-bottom: calc(10px + var(--safe-bottom));
+  }
+
+  .sideFoot {
+    padding-bottom: calc(10px + var(--safe-bottom));
+  }
+
+  .panel,
+  .computer {
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .item {
+    min-height: 56px;
+  }
+
+  .backdrop {
+    padding: calc(10px + var(--safe-top)) 10px calc(10px + var(--safe-bottom));
+  }
+
+  .modal {
+    max-height: 100%;
+  }
+
+  .newButton,
+  .newButtonQuiet {
+    min-height: 44px;
+  }
+
+  .iconButton {
+    width: 40px;
+    height: 40px;
+  }
+
+  .chatHead {
+    padding: 6px 10px;
+  }
+
   .templates {
     grid-template-columns: minmax(0, 1fr);
   }
