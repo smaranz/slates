@@ -22,7 +22,11 @@ devices** get in (`web/proxy.ts`, `web/lib/devices.ts`):
 - A device pairs itself the first time it opens Slates over Tailscale. Tailscale
   vouches for your account there, so Slates hands the device a 256-bit key, kept
   as a cookie. From then on it works with Tailscale off.
-- Anything reaching the portal through Tailscale without a key gets a "not
+- A device that never runs Tailscale pairs with a code instead: Settings ›
+  General › Devices on a paired device shows a one-time 8-digit code, and the
+  new device types it on its "not paired" page. A code lasts 10 minutes, pairs
+  one device, and is spent by 5 wrong tries.
+- Anything reaching the portal through Tailscale without a key gets that "not
   paired" page. Settings › General › Devices lists paired devices and forgets a
   lost one.
 - Requests from the host itself need no key. That's why nothing but Tailscale
@@ -135,18 +139,18 @@ and the Schoology sign-in needs a real window on the desktop.
 
 ## 3. The phone
 
-1. Install the Tailscale app and sign in to the same tailnet.
-2. In `mobile/.env`:
+1. In `mobile/.env`:
 
    ```
    SLATES_MOBILE_SERVER_URL=https://<host>.<tailnet>.ts.net
    ```
 
-3. `npm run check:server && npm run sync` in `mobile/`, then build and install
+2. `npm run check:server && npm run sync` in `mobile/`, then build and install
    from Xcode or Android Studio. It's HTTPS, so no plain-HTTP exceptions are
    needed, and it works away from home.
-4. Open it once with Tailscale on to pair the phone; after that it works with
-   Tailscale off.
+3. Open it and it shows the "not paired" page. On the Mac, choose Get a code in
+   Settings › General › Devices and type the code on the phone. (Opening it
+   once with Tailscale on pairs it too.) The phone never needs Tailscale.
 
 ## Updating the host
 

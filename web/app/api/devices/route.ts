@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Keys only for callers on the host or the tailnet: a stolen device key can't mint itself more.
+  // Keys only for callers on the host or the tailnet; a paired device adds others with a pairing code (./code).
   if (originOf(request.headers).kind === "outside") {
     return Response.json({ error: "New keys can only be made from the host or over Tailscale." }, { status: 403 });
   }

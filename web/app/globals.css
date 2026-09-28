@@ -8004,6 +8004,15 @@ a.counselor-source:hover {
   font-size: 11.5px;
 }
 
+.app-settings-text strong.app-settings-pair-code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------------------------------------------------------------- tutor work
    What the tutor did on the way to the answer: the tools it reached for and,
    where the model exposes it, what it was thinking.

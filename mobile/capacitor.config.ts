@@ -27,6 +27,9 @@ const config: CapacitorConfig = {
   appName: "Slates",
   webDir: "www",
   backgroundColor: SHELL_BG,
+  // Appended to the web view's user agent, so Slates lists a paired phone as
+  // its app rather than a browser (web/lib/devices.ts).
+  appendUserAgent: "SlatesApp",
   ios: {
     contentInset: "never",
     preferredContentMode: "mobile",

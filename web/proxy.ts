@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isPublicPath, originOf, UNPAIRED_PAGE } from "@/lib/device-gate";
-import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, enroll, isOwner, touch, verifyKey } from "@/lib/devices";
+import { isPublicPath, originOf, unpairedPage } from "@/lib/device-gate";
+import { DEVICE_COOKIE, DEVICE_COOKIE_OPTIONS, enroll, isOwner, touch, verifyKey } from "@/lib/devices";
 
 /**
  * Who may reach Slates, and only from Slates' own pages.
@@ -10,7 +10,8 @@ import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, enroll, isOwner, touch, verifyKey
  * agents' commands on the host, so every request that arrives through
  * Tailscale — the tailnet, or the internet through Funnel — must carry a
  * paired device's key (see lib/devices.ts). A device on the student's tailnet
- * is paired on its first request; requests on the host itself need nothing.
+ * is paired on its first request, any other by typing a code a paired device
+ * shows; requests on the host itself need nothing.
  *
  * Then, for the API: browsers label every request with where it came from
  * (`Sec-Fetch-Site`, `Origin`), and a page that rebinds its DNS to this
@@ -69,8 +70,8 @@ function fromElsewhere(req: NextRequest): boolean {
 
 function unpaired(req: NextRequest): NextResponse {
   const page = req.method === "GET" && (req.headers.get("sec-fetch-dest") === "document" || (req.headers.get("accept") ?? "").includes("text/html"));
-  if (page) return new NextResponse(UNPAIRED_PAGE, { status: 401, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
-  return NextResponse.json({ error: "This device isn't paired with Slates. Open Slates once on it with Tailscale on." }, { status: 401 });
+  if (page) return new NextResponse(unpairedPage(req.nextUrl.searchParams.get("pairing")), { status: 401, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  return NextResponse.json({ error: "This device isn't paired with Slates. Pair it with a code from Settings › General › Devices on a paired device." }, { status: 401 });
 }
 
 export function proxy(req: NextRequest) {
@@ -91,7 +92,8 @@ export function proxy(req: NextRequest) {
     } else if (origin.kind === "tailnet") {
       if (!isOwner(origin.login)) return unpaired(req);
       // Only a browser can keep the key; a script on the tailnet gets in on Tailscale's word alone.
-      if (req.headers.has("sec-fetch-mode")) issue = enroll(origin.login, req.headers.get("user-agent") ?? "")?.key ?? null;
+      // (Node's fetch sends Sec-Fetch-Mode as well, but only browsers send Sec-Fetch-Dest.)
+      if (req.headers.has("sec-fetch-dest")) issue = enroll(origin.login, req.headers.get("user-agent") ?? "")?.key ?? null;
     } else {
       return unpaired(req);
     }
@@ -103,7 +105,7 @@ export function proxy(req: NextRequest) {
 
   const response = NextResponse.next();
   if (issue) {
-    response.cookies.set(DEVICE_COOKIE, issue, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: DEVICE_COOKIE_MAX_AGE });
+    response.cookies.set(DEVICE_COOKIE, issue, DEVICE_COOKIE_OPTIONS);
   }
   return response;
 }

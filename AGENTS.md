@@ -8,7 +8,7 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 
 - SSH is key-only and tailnet-only: `ssh -i ~/.ssh/slates_pc email@100.79.163.21`. The default key and the Mac username are refused. SSH lands in cmd.exe: wrap commands in `powershell -NoProfile -Command "..."` (PowerShell 5.1), and for anything with pipes or regexes `scp` a `.ps1` over and run it with `powershell -NoProfile -ExecutionPolicy Bypass -File`, since cmd splits on `|` even inside quotes.
 - The PC runs `node bin/slates.js host` from `C:\Users\email\slates` through the "Slates host" scheduled task (headless console). Log: `%USERPROFILE%\.slates\logs\host.log`.
-- The portal is published with `tailscale funnel` (internet + tailnet), locked to paired devices by `web/proxy.ts` + `web/lib/devices.ts` (registry `%USERPROFILE%\.slates\devices.json`). Devices pair by visiting once over the tailnet; requests on the host itself pass. From the Mac over Tailscale, curl gets in on Tailscale's identity; from outside it needs `Authorization: Bearer <key>` (mint one with `POST /api/devices` over Tailscale). Never publish the portal with anything but Tailscale.
+- The portal is published with `tailscale funnel` (internet + tailnet), locked to paired devices by `web/proxy.ts` + `web/lib/devices.ts` (registry `%USERPROFILE%\.slates\devices.json`). Devices pair by visiting once over the tailnet, or by typing a one-time code from Settings › General › Devices on the "not paired" page (`/api/devices/code` makes it, `/api/devices/pair` takes it); requests on the host itself pass. From the Mac over Tailscale, curl gets in on Tailscale's identity; from outside it needs `Authorization: Bearer <key>` (mint one with `POST /api/devices` over Tailscale). Never publish the portal with anything but Tailscale.
 
 ## Deploying to the PC
 
@@ -22,6 +22,10 @@ The backend runs on the always-on gaming PC ("smaran", Windows 11), reached over
 - Shells started by the IDE carry `ELECTRON_RUN_AS_NODE=1`, and `open` passes it on, so Slates exits at once as plain Node. Launch with `env -u ELECTRON_RUN_AS_NODE open -a Slates`; the Dock is unaffected.
 - On displays at least 2400 points wide (the 27" 1440p monitor, 5K, 4K scaled to 1440p) the window zooms to 120% (`zoomFor` in `desktop/main.mjs`), re-fitted when it moves to another display or loads another origin, so a zoom set by hand holds until then. The window's size and place are kept in `window-state.json` in userData. Layouts for pages over 1800 CSS px (one class's grades in columns, wider calendar, tutor and study; the class and grades lists stay one per row) are in `web/app/wide.css`, loaded after `globals.css`.
 - In remote mode AI Usage still reads the Mac: `desktop/preload.cjs` gives the window a bridge, `main.mjs` (`LOCAL_APPS`) starts the bundled portal on the Mac on first use with `SLATES_USAGE_ONLY=1` (no routines), and `web/lib/desktop-bridge.ts` sends `/api/usage/coding` through it. Slates' own calls come from the host's ledger (`/api/usage?view=events`).
+
+## The iPhone app
+
+The Capacitor shell in `mobile/` opens the host's URL from `mobile/.env`, so web changes reach the phone with a host deploy; rebuild the app only for native or `capacitor.config.ts` changes. With the phone plugged in (`xcrun devicectl list devices` gives its id): `npx cap sync ios` in `mobile/`, then `xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination 'platform=iOS,id=<id>' -derivedDataPath /tmp/slates-ios-build -allowProvisioningUpdates DEVELOPMENT_TEAM=M7Y3TAH3UX PRODUCT_BUNDLE_IDENTIFIER=com.smaranz.slates build` and `xcrun devicectl device install app --device <id> /tmp/slates-ios-build/Build/Products/Debug-iphoneos/App.app`. The team is a free Personal Team: `com.slates.app` is registered to someone else (hence the override), the profile lapses after 7 days (reinstall to renew; the app keeps its data and pairing), and a phone holds only 3 such apps.
 
 ## Study Studio
 

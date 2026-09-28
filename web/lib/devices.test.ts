@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { isPublicPath, originOf } from "./device-gate";
+import { isPublicPath, originOf, unpairedPage } from "./device-gate";
 import * as devices from "./devices";
 
 // The registry lives under HOME, read when first used; point it somewhere disposable.
@@ -28,9 +28,12 @@ test("tells the host, the tailnet and the internet apart, whatever Host says", (
   assert.deepEqual(originOf(new Headers({ "x-forwarded-proto": "https", "tailscale-funnel-request": "?1", "tailscale-user-login": "someone@x.com" })), { kind: "outside" });
 });
 
-test("only the host check is open to anyone", () => {
+test("only the host check and the pairing form are open to anyone", () => {
   assert.equal(isPublicPath("GET", "/api/host"), true);
   assert.equal(isPublicPath("POST", "/api/host"), false);
+  assert.equal(isPublicPath("POST", "/api/devices/pair"), true);
+  assert.equal(isPublicPath("GET", "/api/devices/pair"), false);
+  assert.equal(isPublicPath("POST", "/api/devices/code"), false);
   assert.equal(isPublicPath("GET", "/api/study"), false);
   assert.equal(isPublicPath("GET", "/"), false);
 });
@@ -66,4 +69,59 @@ test("forgets a device, which stops its key working", () => {
   assert.equal(devices.forgetDevice(minted.device.id), true);
   assert.equal(devices.verifyKey(minted.key), null);
   assert.equal(devices.forgetDevice(minted.device.id), false);
+});
+
+const IPHONE_APP = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 SlatesApp";
+const otherThan = (code: string) => (code === "00000000" ? "11111111" : "00000000");
+
+test("a code pairs one device, once", () => {
+  const { code, expiresAt } = devices.createPairingCode();
+  assert.match(code, /^\d{8}$/);
+  assert.ok(expiresAt > Date.now());
+
+  assert.deepEqual(devices.redeemPairingCode(otherThan(code), IPHONE_APP), { error: "wrong" });
+  const paired = devices.redeemPairingCode(`${code.slice(0, 4)} ${code.slice(4)}`, IPHONE_APP);
+  assert.ok("key" in paired);
+  assert.equal(paired.device.name, "Slates app on iPhone");
+  assert.equal(devices.verifyKey(paired.key)?.id, paired.device.id);
+  assert.equal(devices.isOwner("someone-else@gmail.com"), false, "pairing by code doesn't change whose Slates it is");
+
+  assert.deepEqual(devices.redeemPairingCode(code, IPHONE_APP), { error: "expired" }, "a used code is spent");
+});
+
+test("typos cost nothing, but five wrong tries spend a code, and so do ten minutes", (t) => {
+  let { code } = devices.createPairingCode();
+  for (let i = 0; i < 10; i++) devices.redeemPairingCode("1234", IPHONE_APP);
+  for (let i = 0; i < 4; i++) devices.redeemPairingCode(otherThan(code), IPHONE_APP);
+  assert.ok("key" in devices.redeemPairingCode(code, IPHONE_APP), "four misses and any number of typos leave it working");
+
+  ({ code } = devices.createPairingCode());
+  for (let i = 0; i < 5; i++) assert.deepEqual(devices.redeemPairingCode(otherThan(code), IPHONE_APP), { error: "wrong" });
+  assert.deepEqual(devices.redeemPairingCode(code, IPHONE_APP), { error: "expired" }, "the fifth miss spends it");
+
+  ({ code } = devices.createPairingCode());
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now + 10 * 60_000 + 1);
+  assert.deepEqual(devices.redeemPairingCode(code, IPHONE_APP), { error: "expired" });
+});
+
+test("a new code replaces the last one", () => {
+  const first = devices.createPairingCode().code;
+  const second = devices.createPairingCode().code;
+  if (first !== second) assert.deepEqual(devices.redeemPairingCode(first, IPHONE_APP), { error: "wrong" });
+  assert.ok("key" in devices.redeemPairingCode(second, IPHONE_APP));
+});
+
+test("names the phone app apart from a browser", () => {
+  assert.equal(devices.deviceName(IPHONE_APP), "Slates app on iPhone");
+  assert.equal(devices.deviceName("Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"), "Browser on iPhone");
+  assert.equal(devices.deviceName("Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP4A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0 Mobile Safari/537.36"), "Slates app on Android");
+});
+
+test("the not-paired page takes a code and says why one failed, without echoing the address", () => {
+  assert.match(unpairedPage(), /<form method="post" action="\/api\/devices\/pair">/);
+  assert.doesNotMatch(unpairedPage(), /role="alert"/);
+  assert.match(unpairedPage("wrong"), /role="alert"[^>]*>That code isn’t right/);
+  assert.match(unpairedPage("expired"), /role="alert"[^>]*>That code has run out/);
+  assert.doesNotMatch(unpairedPage("<img src=x onerror=alert(1)>"), /onerror|role="alert"/);
 });

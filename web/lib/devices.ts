@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,13 +10,15 @@ import path from "node:path";
  * phone doesn't need Tailscale running, and nothing may get in that way without
  * a device key. A device earns one by visiting once over Tailscale itself —
  * a WireGuard connection Tailscale has already tied to the student's account —
- * and keeps it as a cookie. Keys are 256-bit random; only their SHA-256 is
- * stored, under ~/.slates/devices.json on the host.
+ * or by typing a one-time code a paired device shows, and keeps it as a
+ * cookie. Keys are 256-bit random; only their SHA-256 is stored, under
+ * ~/.slates/devices.json on the host.
  */
 
 export const DEVICE_COOKIE = "slates_device";
 /** Browsers cap cookie lifetimes near 400 days; each visit renews it. */
 export const DEVICE_COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
+export const DEVICE_COOKIE_OPTIONS = { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: DEVICE_COOKIE_MAX_AGE } as const;
 
 export interface Device {
   id: string;
@@ -40,6 +42,8 @@ const memory = globalThis as typeof globalThis & {
   __slatesDevices?: { mtime: number; checkedAt: number; registry: Registry };
   /** A just-issued key, reused for the same login and browser for a few minutes so parallel first requests don't each pair a device. */
   __slatesFreshKeys?: Map<string, { key: string; device: Device; at: number }>;
+  /** The pairing code on offer: its hash, when it lapses, and the wrong tries it has taken. */
+  __slatesPairing?: { hash: string; expiresAt: number; misses: number };
 };
 
 function read(): Registry {
@@ -92,37 +96,71 @@ export function isOwner(login: string): boolean {
   return !owner || owner === login;
 }
 
-/**
- * A key for something that isn't a browser — the Mac's coding agents, a
- * script. Only callers already on the host or the tailnet may ask (the route
- * checks), so a leaked device key can't mint itself more.
- */
-export function mintKey(name: string): { key: string; device: Device } {
+function addDevice(name: string, owner?: string): { key: string; device: Device } {
   const registry = read();
   const secret = randomBytes(32).toString("base64url");
   const now = Date.now();
-  const device: Device = { id: randomBytes(8).toString("hex"), name: name.trim().slice(0, 60) || "Script", hash: hashOf(secret), createdAt: now, lastSeen: now };
-  write({ ...registry, devices: [...registry.devices, device].slice(-50) });
+  const device: Device = { id: randomBytes(8).toString("hex"), name: name.trim().slice(0, 60), hash: hashOf(secret), createdAt: now, lastSeen: now };
+  write({ owner: registry.owner ?? owner, devices: [...registry.devices, device].slice(-50) });
   return { key: `${device.id}.${secret}`, device };
+}
+
+/**
+ * A key for something that isn't a browser — the Mac's coding agents, a
+ * script. Only callers already on the host or the tailnet may ask (the route
+ * checks); a paired device adds others with a pairing code instead.
+ */
+export function mintKey(name: string): { key: string; device: Device } {
+  return addDevice(name.trim() || "Script");
 }
 
 /** Pair a device for a Tailscale-verified login. Null when that login isn't the owner. */
 export function enroll(login: string, userAgent: string, name?: string): { key: string; device: Device } | null {
-  const registry = read();
-  if (registry.owner && registry.owner !== login) return null;
+  if (!isOwner(login)) return null;
 
   const fresh = (memory.__slatesFreshKeys ??= new Map());
   const recentKey = `${login}\n${userAgent}\n${name ?? ""}`;
   const recent = fresh.get(recentKey);
-  if (recent && Date.now() - recent.at < 5 * 60_000 && registry.devices.some((device) => device.id === recent.device.id)) return recent;
+  if (recent && Date.now() - recent.at < 5 * 60_000 && read().devices.some((device) => device.id === recent.device.id)) return recent;
 
-  const secret = randomBytes(32).toString("base64url");
-  const now = Date.now();
-  const device: Device = { id: randomBytes(8).toString("hex"), name: name?.trim().slice(0, 60) || deviceName(userAgent), hash: hashOf(secret), createdAt: now, lastSeen: now };
-  write({ owner: registry.owner ?? login, devices: [...registry.devices, device].slice(-50) });
-  const issued = { key: `${device.id}.${secret}`, device, at: now };
+  const issued = { ...addDevice(name?.trim() || deviceName(userAgent), login), at: Date.now() };
   fresh.set(recentKey, issued);
   return issued;
+}
+
+const CODE_LIFETIME = 10 * 60_000;
+const CODE_TRIES = 5;
+
+/**
+ * A one-time code that pairs a device without Tailscale: a paired device
+ * shows it (Settings › General › Devices) and the new one types it on the
+ * "not paired" page. One is on offer at a time, spent by a pairing, ten
+ * minutes or five wrong tries — five chances in a hundred million for anyone
+ * guessing. Only its hash is kept, in memory.
+ */
+export function createPairingCode(): { code: string; expiresAt: number } {
+  const code = String(randomInt(100_000_000)).padStart(8, "0");
+  const expiresAt = Date.now() + CODE_LIFETIME;
+  memory.__slatesPairing = { hash: hashOf(code), expiresAt, misses: 0 };
+  return { code, expiresAt };
+}
+
+/** Pair the device that typed a code, or say why not. */
+export function redeemPairingCode(typed: string, userAgent: string): { key: string; device: Device } | { error: "wrong" | "expired" } {
+  const offer = memory.__slatesPairing;
+  if (!offer || Date.now() > offer.expiresAt) {
+    memory.__slatesPairing = undefined;
+    return { error: "expired" };
+  }
+  const digits = typed.replace(/\D/g, "");
+  // Too short or long to be the code: a typo, which costs no try.
+  if (digits.length !== 8) return { error: "wrong" };
+  if (!timingSafeEqual(Buffer.from(hashOf(digits), "hex"), Buffer.from(offer.hash, "hex"))) {
+    if (++offer.misses >= CODE_TRIES) memory.__slatesPairing = undefined;
+    return { error: "wrong" };
+  }
+  memory.__slatesPairing = undefined;
+  return addDevice(deviceName(userAgent));
 }
 
 /** Record that a device was used, at most hourly so every request isn't a disk write. */
@@ -144,7 +182,8 @@ export function forgetDevice(id: string): boolean {
 }
 
 export function deviceName(userAgent: string): string {
-  const app = /Electron/i.test(userAgent) ? "Slates app" : /Capacitor|; wv\)/i.test(userAgent) ? "Slates app" : "Browser";
+  // The phone app's web view adds "SlatesApp" (mobile/capacitor.config.ts); Android's says "; wv)" anyway.
+  const app = /Electron|SlatesApp|; wv\)/i.test(userAgent) ? "Slates app" : "Browser";
   const place = /iPhone/i.test(userAgent) ? "iPhone"
     : /iPad/i.test(userAgent) ? "iPad"
       : /Android/i.test(userAgent) ? "Android"

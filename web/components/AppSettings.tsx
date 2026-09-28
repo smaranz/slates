@@ -112,23 +112,63 @@ function lastUsed(at: number): string {
   return `used ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
+interface DevicesData {
+  devices: PairedDevice[];
+  current: string | null;
+  local: boolean;
+}
+
+const fetchDevices = (): Promise<DevicesData | null> =>
+  fetch("/api/devices", { cache: "no-store" })
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+
 /** The devices that can open this Slates without Tailscale; see lib/devices.ts. Hidden where there's nothing to pair (Slates on this machine only). */
 function DevicesCard() {
-  const [data, setData] = useState<{ devices: PairedDevice[]; current: string | null; local: boolean } | null>(null);
+  const [data, setData] = useState<DevicesData | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<{ code: string; expiresAt: number; known: string[] } | null>(null);
+  const [pairNote, setPairNote] = useState<string | null>(null);
 
-  const load = () => {
-    void fetch("/api/devices", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then(setData)
-      .catch(() => setData(null));
-  };
+  const load = () => void fetchDevices().then(setData);
   useEffect(() => {
     const first = window.setTimeout(load, 0);
     return () => window.clearTimeout(first);
   }, []);
 
+  // While a code shows, watch for the device it pairs.
+  useEffect(() => {
+    if (!pairing) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() > pairing.expiresAt) {
+        setPairing(null);
+        setPairNote("That code ran out. Get another when the device is ready.");
+        return;
+      }
+      void fetchDevices().then((next) => {
+        if (!next) return;
+        setData(next);
+        const added = next.devices.find((device) => !pairing.known.includes(device.id));
+        if (!added) return;
+        setPairing(null);
+        setPairNote(`Paired ${added.name}.`);
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [pairing]);
+
   if (!data || (data.local && !data.devices.length)) return null;
+
+  const getCode = () => {
+    setPairNote(null);
+    void fetch("/api/devices/code", { method: "POST" })
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then((offer: { code: string; expiresAt: number } | null) => {
+        if (offer) setPairing({ ...offer, known: data.devices.map((device) => device.id) });
+        else setPairNote("Couldn't get a code. Try again.");
+      });
+  };
 
   const forget = (id: string) => {
     if (confirming !== id) {
@@ -143,9 +183,24 @@ function DevicesCard() {
   return (
     <Card
       title="Devices"
-      note="These can open Slates from anywhere without Tailscale. A new device pairs itself the first time you open Slates on it with Tailscale on. Forget one you've lost and it's locked out."
+      note="These can open Slates from anywhere without Tailscale. To add one, get a code here and type it on the new device's “not paired” screen. Forget one you've lost and it's locked out."
     >
       <ul className="app-settings-list">
+        <li className="app-settings-row">
+          <span className="app-settings-text" aria-live="polite">
+            {pairing ? <strong className="app-settings-pair-code">{`${pairing.code.slice(0, 4)} ${pairing.code.slice(4)}`}</strong> : <strong>Pair a new device</strong>}
+            <span>{pairing ? "Type this on the new device. It works once, for the next 10 minutes." : (pairNote ?? "Get a code to type on it. No Tailscale needed.")}</span>
+          </span>
+          {pairing ? (
+            <button type="button" className="btn btn--quiet" onClick={() => setPairing(null)}>
+              Hide
+            </button>
+          ) : (
+            <button type="button" className="btn btn--primary" onClick={getCode}>
+              Get a code
+            </button>
+          )}
+        </li>
         {data.devices.map((device) => (
           <Row key={device.id} title={device.id === data.current ? `${device.name} (this one)` : device.name} sub={`Paired ${new Date(device.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${lastUsed(device.lastSeen)}`}>
             <button type="button" className="btn btn--quiet" onClick={() => forget(device.id)}>
@@ -153,7 +208,7 @@ function DevicesCard() {
             </button>
           </Row>
         ))}
-        {!data.devices.length && <Row title="No devices yet" sub="Open Slates once with Tailscale on to pair a device.">{null}</Row>}
+        {!data.devices.length && <Row title="No devices yet" sub="Get a code above to pair one.">{null}</Row>}
       </ul>
     </Card>
   );
