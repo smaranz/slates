@@ -1556,10 +1556,10 @@ button {
   transform: scale(0.9);
 }
 
-/* The drawer's own toggle is redundant with the header's while the drawer is
-   docked beside it, but on a phone the drawer covers the header entirely. */
+/* While the drawer is open its own toggle closes it, so the header's only
+   appears once it's closed, as in ChatGPT. */
 .gpt[data-drawer="open"] .gpt-main > .gpt-header > .gpt-icon-btn:first-child {
-  color: var(--faint);
+  display: none;
 }
 
 /* --- thread --- */
