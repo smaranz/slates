@@ -92,10 +92,10 @@ export default function AgentApp() {
             {!live.connected ? "Connecting…" : working ? `${working} working on the PC` : "Teammates that work on your PC"}
           </span>
           <span style={{ flex: 1 }} />
-          <button type="button" className={`ui-back ${panel === "computer" ? s.headerOn : ""}`} onClick={() => setPanel(panel === "computer" ? null : "computer")} aria-pressed={panel === "computer"}>
+          <button type="button" className={`ui-back ${panel === "computer" ? s.headerOn : ""}`} onClick={() => setPanel(panel === "computer" ? null : "computer")} aria-pressed={panel === "computer"} aria-label="Computer">
             <Icon path={MONITOR} size={13} /> <span className={s.headerLabel}>Computer</span>
           </button>
-          <button type="button" className="ui-back" onClick={() => setDialog("skills")}>
+          <button type="button" className="ui-back" onClick={() => setDialog("skills")} aria-label="Skills">
             <Icon path={ICON.checklist} size={13} /> <span className={s.headerLabel}>Skills</span>
           </button>
           <button type="button" className="ui-back" onClick={openSettings} aria-label="Settings">

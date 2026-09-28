@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { Icon, ICON, Spinner } from "../ui";
 import s from "./agent.module.css";
@@ -10,6 +11,10 @@ import { agentApi } from "./useAgentData";
  * The agents' browser on the host, live. View-only until you take control;
  * then clicks, scrolling and typing go straight to the page — for sign-ins,
  * 2FA and CAPTCHAs, which agents hand to you rather than work around.
+ *
+ * The panel is small enough to watch in beside a chat, too small to sign in
+ * through, so taking control opens the screen large in a popup until you give
+ * control back.
  */
 
 interface Frame {
@@ -31,7 +36,10 @@ export default function Computer({ onClose }: { onClose: () => void }) {
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typing, setTyping] = useState("");
   const img = useRef<HTMLImageElement>(null);
+  const liveScreen = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const typed = useRef("");
   const flushTimer = useRef<number | undefined>(undefined);
 
@@ -40,6 +48,7 @@ export default function Computer({ onClose }: { onClose: () => void }) {
       const response = await fetch("/api/agent/computer", { cache: "no-store" });
       const data = (await response.json()) as Frame;
       setFrame(data);
+      if (!data.running) setControl(false);
       if (!editing && data.url) setAddress(data.url);
     } catch {
       // Keep the last frame.
@@ -97,12 +106,63 @@ export default function Computer({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const takingOver = control && !!frame?.running;
+  const wasTakingOver = useRef(false);
+
+  // The keyboard goes to the page as soon as the popup opens, and back to the
+  // button that opened it once it has closed.
+  useEffect(() => {
+    if (takingOver) liveScreen.current?.focus();
+    else if (wasTakingOver.current) toggle.current?.focus();
+    wasTakingOver.current = takingOver;
+  }, [takingOver]);
+
+  const giveBack = () => {
+    flushTyped();
+    setControl(false);
+  };
+
+  const addressBar = (
+    <form
+      className={s.address}
+      onSubmit={(e) => {
+        e.preventDefault();
+        setEditing(false);
+        if (address.trim()) void send({ type: "navigate", url: address.trim() });
+      }}
+    >
+      <button type="button" className={s.iconButton} aria-label="Back" onClick={() => void send({ type: "back" })}><Icon path={ICON.chevronLeft} size={13} /></button>
+      <input className={s.addressInput} value={address} onFocus={() => setEditing(true)} onBlur={() => setEditing(false)} onChange={(e) => setAddress(e.target.value)} aria-label="Address" spellCheck={false} />
+    </form>
+  );
+
+  const picture = (live: boolean) =>
+    frame?.image ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        ref={live ? img : undefined}
+        src={`data:image/jpeg;base64,${frame.image}`}
+        alt={frame.title || "The agents' browser"}
+        draggable={false}
+        onClick={
+          live
+            ? (e) => {
+                e.currentTarget.parentElement?.focus();
+                flushTyped();
+                const p = point(e.clientX, e.clientY);
+                if (p) void send({ type: "click", ...p });
+              }
+            : undefined
+        }
+      />
+    ) : <div className={s.center}>{frame?.error ?? <Spinner size={16} />}</div>;
+
   return (
     <aside className={`${s.panel} ${s.computer}`} aria-label="Computer">
       <div className={s.panelHead}>
         <h2>Computer</h2>
         {frame?.running && (
-          <button type="button" className={control ? s.controlOn : s.quiet} onClick={() => { flushTyped(); setControl((c) => !c); }} aria-pressed={control}>
+          <button ref={toggle} type="button" className={control ? s.controlOn : s.quiet} onClick={() => (control ? giveBack() : setControl(true))} aria-pressed={control}>
             {control ? "Give back control" : "Take control"}
           </button>
         )}
@@ -117,68 +177,85 @@ export default function Computer({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <>
-          <form
-            className={s.address}
-            onSubmit={(e) => {
-              e.preventDefault();
-              setEditing(false);
-              if (address.trim()) void send({ type: "navigate", url: address.trim() });
-            }}
-          >
-            <button type="button" className={s.iconButton} aria-label="Back" onClick={() => void send({ type: "back" })}><Icon path={ICON.chevronLeft} size={13} /></button>
-            <input className={s.addressInput} value={address} onFocus={() => setEditing(true)} onBlur={() => setEditing(false)} onChange={(e) => setAddress(e.target.value)} aria-label="Address" spellCheck={false} />
-          </form>
-          <div
-            className={`${s.screen} ${control ? s.screenLive : ""}`}
-            tabIndex={control ? 0 : -1}
-            onKeyDown={(e) => {
-              if (!control || e.metaKey || e.ctrlKey) return;
-              if (SPECIAL.has(e.key)) {
-                e.preventDefault();
-                flushTyped();
-                void send({ type: "key", key: e.key });
-              } else if (e.key.length === 1) {
-                e.preventDefault();
-                typed.current += e.key;
-                window.clearTimeout(flushTimer.current);
-                flushTimer.current = window.setTimeout(flushTyped, 250);
-              }
-            }}
-            onPaste={(e) => {
-              if (!control) return;
-              e.preventDefault();
-              flushTyped();
-              void send({ type: "text", text: e.clipboardData.getData("text") });
-            }}
-            onWheel={(e) => {
-              if (!control) return;
-              const p = point(e.clientX, e.clientY);
-              if (p) void send({ type: "scroll", ...p, dy: e.deltaY });
-            }}
-          >
-            {frame.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                ref={img}
-                src={`data:image/jpeg;base64,${frame.image}`}
-                alt={frame.title || "The agents' browser"}
-                draggable={false}
-                onClick={(e) => {
-                  if (!control) return;
-                  e.currentTarget.parentElement?.focus();
-                  flushTyped();
-                  const p = point(e.clientX, e.clientY);
-                  if (p) void send({ type: "click", ...p });
-                }}
-              />
-            ) : <div className={s.center}>{frame.error ?? <Spinner size={16} />}</div>}
-          </div>
+          {addressBar}
+          <div className={s.screen}>{picture(false)}</div>
           <p className={s.computerHint}>
-            {control ? "You're in control: click the page, then type. Your keys go to the PC's browser." : frame.title || "Watching. Take control to sign in or click."}
+            {control ? "You're in control in the popup." : frame.title || "Watching. Take control to sign in or click."}
           </p>
         </>
       )}
       {error && <p className={s.bad}>{error}</p>}
+
+      {takingOver &&
+        createPortal(
+          <div
+            className={s.takeoverBackdrop}
+            onKeyDown={(e) => {
+              // Esc on the page goes to the page (the screen claims it); anywhere else it gives control back.
+              if (e.key === "Escape" && !e.defaultPrevented) giveBack();
+            }}
+          >
+            <section
+              className={s.takeover}
+              role="dialog"
+              aria-modal="true"
+              aria-label="In control of the PC's browser"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) liveScreen.current?.focus();
+              }}
+            >
+              <header className={s.takeoverHead}>
+                <span className={s.takeoverLive}><i aria-hidden="true" /> You&apos;re in control</span>
+                {addressBar}
+                <button type="button" className={s.controlOn} onClick={giveBack}>Give back control</button>
+              </header>
+              <div
+                ref={liveScreen}
+                className={`${s.screen} ${s.screenLive} ${s.takeoverScreen}`}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.metaKey || e.ctrlKey) return;
+                  if (SPECIAL.has(e.key)) {
+                    e.preventDefault();
+                    flushTyped();
+                    void send({ type: "key", key: e.key });
+                  } else if (e.key.length === 1) {
+                    e.preventDefault();
+                    typed.current += e.key;
+                    window.clearTimeout(flushTimer.current);
+                    flushTimer.current = window.setTimeout(flushTyped, 250);
+                  }
+                }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  flushTyped();
+                  void send({ type: "text", text: e.clipboardData.getData("text") });
+                }}
+                onWheel={(e) => {
+                  const p = point(e.clientX, e.clientY);
+                  if (p) void send({ type: "scroll", ...p, dy: e.deltaY });
+                }}
+              >
+                {picture(true)}
+              </div>
+              {/* A touch screen has no keyboard until a text field has focus, so a phone types through this. */}
+              <form
+                className={s.takeoverType}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (typing) void send({ type: "text", text: typing });
+                  setTyping("");
+                }}
+              >
+                <input className={s.addressInput} value={typing} onChange={(e) => setTyping(e.target.value)} placeholder="Type into the page" aria-label="Type into the page" enterKeyHint="send" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+                <button type="submit" className={s.quiet}>Send</button>
+                <button type="button" className={s.quiet} onClick={() => void send({ type: "key", key: "Enter" })}>Return</button>
+              </form>
+              <p className={s.computerHint}>Click the page, then type. Your keys go to the PC&apos;s browser.</p>
+            </section>
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }
