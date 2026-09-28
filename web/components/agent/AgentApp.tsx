@@ -6,6 +6,7 @@ import { useMode } from "@/lib/mode";
 import { Icon, ICON, Spinner } from "../ui";
 import Chat, { Face } from "./Chat";
 import Computer from "./Computer";
+import AgentDrawer from "./Drawer";
 import { AgentDetails, GroupDetails, NewAgent, NewGroup, Skills, TEMPLATES } from "./Panels";
 import s from "./agent.module.css";
 import { agentApi, useAgentLive } from "./useAgentData";
@@ -22,9 +23,26 @@ import { agentApi, useAgentLive } from "./useAgentData";
 const MONITOR = "M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z";
 const OPEN_KEY = "slates.agent.open";
 const TALK_KEY = "slates.agent.talk";
+const DRAWER_KEY = "slates.agent.drawer";
+const PHONE = "(max-width: 760px)";
 
 type Panel = "details" | "computer" | null;
 type Dialog = "agent" | "group" | "skills" | null;
+
+/**
+ * Whether the agents drawer starts open. Docked on a laptop, as the student
+ * left it. A sheet over the chat on a phone, open only when there's no chat
+ * to go back to, since there the list is where you start.
+ */
+function initialDrawer(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    if (window.matchMedia(PHONE).matches) return !window.localStorage.getItem(OPEN_KEY);
+    return window.localStorage.getItem(DRAWER_KEY) !== "closed";
+  } catch {
+    return true;
+  }
+}
 
 export default function AgentApp() {
   const { clear, openSettings } = useMode();
@@ -32,6 +50,7 @@ export default function AgentApp() {
   const [panel, setPanel] = useState<Panel>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [talk, setTalk] = useState(false);
+  const [drawer, setDrawer] = useState(initialDrawer);
   const live = useAgentLive(open);
   const { roster } = live;
 
@@ -62,9 +81,18 @@ export default function AgentApp() {
     return () => window.clearTimeout(fallback);
   }, [roster, open, current, group]);
 
+  const setDrawerOpen = (next: boolean) => {
+    setDrawer(next);
+    try {
+      if (!window.matchMedia(PHONE).matches) window.localStorage.setItem(DRAWER_KEY, next ? "open" : "closed");
+    } catch {}
+  };
+
   const openChat = (id: string | null) => {
     setOpen(id);
     if (id) live.markRead(id);
+    // On a phone the drawer covers the chat, so picking one gets out of its way.
+    if (id && window.matchMedia(PHONE).matches) setDrawer(false);
   };
 
   const setTalkMode = (on: boolean) => {
@@ -103,91 +131,83 @@ export default function AgentApp() {
           </button>
         </header>
 
-        <div className={`${s.shell} ${open ? s.hasOpen : ""}`}>
-          <nav className={s.side} aria-label="Agents">
-            <div className={s.sideScroll}>
-              <div className={s.sideLabel}>Agents</div>
-              {agents.map((a) => (
-                <button key={a.id} type="button" className={`${s.item} ${open === a.id ? s.itemOn : ""}`} onClick={() => openChat(a.id)}>
-                  <Face agent={a} size={30} />
-                  <span className={s.itemText}>
-                    <strong>{a.name}</strong>
-                    <span>{a.state === "working" ? "Working…" : a.state === "queued" ? "Up next" : a.job || "Agent"}</span>
-                  </span>
-                  {live.unread.has(a.id) && <i className={s.dot} aria-label="New activity" />}
-                </button>
-              ))}
-              {groups.length > 0 && <div className={s.sideLabel}>Groups</div>}
-              {groups.map((g) => (
-                <button key={g.id} type="button" className={`${s.item} ${open === g.id ? s.itemOn : ""}`} onClick={() => openChat(g.id)}>
-                  <span className={s.groupFaces}>
-                    {g.members.slice(0, 3).map((id) => {
-                      const m = agents.find((a) => a.id === id);
-                      return m ? <Face key={id} agent={m} size={18} /> : null;
-                    })}
-                  </span>
-                  <span className={s.itemText}>
-                    <strong>{g.name}</strong>
-                    <span>{g.members.map((id) => agents.find((a) => a.id === id)?.name).filter(Boolean).join(", ")}</span>
-                  </span>
-                  {live.unread.has(g.id) && <i className={s.dot} aria-label="New activity" />}
-                </button>
-              ))}
-            </div>
-            <div className={s.sideFoot}>
-              <button type="button" className={s.newButton} onClick={() => setDialog("agent")}><Icon path={ICON.plus} size={12} /> New agent</button>
-              {agents.length >= 2 && <button type="button" className={s.newButtonQuiet} onClick={() => setDialog("group")}>New group</button>}
-            </div>
-          </nav>
+        {/* The tutor's ChatGPT layout: the agents in its drawer, the one you're
+            talking to in its header, the chat in its thread and composer. */}
+        <div className={`gpt ${s.gpt}`} data-drawer={drawer ? "open" : "closed"}>
+          <div className="gpt-scrim" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <AgentDrawer
+            agents={agents}
+            groups={groups}
+            open={open}
+            unread={live.unread}
+            onOpen={openChat}
+            onClose={() => setDrawerOpen(false)}
+            onNewAgent={() => setDialog("agent")}
+            onNewGroup={agents.length >= 2 ? () => setDialog("group") : undefined}
+          />
 
-          <section className={s.stage}>
-            {!roster ? (
-              <div className={s.center}>{live.error ? <p className={s.bad}>{live.error}</p> : <Spinner size={18} />}</div>
-            ) : !agents.length ? (
-              <div className={s.welcome}>
-                <h1>Your AI teammates</h1>
-                <p>Agents work on your PC with full access to it: files, a terminal, a real browser, and your Schoology. They keep memory, run on schedules, and keep going when your laptop is closed.</p>
-                <div className={s.templates}>
-                  {TEMPLATES.map((t) => (
-                    <button key={t.name} type="button" className={s.template} onClick={() => void quickCreate(t)}>
-                      <strong>{t.name}</strong>
-                      <span>{t.job}</span>
-                    </button>
-                  ))}
-                </div>
-                <button type="button" className={s.quiet} onClick={() => setDialog("agent")}>Or make your own</button>
-              </div>
-            ) : current || group ? (
-              <>
-                <div className={s.chatHead}>
-                  <button type="button" className={`${s.iconButton} ${s.mobileBack}`} aria-label="All agents" onClick={() => setOpen(null)}><Icon path={ICON.chevronLeft} size={14} /></button>
-                  {current ? <Face agent={current} size={30} /> : (
-                    <span className={s.groupFaces}>{group!.members.slice(0, 3).map((id) => { const m = agents.find((a) => a.id === id); return m ? <Face key={id} agent={m} size={20} /> : null; })}</span>
+          <div className="gpt-main">
+            <header className="gpt-header">
+              <button type="button" className="gpt-icon-btn" onClick={() => setDrawerOpen(!drawer)} aria-label={drawer ? "Hide agents" : "Show agents"} aria-expanded={drawer}>
+                <Icon path={ICON.sidebar} size={19} />
+              </button>
+              {/* Where the tutor names its model: who you're talking to, which opens their details. */}
+              {roster && (current || group) && (
+                <button type="button" className={s.who} onClick={() => setPanel(panel === "details" ? null : "details")} aria-expanded={panel === "details"} aria-label={`${current?.name ?? group!.name}: details`}>
+                  {current ? <Face agent={current} size={24} /> : (
+                    <span className={s.groupFaces}>{group!.members.slice(0, 3).map((id) => { const m = agents.find((a) => a.id === id); return m ? <Face key={id} agent={m} size={18} /> : null; })}</span>
                   )}
-                  <div className={s.chatTitle}>
+                  <span className={s.whoText}>
                     <strong>{current?.name ?? group!.name}</strong>
                     <span>{current ? `${roster.models.find((m) => m.id === current.model)?.label ?? current.model}${current.job ? ` · ${current.job}` : ""}` : `${group!.members.length} agents`}</span>
-                  </div>
-                  <button type="button" className={`${s.iconButton} ${panel === "details" ? s.headerOn : ""}`} aria-label="Details" aria-pressed={panel === "details"} onClick={() => setPanel(panel === "details" ? null : "details")}>
-                    <Icon path={ICON.sidebar} size={15} />
-                  </button>
-                </div>
-                <Chat
-                  key={open!}
-                  chatId={open!}
-                  events={live.events}
-                  loading={live.loadingChat}
-                  agents={agents}
-                  group={group}
-                  skills={roster.skills}
-                  talk={talk}
-                  onTalk={setTalkMode}
-                />
-              </>
+                  </span>
+                  <Icon path={ICON.chevronDown} size={12} />
+                </button>
+              )}
+              <span className="gpt-header-gap" />
+              <button type="button" className="gpt-icon-btn" onClick={() => setDialog("agent")} aria-label="New agent" title="New agent">
+                <Icon path={ICON.compose} size={19} />
+              </button>
+            </header>
+
+            {roster && (current || group) ? (
+              <Chat
+                key={open!}
+                chatId={open!}
+                events={live.events}
+                loading={live.loadingChat}
+                agents={agents}
+                group={group}
+                skills={roster.skills}
+                talk={talk}
+                onTalk={setTalkMode}
+              />
             ) : (
-              <div className={s.center}><p className={s.muted}>Pick an agent.</p></div>
+              <div className="gpt-thread">
+                <div className="gpt-column gpt-column--empty">
+                  {!roster ? (
+                    <div className={s.center}>{live.error ? <p className={s.bad}>{live.error}</p> : <Spinner size={18} />}</div>
+                  ) : !agents.length ? (
+                    <div className={s.welcome}>
+                      <h1>Your AI teammates</h1>
+                      <p>Agents work on your PC with full access to it: files, a terminal, a real browser, and your Schoology. They keep memory, run on schedules, and keep going when your laptop is closed.</p>
+                      <div className={s.templates}>
+                        {TEMPLATES.map((t) => (
+                          <button key={t.name} type="button" className={s.template} onClick={() => void quickCreate(t)}>
+                            <strong>{t.name}</strong>
+                            <span>{t.job}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" className={s.quiet} onClick={() => setDialog("agent")}>Or make your own</button>
+                    </div>
+                  ) : (
+                    <div className={s.center}><p className={s.muted}>Pick an agent.</p></div>
+                  )}
+                </div>
+              </div>
             )}
-          </section>
+          </div>
 
           {panel === "computer" && <Computer onClose={() => setPanel(null)} />}
           {panel === "details" && roster && current && (

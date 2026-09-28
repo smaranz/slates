@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentGroup, ChatEvent, RosterAgent, Skill } from "@/lib/agent/types";
 import { useDictation } from "@/lib/dictation";
@@ -10,9 +10,12 @@ import { Icon, ICON, Spinner } from "../ui";
 import s from "./agent.module.css";
 import { agentApi, readFileAsBase64 } from "./useAgentData";
 
-/** One conversation: the transcript and the composer. */
-
-export const CLIP = "M16.5 6.5v9a4.5 4.5 0 1 1-9 0V5a3 3 0 1 1 6 0v10a1.5 1.5 0 1 1-3 0V6.5h-1.5V15a3 3 0 1 0 6 0V5a4.5 4.5 0 1 0-9 0v10.5a6 6 0 1 0 12 0v-9h-1.5z";
+/**
+ * One conversation: the transcript and the composer, in the tutor's
+ * ChatGPT-shaped `gpt-*` parts — only the student's turns wear a bubble, an
+ * agent's turn is the page, its tool steps fold into one quiet line, and the
+ * composer is the rounded box with attach on the left and send on the right.
+ */
 
 export function Face({ agent, size = 28 }: { agent: Pick<RosterAgent, "name" | "hue"> & { state?: RosterAgent["state"] }; size?: number }) {
   return (
@@ -24,52 +27,92 @@ export function Face({ agent, size = 28 }: { agent: Pick<RosterAgent, "name" | "
 }
 
 type WorkItem = Extract<ChatEvent, { type: "tool" | "thinking" }>;
-type Block =
-  | { kind: "event"; event: ChatEvent }
-  | { kind: "work"; id: string; agentId: string; items: WorkItem[] };
+type AgentPart = Extract<ChatEvent, { type: "agent" | "approval" | "voice" | "question" }> | { type: "work"; id: string; items: WorkItem[] };
+type Turn =
+  | { kind: "user"; event: Extract<ChatEvent, { type: "user" }> }
+  | { kind: "agent"; id: string; agentId: string; parts: AgentPart[] }
+  | { kind: "other"; event: Extract<ChatEvent, { type: "handoff" | "notice" }> };
 
-function blocks(events: ChatEvent[]): Block[] {
-  const out: Block[] = [];
+/**
+ * Everything an agent does between two of the student's messages is one
+ * turn — what it says, the steps it takes between, its drafts and voice
+ * memos — the way the tutor shows one reply rather than a feed of fragments.
+ */
+function turns(events: ChatEvent[]): Turn[] {
+  const out: Turn[] = [];
   for (const event of events) {
+    if (event.type === "user" || event.type === "handoff" || event.type === "notice") {
+      out.push(event.type === "user" ? { kind: "user", event } : { kind: "other", event });
+      continue;
+    }
+    let turn = out.at(-1);
+    if (turn?.kind !== "agent" || turn.agentId !== event.agentId) {
+      turn = { kind: "agent", id: `turn_${event.id}`, agentId: event.agentId, parts: [] };
+      out.push(turn);
+    }
     if (event.type === "tool" || event.type === "thinking") {
-      const last = out.at(-1);
-      if (last?.kind === "work" && last.agentId === event.agentId) last.items.push(event);
-      else out.push({ kind: "work", id: `work_${event.id}`, agentId: event.agentId, items: [event] });
+      const last = turn.parts.at(-1);
+      if (last?.type === "work") last.items.push(event);
+      else turn.parts.push({ type: "work", id: `work_${event.id}`, items: [event] });
     } else {
-      out.push({ kind: "event", event });
+      turn.parts.push(event);
     }
   }
   return out;
 }
 
+/** The steps between two things an agent says: one dim line, opened if you ask. */
 function Work({ items, live }: { items: WorkItem[]; live: boolean }) {
   const [open, setOpen] = useState(false);
   const tools = items.filter((i): i is Extract<WorkItem, { type: "tool" }> => i.type === "tool");
-  const running = live && (items.some((i) => (i.type === "tool" && i.status === "running") || (i.type === "thinking" && i.streaming)));
-  const latest = [...items].reverse().find((i) => i.type === "tool") as Extract<WorkItem, { type: "tool" }> | undefined;
+  const running = live && items.some((i) => (i.type === "tool" && i.status === "running") || (i.type === "thinking" && i.streaming));
+  const current = tools.findLast((t) => t.status === "running");
   const summary = running
-    ? latest?.label ?? "Thinking"
-    : tools.length ? `${tools.length} step${tools.length === 1 ? "" : "s"}` : "Thought it through";
+    ? current?.label ?? "Thinking"
+    : tools.length ? `Used ${tools.length} ${tools.length === 1 ? "tool" : "tools"}` : "Thought it through";
   return (
-    <div className={s.work}>
-      <button type="button" className={s.workHead} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        {running ? <Spinner size={12} /> : <Icon path={ICON.check} size={12} />}
-        <span>{summary}</span>
-        <Icon path={ICON.chevronDown} size={11} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+    <div className={`tutor-work${open ? " is-open" : ""}`}>
+      <button type="button" className="tutor-work-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {running ? <Spinner size={11} /> : <Icon path={ICON.check} size={11} />}
+        <span className="tutor-work-summary">{summary}</span>
+        <Icon path={ICON.chevronDown} size={11} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .18s" }} />
       </button>
       {open && (
-        <ol className={s.workList}>
+        <div className="tutor-work-body">
           {items.map((item) => item.type === "tool" ? (
-            <li key={item.id} className={item.status === "error" ? s.workError : undefined}>
-              <span>{item.label}</span>
-              {item.detail && <code>{item.detail}</code>}
-            </li>
+            <div key={item.id} className={`tutor-step is-${item.status === "running" && live ? "run" : item.status === "error" ? "fail" : "done"} ${s.step}`}>
+              <span className="tutor-step-dot" />
+              <span className={s.stepText}>
+                <span className="truncate">{item.label}</span>
+                {item.detail && <code>{item.detail}</code>}
+              </span>
+            </div>
           ) : (
-            <li key={item.id} className={s.workThought}>{item.text.trim().slice(0, 2000)}</li>
+            <div key={item.id} className="tutor-reasoning"><p>{item.text.trim().slice(0, 2000)}</p></div>
           ))}
-        </ol>
+        </div>
       )}
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="gpt-action"
+      aria-label={copied ? "Copied" : "Copy"}
+      title={copied ? "Copied" : "Copy"}
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }).catch(() => {});
+      }}
+    >
+      <Icon path={copied ? ICON.check : ICON.copy} size={15} />
+    </button>
   );
 }
 
@@ -171,7 +214,7 @@ export default function Chat({
   const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const members = group ? group.members.map((id) => byId.get(id)).filter((a): a is RosterAgent => !!a) : [byId.get(chatId)].filter((a): a is RosterAgent => !!a);
   const working = members.some((m) => m.state !== "idle");
-  const items = useMemo(() => blocks(events), [events]);
+  const thread = useMemo(() => turns(events), [events]);
   const autoVoice = talk ? events.findLast((e) => e.type === "voice" && e.at > talkSince)?.id ?? null : null;
 
   useLayoutEffect(() => {
@@ -224,128 +267,148 @@ export default function Chat({
 
   const stopAll = () => void agentApi("/api/agent/chat", { chatId, op: "stop" }).catch(() => {});
 
+  const empty = !loading && !events.length;
+  const streaming = events.some((e) => (e.type === "agent" && e.streaming) || (e.type === "tool" && e.status === "running"));
+  const single = members.length === 1 ? members[0]! : null;
+  // Between steps an agent is still at work; say so at the end of its turn, or on its own line if it hasn't started one.
+  const busy = members.filter((m) => m.state !== "idle");
+  const lastTurn = thread.at(-1);
+  const busyInTurn = working && lastTurn?.kind === "agent" && busy.some((m) => m.id === lastTurn.agentId);
+  const busyLine = working && !streaming && (
+    <div className="tutor-work">
+      <span className="tutor-work-head">
+        <Spinner size={11} />
+        <span className="tutor-work-summary">{busy.map((m) => m.name).join(", ")} {busy.some((m) => m.state === "working") ? "is working" : "is up next"}</span>
+      </span>
+    </div>
+  );
+
   return (
-    <div className={s.chat}>
+    <>
       <div
-        className={s.scroll}
+        className="gpt-thread"
         ref={scroller}
         onScroll={(e) => {
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <div className={s.transcript}>
+        <div className={`gpt-column${empty || (loading && !events.length) ? " gpt-column--empty" : ""}`}>
           {loading && !events.length && <div className={s.center}><Spinner size={16} /></div>}
-          {!loading && !events.length && (
-            <div className={s.hello}>
-              {members.length === 1 ? (
-                <>
-                  <Face agent={members[0]!} size={44} />
-                  <h2>{members[0]!.name}</h2>
-                  <p>{members[0]!.job || "Ready when you are."}</p>
-                </>
-              ) : (
-                <>
-                  <div className={s.helloFaces}>{members.map((m) => <Face key={m.id} agent={m} size={34} />)}</div>
-                  <h2>{group?.name}</h2>
-                  <p>Write to the group, or @mention who should take it.</p>
-                </>
+          {empty && (
+            <div className="gpt-greeting">
+              {single ? <Face agent={single} size={44} /> : <div className={s.helloFaces}>{members.map((m) => <Face key={m.id} agent={m} size={34} />)}</div>}
+              <h1>{`What should ${single?.name ?? group?.name ?? "they"} work on?`}</h1>
+              <p className={s.greetingSub}>{single ? single.job || "Ready when you are." : "Write to the group, or @mention who should take it."}</p>
+              {single && (
+                <div className="gpt-starters">
+                  {STARTERS.map((ask) => (
+                    <button key={ask} type="button" className="gpt-starter" onClick={() => void send(ask)}>{ask}</button>
+                  ))}
+                </div>
               )}
             </div>
           )}
-          {items.map((block, index) => {
-            if (block.kind === "work") return <Work key={block.id} items={block.items} live={index >= items.length - 3} />;
-            const event = block.event;
-            const agent = "agentId" in event ? byId.get(event.agentId) : undefined;
-            switch (event.type) {
-              case "user":
-                return (
-                  <div key={event.id} className={s.user}>
-                    {event.images?.map((name) => (
-                      <Image key={name} src={`/api/agent/file?name=${encodeURIComponent(name)}`} alt="Attached image" width={260} height={220} unoptimized className={s.userImage} style={{ width: "auto", height: "auto" }} />
-                    ))}
-                    {event.text !== "(image)" && <div className={s.userText}>{event.text}</div>}
-                  </div>
-                );
-              case "agent":
-                if (event.text.trim() === "PASS") return null;
-                return (
-                  <div key={event.id} className={s.reply}>
-                    {(group || index === 0 || items[index - 1]?.kind !== "work") && agent && (
-                      <div className={s.replyWho}><Face agent={agent} size={20} /><span>{agent.name}</span></div>
+
+          {thread.map((turn, index) => {
+            if (turn.kind === "user") {
+              const event = turn.event;
+              return (
+                <div key={event.id} className="gpt-turn gpt-turn--user">
+                  <div className="gpt-bubble">
+                    {!!event.images?.length && (
+                      <div className="gpt-bubble-files">
+                        {event.images.map((name) => (
+                          <Image key={name} src={`/api/agent/file?name=${encodeURIComponent(name)}`} alt="Attached image" width={260} height={220} unoptimized className={s.userImage} style={{ width: "auto", height: "auto" }} />
+                        ))}
+                      </div>
                     )}
-                    <TutorMarkdown text={event.text} className={s.replyText} />
+                    {event.text !== "(image)" && event.text}
                   </div>
-                );
-              case "approval":
-                return <Draft key={event.id} chatId={chatId} event={event} />;
-              case "voice":
-                return <Voice key={event.id} event={event} autoplay={autoVoice === event.id} />;
-              case "question":
-                return (
-                  <div key={event.id} className={s.question}>
-                    <p>{event.question}</p>
-                    {event.options.length > 0 && (
-                      <div className={s.chips}>{event.options.map((option) => <button key={option} type="button" className={s.chip} onClick={() => void send(option)}>{option}</button>)}</div>
-                    )}
-                  </div>
-                );
-              case "handoff": {
-                const from = byId.get(event.from)?.name ?? "An agent";
-                const to = byId.get(event.to)?.name ?? "an agent";
-                return <HandoffLine key={event.id} from={from} to={to} text={event.text} />;
-              }
-              case "notice":
-                return <p key={event.id} className={event.tone === "error" ? s.noticeBad : s.notice}>{event.text}</p>;
-              default:
-                return <Fragment key={(event as ChatEvent).id} />;
+                  {event.text !== "(image)" && <div className="gpt-actions gpt-actions--user"><CopyButton text={event.text} /></div>}
+                </div>
+              );
             }
+            if (turn.kind === "other") {
+              const event = turn.event;
+              if (event.type === "notice") return <p key={event.id} className={event.tone === "error" ? s.noticeBad : s.notice}>{event.text}</p>;
+              return <HandoffLine key={event.id} from={byId.get(event.from)?.name ?? "An agent"} to={byId.get(event.to)?.name ?? "an agent"} text={event.text} />;
+            }
+            const agent = byId.get(turn.agentId);
+            const said = turn.parts.filter((p): p is Extract<AgentPart, { type: "agent" }> => p.type === "agent" && p.text.trim() !== "PASS");
+            if (!said.length && turn.parts.every((p) => p.type === "agent")) return null;
+            const last = index === thread.length - 1;
+            return (
+              <div key={turn.id} className="gpt-turn gpt-turn--assistant">
+                {group && agent && <div className={s.replyWho}><Face agent={agent} size={20} /><span>{agent.name}</span></div>}
+                {turn.parts.map((part) => {
+                  switch (part.type) {
+                    case "work":
+                      return <Work key={part.id} items={part.items} live={last && working} />;
+                    case "agent":
+                      return part.text.trim() === "PASS" ? null : <div key={part.id} className="gpt-reply"><TutorMarkdown text={part.text} className="prose--chat" /></div>;
+                    case "approval":
+                      return <Draft key={part.id} chatId={chatId} event={part} />;
+                    case "voice":
+                      return <Voice key={part.id} event={part} autoplay={autoVoice === part.id} />;
+                    case "question":
+                      return (
+                        <div key={part.id} className={s.question}>
+                          <p>{part.question}</p>
+                          {part.options.length > 0 && (
+                            <div className={s.chips}>{part.options.map((option) => <button key={option} type="button" className={s.chip} onClick={() => void send(option)}>{option}</button>)}</div>
+                          )}
+                        </div>
+                      );
+                  }
+                })}
+                {last && busyInTurn && busyLine}
+                {said.length > 0 && !(last && busyInTurn) && (
+                  <div className="gpt-actions"><CopyButton text={said.map((p) => p.text).join("\n\n")} /></div>
+                )}
+              </div>
+            );
           })}
-          {working && !events.some((e) => (e.type === "agent" && e.streaming) || (e.type === "tool" && e.status === "running")) && (
-            <div className={s.typing}><Spinner size={12} /> {members.filter((m) => m.state !== "idle").map((m) => m.name).join(", ")} {members.filter((m) => m.state === "working").length ? "is working" : "is up next"}</div>
-          )}
+
+          {busyLine && !busyInTurn && <div className="gpt-turn gpt-turn--assistant">{busyLine}</div>}
         </div>
       </div>
 
-      <form
-        className={s.composer}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send();
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
-        }}
-      >
-        {menu.length > 0 && (
-          <div className={s.menu} role="listbox">
-            {menu.map((item, i) => (
-              <button key={item.key} type="button" role="option" aria-selected={i === menuIndex} className={i === menuIndex ? s.menuOn : undefined} onMouseDown={(e) => { e.preventDefault(); choose(item.insert); }}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {files.length > 0 && (
-          <div className={s.files}>
-            {files.map((f, i) => (
-              <span key={`${f.name}-${i}`} className={s.fileChip}>
-                {f.name}
-                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((current) => current.filter((_, j) => j !== i))}><Icon path={ICON.close} size={10} /></button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className={s.composeRow}>
-          <button type="button" className={s.iconButton} aria-label="Attach files" title="Attach files" onClick={() => picker.current?.click()}>
-            <Icon path={CLIP} size={16} />
-          </button>
-          <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
+      <div className="gpt-composer-dock">
+        <form
+          className="gpt-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+          }}
+        >
+          {menu.length > 0 && (
+            <div className={s.menu} role="listbox">
+              {menu.map((item, i) => (
+                <button key={item.key} type="button" role="option" aria-selected={i === menuIndex} className={i === menuIndex ? s.menuOn : undefined} onMouseDown={(e) => { e.preventDefault(); choose(item.insert); }}>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {files.length > 0 && (
+            <div className="gpt-composer-files">
+              {files.map((f, i) => (
+                <span key={`${f.name}-${i}`} className={s.fileChip}>
+                  {f.name}
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((current) => current.filter((_, j) => j !== i))}><Icon path={ICON.close} size={10} /></button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             ref={input}
-            className={s.input}
+            className="gpt-input"
             value={draft}
             rows={1}
             autoFocus
@@ -354,7 +417,7 @@ export default function Chat({
               setDraft(e.target.value);
               setMenuIndex(0);
               e.currentTarget.style.height = "auto";
-              e.currentTarget.style.height = `${Math.min(200, e.currentTarget.scrollHeight)}px`;
+              e.currentTarget.style.height = `${Math.min(180, e.currentTarget.scrollHeight)}px`;
             }}
             onPaste={(e) => {
               const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
@@ -377,25 +440,35 @@ export default function Chat({
             }}
             aria-label="Message"
           />
-          {dictation.available && (
-            <button type="button" className={`${s.iconButton} ${dictation.recording ? s.recording : ""}`} aria-label={dictation.recording ? "Stop dictation" : "Dictate"} title="Dictate" onClick={dictation.toggle} disabled={dictation.transcribing}>
-              {dictation.transcribing ? <Spinner size={14} /> : <Icon path={ICON.mic} size={16} />}
+          <div className="gpt-composer-row">
+            <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
+            <button type="button" className="gpt-round-btn" aria-label="Add photos or files" title="Add photos or files" onClick={() => picker.current?.click()}>
+              <Icon path={ICON.plus} size={17} />
             </button>
-          )}
-          <button type="button" className={`${s.iconButton} ${talk ? s.talkOn : ""}`} aria-pressed={talk} aria-label="Talk mode" title="Talk mode: speak, and hear replies" onClick={() => { if (!talk) setTalkSince(Date.now()); onTalk(!talk); }}>
-            <Icon path={ICON.waveform} size={16} />
-          </button>
-          {working && !draft.trim() && !files.length ? (
-            <button type="button" className={s.send} aria-label="Stop" title="Stop" onClick={stopAll}><Icon path={ICON.stop} size={14} /></button>
-          ) : (
-            <button type="submit" className={s.send} aria-label="Send" disabled={sending || (!draft.trim() && !files.length)}>{sending ? <Spinner size={14} /> : <Icon path={ICON.arrowUp} size={15} />}</button>
-          )}
-        </div>
-        {(error || dictation.error) && <p className={s.composeError}>{error ?? dictation.error}</p>}
-      </form>
-    </div>
+            <button type="button" className={`gpt-round-btn ${talk ? s.talkOn : ""}`} aria-pressed={talk} aria-label="Talk mode" title="Talk mode: speak, and hear replies" onClick={() => { if (!talk) setTalkSince(Date.now()); onTalk(!talk); }}>
+              <Icon path={ICON.waveform} size={16} />
+            </button>
+            <span className="gpt-composer-gap" />
+            {dictation.available && (
+              <button type="button" className={`gpt-round-btn${dictation.recording ? " is-live" : ""}`} aria-label={dictation.transcribing ? "Transcribing" : dictation.recording ? "Stop dictating" : "Dictate"} aria-pressed={dictation.recording} onClick={dictation.toggle} disabled={dictation.transcribing}>
+                {dictation.transcribing ? <Spinner size={15} /> : <Icon path={ICON.mic} size={17} />}
+              </button>
+            )}
+            {working && !draft.trim() && !files.length ? (
+              <button type="button" className="gpt-send" aria-label="Stop" title="Stop" onClick={stopAll}><Icon path={ICON.stop} size={13} /></button>
+            ) : (
+              <button type="submit" className="gpt-send" aria-label="Send" title="Send" disabled={sending || (!draft.trim() && !files.length)}>{sending ? <Spinner size={15} /> : <Icon path={ICON.arrowUp} size={19} />}</button>
+            )}
+          </div>
+        </form>
+        {(error || dictation.error) && <p className="gpt-error">{error ?? dictation.error}</p>}
+      </div>
+    </>
   );
 }
+
+/** Two ways in that suit any agent; its job line says the rest. */
+const STARTERS = ["What can you do?", "What are you working on?"];
 
 function HandoffLine({ from, to, text }: { from: string; to: string; text: string }) {
   const [open, setOpen] = useState(false);

@@ -1,85 +1,28 @@
-/* Agent: a roster, a conversation, and an optional side panel. Nothing else. */
+/*
+ * Agent: the tutor's ChatGPT layout (the global `gpt-*` parts: drawer,
+ * header, thread, composer) holding the agents, plus an optional side panel.
+ * What's here is only what an agent chat has that a tutor chat doesn't.
+ */
 
-.shell {
-  display: grid;
-  min-height: 0;
-  flex: 1;
-  grid-template-columns: 250px minmax(0, 1fr) auto;
+.gpt {
+  position: relative;
 }
 
-/* ---------- roster ---------- */
+/* ---------- drawer rows: a face beside the name ---------- */
 
-.side {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  border-right: 1px solid var(--line);
-}
-
-.sideScroll {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  padding: 10px 8px;
-}
-
-.sideLabel {
-  padding: 12px 10px 6px;
-  color: var(--dim);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.sideLabel:first-child {
-  padding-top: 4px;
-}
-
-.item {
-  display: flex;
+:global(.gpt-drawer-row) > .drawerItem {
+  flex-direction: row;
   align-items: center;
   gap: 10px;
-  width: 100%;
-  border: 0;
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
+  padding-left: 8px;
 }
 
-.item:hover {
-  background: var(--hover);
-}
-
-.itemOn,
-.itemOn:hover {
-  background: var(--surface-soft);
-}
-
-.itemText {
+.drawerText {
   display: flex;
   min-width: 0;
   flex: 1;
   flex-direction: column;
-}
-
-.itemText strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.itemText span {
-  overflow: hidden;
-  color: var(--dim);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 1px;
 }
 
 .dot {
@@ -88,40 +31,6 @@
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--accent);
-}
-
-.sideFoot {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-top: 1px solid var(--line);
-  padding: 10px;
-}
-
-.newButton,
-.newButtonQuiet {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 9px;
-  padding: 7px 10px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.newButtonQuiet {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-}
-
-.newButton:hover,
-.newButtonQuiet:hover {
-  background: var(--hover);
 }
 
 .face {
@@ -166,36 +75,43 @@
   color: var(--text) !important;
 }
 
-/* ---------- conversation ---------- */
+/* ---------- header: who you're talking to, where the tutor names its model ---------- */
 
-.stage {
+.who {
   display: flex;
   min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.chatHead {
-  display: flex;
-  flex-shrink: 0;
   align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--line);
-  padding: 10px 16px;
+  gap: 9px;
+  border: 0;
+  border-radius: 12px;
+  padding: 5px 10px 5px 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
 }
 
-.chatTitle {
+.who:hover,
+.who[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.whoText {
   display: flex;
   min-width: 0;
-  flex: 1;
   flex-direction: column;
 }
 
-.chatTitle strong {
-  font-size: 14px;
+.whoText strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.chatTitle span {
+.whoText span {
   overflow: hidden;
   color: var(--dim);
   font-size: 12px;
@@ -203,51 +119,13 @@
   white-space: nowrap;
 }
 
-.chatHead .mobileBack {
-  display: none;
-}
+/* ---------- thread: what an agent turn has beyond text ---------- */
 
-.chat {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-.scroll {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-}
-
-.transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: min(760px, 100%);
-  margin: 0 auto;
-  padding: 24px 20px 12px;
-}
-
-.hello {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 12vh 0 4vh;
-  text-align: center;
-}
-
-.hello h2 {
-  margin: 4px 0 0;
-  font-size: 18px;
-}
-
-.hello p {
-  max-width: 420px;
-  margin: 0;
+.greetingSub {
+  max-width: 440px;
+  margin: -6px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .helloFaces {
@@ -255,37 +133,10 @@
   gap: 6px;
 }
 
-.user {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  align-self: flex-end;
-  max-width: 82%;
-}
-
-.userText {
-  border-radius: 16px 16px 4px 16px;
-  padding: 9px 13px;
-  background: var(--surface-soft);
-  font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .userImage {
   max-width: 260px;
   max-height: 220px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-
-.reply {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: 100%;
+  border-radius: 14px;
 }
 
 .replyWho {
@@ -297,72 +148,32 @@
   font-weight: 600;
 }
 
-.replyText {
-  font-size: 14px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
+/* A step's command or address, under its name when the steps are open. */
+.step {
+  align-items: flex-start;
 }
 
-.work {
-  align-self: flex-start;
-  max-width: 100%;
+.step :global(.tutor-step-dot) {
+  margin-top: 6px;
 }
 
-.workHead {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-radius: 999px;
-  padding: 4px 10px 4px 8px;
-  background: var(--surface-faint);
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.workHead:hover {
-  color: var(--text-2);
-}
-
-.workList {
+.stepText {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 8px 0 2px 6px;
-  border-left: 1px solid var(--line);
-  padding: 0 0 0 12px;
-  list-style: none;
-  font-size: 12px;
-}
-
-.workList li {
-  display: flex;
+  min-width: 0;
+  flex: 1;
   flex-direction: column;
   gap: 3px;
-  color: var(--text-2);
 }
 
-.workList code {
+.stepText code {
   overflow: hidden;
-  max-width: 560px;
   border-radius: 6px;
   padding: 3px 7px;
-  background: var(--sunken);
+  background: var(--bg);
   color: var(--muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workError span {
-  color: var(--bad);
-}
-
-.workThought {
-  color: var(--dim) !important;
-  font-style: italic;
-  white-space: pre-wrap;
 }
 
 .notice,
@@ -410,14 +221,6 @@
   max-width: 560px;
   text-align: left;
   white-space: pre-wrap;
-}
-
-.typing {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--dim);
-  font-size: 12px;
 }
 
 .question,
@@ -576,46 +379,7 @@ textarea.field {
   line-height: 1.5;
 }
 
-/* ---------- composer ---------- */
-
-.composer {
-  position: relative;
-  width: min(760px, 100%);
-  margin: 0 auto;
-  padding: 8px 20px 16px;
-}
-
-.composeRow {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: 18px;
-  padding: 6px;
-  background: var(--surface);
-}
-
-.composeRow:focus-within {
-  border-color: color-mix(in oklch, var(--accent) 45%, var(--line-strong));
-}
-
-.input {
-  min-height: 34px;
-  max-height: 200px;
-  flex: 1;
-  border: 0;
-  padding: 7px 6px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.45;
-  resize: none;
-}
-
-.input:focus {
-  outline: none;
-}
+/* ---------- composer: the tutor's, plus the @ and / menu and file chips ---------- */
 
 .iconButton {
   display: inline-grid;
@@ -639,50 +403,23 @@ textarea.field {
   opacity: 0.5;
 }
 
-.recording {
-  color: var(--bad) !important;
-  animation: pulse 1.2s var(--ease-out) infinite;
-}
-
+/* Talk mode on: a steady accent, where the dictation mic pulses. */
 .talkOn {
+  border-color: transparent !important;
   background: var(--accent-soft) !important;
   color: var(--accent) !important;
 }
 
-.send {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  place-items: center;
-  border: 0;
-  border-radius: 12px;
-  background: var(--text);
-  color: var(--bg);
-  cursor: pointer;
-}
-
-.send:disabled {
-  background: var(--surface-soft);
-  color: var(--dim);
-  cursor: default;
-}
-
-.composeError {
-  margin: 6px 4px 0;
-  color: var(--bad);
-  font-size: 12px;
-}
-
 .menu {
   position: absolute;
-  bottom: calc(100% - 2px);
-  left: 20px;
+  z-index: 2;
+  bottom: calc(100% + 6px);
+  left: 12px;
   display: flex;
   min-width: 200px;
   flex-direction: column;
   border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 4px;
   background: var(--surface);
   box-shadow: var(--shadow-menu);
@@ -690,24 +427,17 @@ textarea.field {
 
 .menu button {
   border: 0;
-  border-radius: 8px;
-  padding: 7px 10px;
+  border-radius: 10px;
+  padding: 8px 10px;
   background: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: 13.5px;
   text-align: left;
   cursor: pointer;
 }
 
 .menu .menuOn {
-  background: var(--surface-soft);
-}
-
-.files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
+  background: var(--hover);
 }
 
 .fileChip {
@@ -716,9 +446,9 @@ textarea.field {
   gap: 6px;
   max-width: 240px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 4px 6px 4px 9px;
-  background: var(--surface);
+  border-radius: 10px;
+  padding: 4px 6px 4px 10px;
+  background: var(--sunken);
   color: var(--text-2);
   font-size: 12px;
 }
@@ -1285,13 +1015,9 @@ textarea.field {
   display: inline;
 }
 
-/* ---------- small screens: the list, or one chat ---------- */
+/* ---------- small screens ---------- */
 
 @media (max-width: 1100px) {
-  .shell {
-    grid-template-columns: 220px minmax(0, 1fr) auto;
-  }
-
   .panel {
     position: absolute;
     z-index: 30;
@@ -1300,61 +1026,37 @@ textarea.field {
     bottom: 0;
     box-shadow: var(--shadow-pop);
   }
-
-  .shell {
-    position: relative;
-  }
 }
 
 @media (max-width: 760px) {
-  .shell {
-    grid-template-columns: minmax(0, 1fr);
+  /* The app's own header already clears the notch, so the chat header and the
+     drawer (a sheet under that header here) don't clear it a second time, and
+     the composer, with no tab bar under it, clears the home indicator. */
+  .gpt :global(.gpt-header) {
+    min-height: 50px;
+    padding: 5px 6px;
   }
 
-  .side {
-    border-right: 0;
+  .gpt :global(.gpt-drawer) {
+    padding-top: 0;
   }
 
-  .hasOpen .side,
-  .shell:not(.hasOpen) .stage {
+  .gpt :global(.gpt-composer-dock) {
+    padding-bottom: calc(8px + var(--safe-bottom));
+  }
+
+  .whoText span {
     display: none;
-  }
-
-  .chatHead .mobileBack {
-    display: inline-grid;
   }
 
   .panel,
   .computer {
     width: 100%;
+    padding-bottom: var(--safe-bottom);
   }
 
   .headerLabel {
     display: none;
-  }
-
-  .transcript,
-  .composer {
-    padding-right: 12px;
-    padding-left: 12px;
-  }
-
-  /* The composer, New agent and the side panels end above the home indicator. */
-  .composer {
-    padding-bottom: calc(10px + var(--safe-bottom));
-  }
-
-  .sideFoot {
-    padding-bottom: calc(10px + var(--safe-bottom));
-  }
-
-  .panel,
-  .computer {
-    padding-bottom: var(--safe-bottom);
-  }
-
-  .item {
-    min-height: 56px;
   }
 
   .backdrop {
@@ -1404,18 +1106,9 @@ textarea.field {
     max-height: calc(100dvh - 240px - var(--safe-top) - var(--safe-bottom));
   }
 
-  .newButton,
-  .newButtonQuiet {
-    min-height: 44px;
-  }
-
   .iconButton {
     width: 40px;
     height: 40px;
-  }
-
-  .chatHead {
-    padding: 6px 10px;
   }
 
   .templates {
