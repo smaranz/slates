@@ -10513,6 +10513,18 @@ a.counselor-source:hover {
   background: oklch(0.78 0.18 25 / 0.07);
 }
 
+/* The PC dropped off for a moment: not an error to alarm anyone with, and it goes by itself. */
+.study-banner.is-quiet {
+  align-items: center;
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.study-banner.is-quiet svg {
+  margin-top: 0;
+  color: var(--muted);
+}
+
 .study-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -437,16 +437,22 @@ function Picker({ snapshot, taken, onPick }: { snapshot: SyncSnapshot; taken: Se
 }
 
 /** Every set on the host, most recent first: the library, beside the list of what's coming. */
-function Library({ sets, courseOf, upcoming, onOpen, onDelete }: { sets: StudySummary[]; courseOf: (id: string) => Course | undefined; upcoming: Set<string>; onOpen: (id: string) => void; onDelete: (id: string) => void }) {
+function Library({ sets, loaded, courseOf, upcoming, onOpen, onDelete }: { sets: StudySummary[]; loaded: boolean; courseOf: (id: string) => Course | undefined; upcoming: Set<string>; onOpen: (id: string) => void; onDelete: (id: string) => void }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const ordered = [...sets].sort((a, b) => b.updatedAt - a.updatedAt);
   return (
     <section className="study-panel" aria-labelledby="study-library">
       <div className="study-panel-head">
         <h2 id="study-library">Your study sets</h2>
-        <span className="study-count">{sets.length}</span>
+        {loaded && <span className="study-count">{sets.length}</span>}
       </div>
-      {ordered.length === 0 ? (
+      {!loaded ? (
+        <ul className="study-library" aria-busy="true" aria-label="Loading your study sets">
+          {[0, 1].map((row) => (
+            <li key={row} className="study-skeleton-row"><span /><span /></li>
+          ))}
+        </ul>
+      ) : ordered.length === 0 ? (
         <p className="study-muted">Sets you build show up here, with how much you’ve got right.</p>
       ) : (
         <ul className="study-library">
@@ -541,11 +547,22 @@ export default function StudyView() {
   async function hideEntries(list: Entry[]) {
     const found = list.filter((entry) => !entry.custom);
     if (!found.length) return;
-    await study.changeHidden({ hide: found.map((entry) => ({ id: entry.id, title: entry.title, courseId: entry.courseId })) });
+    setBuildError(null);
+    try {
+      await study.changeHidden({ hide: found.map((entry) => ({ id: entry.id, title: entry.title, courseId: entry.courseId })) });
+    } catch (error) {
+      setBuildError(`Couldn’t take that off the list: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     setUndo({
       ids: found.map((entry) => entry.id),
       label: found.length === 1 ? `Removed “${found[0]!.title}” from Study.` : `Removed ${found.length} tests and quizzes from Study.`,
     });
+  }
+
+  function putBack(ids: string[]) {
+    setBuildError(null);
+    study.changeHidden({ show: ids }).catch((error: unknown) => setBuildError(`Couldn’t put that back: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   function actionsFor(entry: Entry): MenuItem[] {
@@ -743,9 +760,17 @@ export default function StudyView() {
           </div>
         </header>
 
-        {(buildError || study.error) && (
-          <p className="study-notice is-bad study-banner" role="alert"><Icon path={ICON.alert} size={13} /> {buildError ?? study.error}</p>
-        )}
+        {buildError ? (
+          <p className="study-notice is-bad study-banner" role="alert"><Icon path={ICON.alert} size={13} /> {buildError}</p>
+        ) : study.problem?.retrying ? (
+          // A dropped connection to the PC: said calmly, retried on its own, and gone once it's back.
+          <p className="study-notice study-banner is-quiet" role="status">
+            <Spinner size={12} /> {study.problem.message} Trying again on its own.{" "}
+            <button type="button" className="study-link" onClick={() => void study.refresh()}>Try now</button>
+          </p>
+        ) : study.problem ? (
+          <p className="study-notice is-bad study-banner" role="alert"><Icon path={ICON.alert} size={13} /> {study.problem.message}</p>
+        ) : null}
 
         {undo && (
           <p className="study-notice study-undo" role="status">
@@ -754,7 +779,7 @@ export default function StudyView() {
               type="button"
               className="study-link"
               onClick={() => {
-                void study.changeHidden({ show: undo.ids });
+                putBack(undo.ids);
                 setUndo(null);
               }}
             >
@@ -812,14 +837,14 @@ export default function StudyView() {
                         <li key={entry.id}>
                           <span className="study-hidden-title">{entry.title}</span>
                           <span className="study-hidden-meta">{courseLabel(courseOf(entry.courseId))}</span>
-                          <button type="button" className="btn btn--quiet" onClick={() => void study.changeHidden({ show: [entry.id] })}>
+                          <button type="button" className="btn btn--quiet" onClick={() => putBack([entry.id])}>
                             Put back
                           </button>
                         </li>
                       ))}
                     </ul>
                     {hiddenHere.length > 1 && (
-                      <button type="button" className="study-link study-hidden-all" onClick={() => void study.changeHidden({ show: hiddenHere.map((entry) => entry.id) })}>
+                      <button type="button" className="study-link study-hidden-all" onClick={() => putBack(hiddenHere.map((entry) => entry.id))}>
                         Put them all back
                       </button>
                     )}
@@ -856,7 +881,7 @@ export default function StudyView() {
           </div>
 
           <aside className="study-aside">
-            <Library sets={study.sets} courseOf={courseOf} upcoming={upcoming} onOpen={setOpenId} onDelete={(id) => void study.remove(id)} />
+            <Library sets={study.sets} loaded={study.loaded} courseOf={courseOf} upcoming={upcoming} onOpen={setOpenId} onDelete={(id) => void removeSet(id)} />
             <section className="study-panel study-panel--quiet">
               <h2>Make it yours</h2>
               <ul className="study-how">
