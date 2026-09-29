@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { agents, updateAgent } from "@/lib/agent/store";
 import type { Learned, MemoryBookView, MemoryEntry } from "./types";
 
 /**
@@ -65,7 +66,58 @@ export function fileBook(file: string, kind: Book["kind"], title: string, limit:
 }
 
 export function studentBook(): Book {
-  return fileBook(path.join(MEMORY_HOME, "student.json"), "student", "STUDENT PROFILE (shared by every agent and the tutor)", STUDENT_LIMIT);
+  const book = fileBook(path.join(MEMORY_HOME, "student.json"), "student", "STUDENT PROFILE (shared by every agent and the tutor)", STUDENT_LIMIT);
+  adoptAgentMemories(book);
+  return book;
+}
+
+const ADOPTED = path.join(MEMORY_HOME, ".adopted-agent-memory");
+let adopted = false;
+
+/**
+ * Once: what agents remembered before there was a shared profile moves into
+ * it. Their old tool saved "a fact or preference about the student", which
+ * is exactly what every helper should know, and left where it was it would
+ * stay with the one agent that heard it. Newest first while there's room;
+ * anything that doesn't fit, or that the profile would refuse, stays in that
+ * agent's notes.
+ */
+function adoptAgentMemories(book: Book): void {
+  if (adopted) return;
+  adopted = true;
+  if (fs.existsSync(ADOPTED)) return;
+  try {
+    const entries = book.read();
+    const seen = new Set(entries.map((entry) => entry.text.toLowerCase()));
+    let used = usedChars(entries);
+    const moved = new Map<string, Set<string>>();
+    const legacy = agents
+      .all()
+      .flatMap((agent) => (agent.memory ?? []).map((entry) => ({ agent, entry })))
+      .sort((a, b) => b.entry.at - a.entry.at);
+    for (const { agent, entry } of legacy) {
+      const text = cleanEntry(entry.text);
+      if (!text || text.length > ENTRY_LIMIT || SECRET.test(text)) continue;
+      if (!seen.has(text.toLowerCase())) {
+        if (used + text.length > book.limit) continue;
+        entries.push({ id: entry.id, text, at: entry.at, by: agent.name });
+        seen.add(text.toLowerCase());
+        used += text.length;
+      }
+      if (!moved.has(agent.id)) moved.set(agent.id, new Set());
+      moved.get(agent.id)!.add(entry.id);
+    }
+    if (moved.size) {
+      book.write(entries.sort((a, b) => a.at - b.at));
+      for (const [id, ids] of moved) updateAgent(id, (agent) => ({ ...agent, memory: agent.memory.filter((entry) => !ids.has(entry.id)) }));
+    }
+    fs.mkdirSync(MEMORY_HOME, { recursive: true });
+    fs.writeFileSync(ADOPTED, `${new Date().toISOString()} moved=${[...moved.values()].reduce((n, ids) => n + ids.size, 0)}\n`);
+  } catch (error) {
+    // Nothing is lost either way; it's tried again on the next turn.
+    adopted = false;
+    console.error("[memory] couldn't move agents' memories into the shared profile:", error instanceof Error ? error.message : error);
+  }
 }
 
 export function tutorBook(): Book {
