@@ -18,7 +18,11 @@ import { OUTPUT_DIR, ensureWorkspace } from "@/lib/tutor-skills";
  */
 export const dynamic = "force-dynamic";
 
-/** Extensions worth opening in a browser tab rather than downloading blind. */
+/**
+ * Extensions worth opening in a browser tab rather than downloading blind.
+ * Not SVG or HTML: those can carry script, and opened in place they would run
+ * on Slates' own origin, with its API a fetch away.
+ */
 const INLINE: Record<string, string> = {
   ".pdf": "application/pdf",
   ".png": "image/png",
@@ -26,10 +30,11 @@ const INLINE: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
-  ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8",
   ".md": "text/plain; charset=utf-8",
   ".csv": "text/csv; charset=utf-8",
+  ".tsv": "text/plain; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
 };
 
 const TYPES: Record<string, string> = {
@@ -37,6 +42,7 @@ const TYPES: Record<string, string> = {
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".ics": "text/calendar; charset=utf-8",
 };
 
 /**
@@ -63,6 +69,7 @@ export async function GET(req: NextRequest) {
     if (!stat?.isFile()) return new Response("Not found", { status: 404 });
 
     const ext = path.extname(safe).toLowerCase();
+    const download = q.get("download") === "1";
     const stream = createReadStream(file);
     return new Response(
       new ReadableStream<Uint8Array>({
@@ -80,7 +87,8 @@ export async function GET(req: NextRequest) {
           "content-type": TYPES[ext] ?? "application/octet-stream",
           "content-length": String(stat.size),
           // A Word file has nothing to render, so it downloads; a PDF opens.
-          "content-disposition": `${ext in INLINE ? "inline" : "attachment"}; filename="${safe}"`,
+          "content-disposition": `${ext in INLINE && !download ? "inline" : "attachment"}; filename="${safe.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'")}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
+          "x-content-type-options": "nosniff",
           "cache-control": "private, max-age=300",
         },
       }

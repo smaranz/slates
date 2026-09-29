@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, session, shell, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Notification, screen, session, shell, dialog, ipcMain } from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -616,9 +616,9 @@ function createWindow() {
       webviewTag: true,
       // Carries across every page the window loads, the splash included.
       zoomFactor: zoomFor(screen.getDisplayMatching(bounds)),
-      ...(LOCAL_APPS.length
-        ? { preload: path.join(HERE, "preload.cjs"), additionalArguments: [`--slates-local-apps=${LOCAL_APPS.join(",")}`] }
-        : {}),
+      // The bridge: saving files from the host always, and AI Usage from this Mac in remote mode.
+      preload: path.join(HERE, "preload.cjs"),
+      ...(LOCAL_APPS.length ? { additionalArguments: [`--slates-local-apps=${LOCAL_APPS.join(",")}`] } : {}),
     },
   });
 
@@ -631,9 +631,18 @@ function createWindow() {
   win.on("moved", fitZoom);
   win.webContents.on("did-navigate", fitZoom);
 
-  // Anything that isn't the portal itself belongs in the real browser.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+  // Anything that isn't the portal itself belongs in the real browser, except
+  // the portal's own files: the system browser isn't paired with the host, so
+  // those are saved here with this window's session and opened in their app.
+  const contents = win.webContents;
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isPortalFile(url)) {
+      void saveFromPortal(contents, url, "", { then: "open" }).catch((e) =>
+        dialog.showErrorBox("Couldn't open that file", String(e instanceof Error ? e.message : e))
+      );
+    } else {
+      void shell.openExternal(url);
+    }
     return { action: "deny" };
   });
 
@@ -791,8 +800,157 @@ function serveLocalApps() {
 }
 
 
+/*
+ * Files from the portal.
+ *
+ * Something an agent (or the tutor) makes lives on the host, which this Mac
+ * can't reach, and the system browser isn't paired with it. So files are
+ * fetched through the window's own session and saved into Downloads › Slates,
+ * then opened in their app or shown in Finder. A file an agent sent is only
+ * ever saved once: its copy on the host never changes, so asking again opens
+ * the one already here.
+ */
+/** Kept in step with DOCUMENTS in web/proxy.ts: the GETs the host serves to a download the browser starts. */
+const PORTAL_FILES = /^\/api\/(agent\/outbox|tutor\/files|materials\/file|media\/file)$/;
+const RECEIPTS = () => path.join(app.getPath("userData"), "received-files.json");
+const downloadsDir = () => path.join(app.getPath("downloads"), "Slates");
+
+function portalOrigin() {
+  return REMOTE || `http://localhost:${PORTAL}`;
+}
+
+function isPortalFile(url) {
+  try {
+    const target = new URL(url, portalOrigin());
+    return sameOrigin(target.href, portalOrigin()) && PORTAL_FILES.test(target.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function safeFileName(name) {
+  const base = path
+    .basename(String(name || "").replace(/\\/g, "/"))
+    .replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "_")
+    .replace(/^\.+/, "")
+    .trim();
+  return base.slice(0, 140) || "file";
+}
+
+function uniquePath(dir, name) {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  let target = path.join(dir, name);
+  for (let n = 2; fs.existsSync(target); n += 1) target = path.join(dir, `${stem} (${n})${ext}`);
+  return target;
+}
+
+function receiptKey(url) {
+  const target = new URL(url, portalOrigin());
+  const id = target.searchParams.get("id");
+  return target.pathname === "/api/agent/outbox" && id ? `${target.host}/${id}` : null;
+}
+
+function readReceipts() {
+  try {
+    return JSON.parse(fs.readFileSync(RECEIPTS(), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeReceipt(key, file) {
+  const all = readReceipts();
+  all[key] = file;
+  const keys = Object.keys(all);
+  for (const old of keys.slice(0, Math.max(0, keys.length - 500))) delete all[old];
+  try {
+    fs.writeFileSync(RECEIPTS(), JSON.stringify(all));
+  } catch {
+    // It's saved either way; it may just be saved again next time.
+  }
+}
+
+const pendingDownloads = new Map();
+const wiredSessions = new WeakSet();
+/** Held until clicked or closed: macOS drops a notification whose object has been collected. */
+const notifications = new Set();
+
+/** One spelling per address, so the download Chromium reports matches the one asked for. */
+function normalUrl(url) {
+  try {
+    return new URL(url).href;
+  } catch {
+    return url;
+  }
+}
+
+function wireDownloads(ses) {
+  if (wiredSessions.has(ses)) return;
+  wiredSessions.add(ses);
+  ses.on("will-download", (_event, item) => {
+    const original = normalUrl(item.getURLChain()[0] || item.getURL());
+    const pending = pendingDownloads.get(original);
+    // Any other download keeps Chromium's own behaviour.
+    if (!pending) return;
+    pendingDownloads.delete(original);
+    fs.mkdirSync(downloadsDir(), { recursive: true });
+    const target = uniquePath(downloadsDir(), safeFileName(pending.name || item.getFilename()));
+    item.setSavePath(target);
+    item.once("done", (_e, state) =>
+      state === "completed" ? pending.resolve(target) : pending.reject(new Error(state === "cancelled" ? "The download was cancelled." : "The download failed."))
+    );
+  });
+}
+
+async function saveFromPortal(contents, url, name, options = {}) {
+  const absolute = normalUrl(new URL(url, portalOrigin()).href);
+  if (!isPortalFile(absolute)) throw new Error("That isn't a file from Slates.");
+  const key = receiptKey(absolute);
+  let file = key ? readReceipts()[key] : null;
+  if (!file || !fs.existsSync(file)) {
+    wireDownloads(contents.session);
+    file = await new Promise((resolve, reject) => {
+      pendingDownloads.set(absolute, { name, resolve, reject });
+      contents.downloadURL(absolute);
+      setTimeout(() => {
+        if (pendingDownloads.delete(absolute)) reject(new Error("The host didn't send the file."));
+      }, 60_000);
+    });
+    if (key) writeReceipt(key, file);
+  }
+  if (options.then === "open") {
+    // An error string means no app takes that kind of file; Finder at least shows it.
+    if (await shell.openPath(file)) shell.showItemInFolder(file);
+  } else if (options.then === "reveal") {
+    shell.showItemInFolder(file);
+  }
+  if (options.notify && Notification.isSupported()) {
+    const note = new Notification({ title: String(options.notify.title).slice(0, 120), body: String(options.notify.body).slice(0, 240) });
+    notifications.add(note);
+    note.on("click", () => {
+      notifications.delete(note);
+      void shell.openPath(file);
+    });
+    note.on("close", () => notifications.delete(note));
+    note.show();
+  }
+  return { path: file, name: path.basename(file) };
+}
+
+/** Saves a file for the window; only Slates' own pages may ask, and only for Slates' own files. */
+function serveFiles() {
+  ipcMain.handle("slates:save-file", async (event, req) => {
+    if (!sameOrigin(event.senderFrame?.url ?? "", portalOrigin())) throw new Error("Only Slates' own pages can ask for that.");
+    const then = req?.then === "open" || req?.then === "reveal" ? req.then : undefined;
+    const notify = req?.notify && typeof req.notify.title === "string" ? { title: req.notify.title, body: String(req.notify.body ?? "") } : undefined;
+    return saveFromPortal(event.sender, typeof req?.url === "string" ? req.url : "", typeof req?.name === "string" ? req.name : "", { then, notify });
+  });
+}
+
 app.whenReady().then(async () => {
   try {
+    serveFiles();
     if (LOCAL_APPS.length) serveLocalApps();
     // A monitor plugged in, unplugged or rescaled can put the window on a display that wants another zoom.
     screen.on("display-metrics-changed", fitZoom);

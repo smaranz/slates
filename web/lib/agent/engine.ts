@@ -4,18 +4,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Agent, Cursor, JsonlLocalAgentStore, type SDKImage } from "@cursor/sdk";
+import { Agent, JsonlLocalAgentStore, type SDKImage } from "@cursor/sdk";
 
 import { noteUsage } from "@/lib/ai-usage/note";
+import { memoryPrompt, studentBook } from "@/lib/learning/memory";
+import { planReview, startReview, type ReviewTurn } from "@/lib/learning/review";
+import { skillIndex } from "@/lib/learning/skills";
+import { RECALL_GUIDANCE, SKILL_GUIDANCE } from "@/lib/learning/tools";
 import { browserMcp, ensureBrowser } from "./browser";
 import { publish } from "./hub";
+import { listModels, REPLACED } from "./models";
 import { hasCutOffTurn } from "./runs";
 import { nextRunAfter } from "./schedule";
 import {
-  agents, chatEvents, ensureDirs, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, skills, updateAgent, WORKSPACE,
+  agents, chatEvents, ensureDirs, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, updateAgent, WORKSPACE,
 } from "./store";
-import { buildTools, speakToFile } from "./tools";
-import { DEFAULT_MODEL, type AgentProfile, type AgentState, type ChatEvent, type ModelChoice } from "./types";
+import { agentNotes, buildTools, speakToFile } from "./tools";
+import { DEFAULT_MODEL, type AgentProfile, type AgentState, type ChatEvent } from "./types";
+
+export { listModels };
 
 /**
  * Runs agents on the host.
@@ -38,6 +45,8 @@ export interface Job {
   routineId?: string;
   /** Speak the reply (talk mode), whatever the agent's own setting. */
   speak?: boolean;
+  /** Passed on by the School tutor rather than written by the student or a teammate. */
+  viaTutor?: boolean;
   hops: number;
 }
 
@@ -52,7 +61,6 @@ const runtimeStore = new JsonlLocalAgentStore(RUNTIME_DIR);
 const state = globalThis as typeof globalThis & {
   __slatesAgentWorkers?: Map<string, Worker>;
   __slatesAgentNotes?: Map<string, string[]>;
-  __slatesAgentModels?: { at: number; list: ModelChoice[] };
 };
 const workers: Map<string, Worker> = (state.__slatesAgentWorkers ??= new Map());
 /** Things that happened since an agent's last turn (drafts sent or discarded). */
@@ -83,32 +91,6 @@ function announce(agentId: string): void {
 
 export function addNote(agentId: string, note: string): void {
   notes.set(agentId, [...(notes.get(agentId) ?? []), note].slice(-10));
-}
-
-/* ---------- models ---------- */
-
-const PREFERRED = ["grok-4.7", "claude-opus-5-5", "claude-sonnet-5", "gpt-5.6-sol", "gemini-3.1-pro", "composer-2.5", "kimi-k3", "claude-haiku-4-5", "gpt-5.6-luna", "gemini-3.8-flash"];
-/** Models Slates has moved past: hidden from the picker, and agents still set to one run on its successor. */
-const REPLACED: Record<string, string> = { "claude-opus-5": "claude-opus-5-5" };
-
-export async function listModels(): Promise<ModelChoice[]> {
-  const cached = state.__slatesAgentModels;
-  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.list;
-  try {
-    const raw = await Cursor.models.list();
-    const list = raw
-      .filter((model) => model.id !== "default" && !REPLACED[model.id])
-      .map((model) => ({ id: model.id, label: model.displayName || model.id }))
-      .sort((a, b) => {
-        const ia = PREFERRED.indexOf(a.id);
-        const ib = PREFERRED.indexOf(b.id);
-        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-      });
-    state.__slatesAgentModels = { at: Date.now(), list };
-    return list;
-  } catch {
-    return [{ id: DEFAULT_MODEL, label: "Grok 4.7" }];
-  }
 }
 
 /* ---------- queueing ---------- */
@@ -180,6 +162,21 @@ function handoff(fromId: string, fromChat: string, toName: string, message: stri
   return `Sent to ${target.name}. Their answer will come back to you as a new message; end your turn unless you have other work.`;
 }
 
+/**
+ * Work the School tutor passes to an agent: done in the agent's own chat,
+ * where the student follows it, since the tutor's reply has already gone out.
+ */
+export function tutorHandoff(toName: string, message: string): string {
+  const target = findAgentByName(toName);
+  const team = agents.all();
+  if (!target) return team.length ? `There's no agent named "${toName}". The agents are: ${team.map((a) => `${a.name} (${a.job || "general"})`).join("; ")}.` : "The student has no agents yet; they can make one in the Agent app.";
+  const text = message.trim();
+  if (!text) return "Say what the agent should do.";
+  post(target.id, { id: newId("evt"), at: Date.now(), type: "handoff", from: "tutor", to: target.id, text });
+  enqueue({ agentId: target.id, chatId: target.id, text, source: "agent", from: "the tutor", viaTutor: true, hops: 1 });
+  return `Sent to ${target.name}. They'll do it in their own chat in the Agent app, where the student can follow along; tell the student that's where the result will be.`;
+}
+
 /* ---------- a turn ---------- */
 
 async function drain(agentId: string): Promise<void> {
@@ -205,40 +202,68 @@ function localNow(): string {
   return `${now.toLocaleString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
 }
 
-function transcriptTail(chatId: string, limit = 14): string {
-  const names = new Map(agents.all().map((a) => [a.id, a.name]));
-  return chatEvents(chatId, 200)
-    .filter((e) => e.type === "user" || (e.type === "agent" && !e.streaming) || e.type === "handoff")
-    .slice(-limit)
-    .map((e) => e.type === "user" ? `Student: ${e.text}` : e.type === "agent" ? `${names.get(e.agentId) ?? "Agent"}: ${e.text}` : e.type === "handoff" ? `${names.get(e.from) ?? "Agent"} → ${names.get(e.to) ?? "Agent"}: ${e.text}` : "")
-    .join("\n\n")
-    .slice(-8000);
+interface Line {
+  who: string;
+  text: string;
 }
 
-function buildPrompt(profile: AgentProfile, job: Job, browser: boolean): string {
+/** The chat as plain turns, oldest first: what a model reads back and what recall and review search. */
+function chatLines(chatId: string, limit: number): Line[] {
+  const names = new Map(agents.all().map((a) => [a.id, a.name]));
+  return chatEvents(chatId, 400)
+    .filter((e) => e.type === "user" || (e.type === "agent" && !e.streaming && e.text.trim() !== "PASS") || e.type === "handoff")
+    .slice(-limit)
+    .map((e) =>
+      e.type === "user"
+        ? { who: "Student", text: e.text }
+        : e.type === "agent"
+          ? { who: names.get(e.agentId) ?? "Agent", text: e.text }
+          : e.type === "handoff"
+            ? { who: `${e.from === "tutor" ? "Tutor" : names.get(e.from) ?? "Agent"} → ${names.get(e.to) ?? "Agent"}`, text: e.text }
+            : { who: "", text: "" },
+    );
+}
+
+function transcriptTail(chatId: string, limit = 14, skipLast = false): string {
+  const lines = chatLines(chatId, limit + (skipLast ? 1 : 0));
+  return (skipLast ? lines.slice(0, -1) : lines).map((line) => `${line.who}: ${line.text}`).join("\n\n").slice(-8000);
+}
+
+function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: boolean): string {
   const team = agents.all().filter((a) => a.id !== profile.id);
   const pending = notes.get(profile.id) ?? [];
   notes.delete(profile.id);
+  const skillList = skillIndex();
   const lines = [
     "<slates_context>",
     `You are ${profile.name}, one of the student's AI teammates in Slates (the Agent app). Your job: ${profile.job || "general help"}.`,
     profile.rules.trim() ? `Standing rules from the student:\n${profile.rules.trim()}` : "",
-    `You run on the student's always-on PC (${os.type()}), with full access to it: shell, files and apps. Your working folder is ${WORKSPACE}, shared with the other agents; keep project files in clear subfolders there.`,
+    `You run on the student's always-on PC (${os.type()}), with full access to it: shell, files and apps. Your working folder is ${WORKSPACE}, shared with the other agents; keep project files in clear subfolders there. The student isn't at this PC: they talk to you from their Mac or phone.`,
     browser
       ? "You also have a real Chrome browser (the browser_* tools) whose sign-ins persist between tasks. When a site needs a password, 2FA or a CAPTCHA, ask the student to take over in the Computer panel and wait. Never ask for passwords in chat."
       : "",
-    "Slates tools: slates_board (their Schoology classes, grades, assignments, messages), slates_find_person, slates_draft_message and slates_draft_reply (drafts only; the student sends them), remember/forget, list_skills/get_skill/save_skill, create_routine/list_routines/update_routine, list_agents/message_agent, send_voice_memo, ask_user.",
+    "Slates tools: slates_board (their Schoology classes, grades, assignments, messages), slates_find_person, slates_draft_message and slates_draft_reply (drafts only; the student sends them), memory, search_chats, list_skills/get_skill/save_skill/patch_skill, send_file, create_routine/list_routines/update_routine, list_agents/message_agent, send_voice_memo, ask_user.",
+    "When you make a file for the student (a document, slides, a spreadsheet, a PDF, an image), send it with send_file: it lands on their own computer and in this chat. Don't just say where it is on the PC; they can't open that from their laptop or phone.",
     "Help the student learn and stay organized; never produce graded work for them to hand in as their own. Be concise; lead with the result. Link sources for facts from the web.",
     `It is ${localNow()}.`,
-    profile.memory.length ? `What you remember:\n${profile.memory.map((m) => `- ${m.text}`).join("\n")}` : "",
+    memoryPrompt([studentBook(), agentNotes(profile.id)]),
+    RECALL_GUIDANCE,
+    `${SKILL_GUIDANCE}${skillList ? `\nSaved skills:\n${skillList}\nIf the student names one with /, open it with get_skill first.` : ""}`,
     team.length ? `Teammates (message_agent, or @Name in a group chat): ${team.map((a) => `${a.name} (${a.job || "general"})`).join("; ")}` : "",
-    skills.all().length ? `Saved skills: ${skills.all().map((s) => s.name).join(", ")}. If the student names one with /, call get_skill first.` : "",
     pending.length ? `Since your last turn:\n${pending.map((n) => `- ${n}`).join("\n")}` : "",
   ];
+  // A runtime that couldn't be resumed starts with no idea what was said; the chat still has it.
+  if (fresh && !job.chatId.startsWith("grp_")) {
+    // The message being answered is already the chat's last line, except on a routine run.
+    const earlier = transcriptTail(job.chatId, 16, job.source !== "routine");
+    if (earlier) lines.push(`Your working context was reset, so here is how this chat went before this message:\n${earlier}`);
+  }
   if (job.chatId.startsWith("grp_")) {
     const group = groups.all().find((g) => g.id === job.chatId);
     const members = (group?.members ?? []).map((id) => getAgent(id)?.name).filter(Boolean).join(", ");
     lines.push(`This message is in the group chat "${group?.name ?? "Group"}" with ${members}. Recent messages:\n${transcriptTail(job.chatId)}\nReply to the group. To bring in a teammate, @mention them by name in your reply. Stay silent on things another member owns: reply with just "PASS" if you have nothing to add.`);
+  } else if (job.viaTutor) {
+    lines.push("This was passed on by the student's tutor in Slates' School app, from a conversation with the student. Do it, and post the result here: the student reads it in this chat.");
   } else if (job.source === "agent") {
     lines.push(`This is a handoff from your teammate ${job.from ?? "another agent"}. Do the work, then reply with the answer for them.`);
   } else if (job.source === "routine") {
@@ -268,6 +293,11 @@ function toolView(toolCall: { type?: string; args?: Record<string, unknown> } | 
       if (name.startsWith("browser_")) return { label: `Browser: ${name.slice(8).replace(/_/g, " ")}` };
       if (name === "slates_board") return { label: "Read your Schoology board" };
       if (name.startsWith("slates_draft")) return { label: "Drafted a message for you" };
+      if (name === "memory") return { label: "Updated its memory", detail: String(inner.content ?? inner.old_text ?? "") };
+      if (name === "search_chats") return { label: "Searched past chats", detail: String(inner.query ?? inner.chat ?? "") };
+      if (name === "get_skill") return { label: "Opened a skill", detail: String(inner.name ?? "") };
+      if (name === "save_skill" || name === "patch_skill") return { label: "Saved a skill", detail: String(inner.name ?? "") };
+      if (name === "send_file") return { label: "Sent you a file", detail: String(inner.path ?? "") };
       return { label: name.replace(/[_-]+/g, " ").replace(/^\w/, (c) => c.toUpperCase()) };
     }
     default: {
@@ -291,7 +321,7 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const wanted = REPLACED[profile.model] ?? profile.model;
   const modelId = models.some((m) => m.id === wanted) ? wanted : DEFAULT_MODEL;
 
-  let mcp = browserMcp();
+  let mcp = browserMcp(path.join(WORKSPACE, "browser"));
   if (mcp) {
     try {
       await ensureBrowser();
@@ -300,11 +330,17 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     }
   }
 
+  // What this turn saved by itself, so the review afterwards doesn't redo it.
+  const wrote = { memory: false, skill: false };
   const tools = buildTools({
     agentId: profile.id,
     chatId: job.chatId,
     post: (event) => post(job.chatId, event),
     handoff: (to, message) => handoff(profile.id, job.chatId, to, message, job.hops),
+    onLearned: (item) => {
+      wrote[item.kind === "memory" ? "memory" : "skill"] = true;
+      post(job.chatId, { id: newId("evt"), at: Date.now(), type: "learned", agentId: profile.id, items: [item] });
+    },
   });
   const options = {
     model: { id: modelId },
@@ -312,7 +348,13 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     ...(mcp ? { mcpServers: { browser: mcp } } : {}),
   };
 
-  let sdk = profile.runtimeId ? await Agent.resume(profile.runtimeId, options).catch(() => null) : null;
+  let sdk = profile.runtimeId
+    ? await Agent.resume(profile.runtimeId, options).catch((error: unknown) => {
+        console.error(`[agent] couldn't resume ${profile.name}'s context, starting a new one:`, error instanceof Error ? error.message : error);
+        return null;
+      })
+    : null;
+  const fresh = !sdk;
   if (!sdk) {
     sdk = await Agent.create(options);
     updateAgent(profile.id, (agent) => ({ ...agent, runtimeId: sdk!.agentId }));
@@ -356,7 +398,8 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     thinking = null;
   };
 
-  const message = { text: buildPrompt(profile, job, !!mcp), images: job.images?.length ? job.images : undefined };
+  const steps: string[] = [];
+  const message = { text: buildPrompt(profile, job, !!mcp, fresh), images: job.images?.length ? job.images : undefined };
   const onDelta = ({ update }: { update: unknown }) => {
     const u = update as { type: string; text?: string; callId?: string; toolCall?: { type?: string; args?: Record<string, unknown>; result?: { error?: unknown; status?: string } } };
     if (u.type === "text-delta" && u.text) {
@@ -374,6 +417,7 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
       closeText();
       closeThinking();
       const view = toolView(u.toolCall);
+      if (u.type === "tool-call-started") steps.push(view.detail ? `${view.label}: ${view.detail.slice(0, 120)}` : view.label);
       const failed = u.type === "tool-call-completed" && (u.toolCall?.result?.error !== undefined || u.toolCall?.result?.status === "error");
       post(job.chatId, {
         id: `tool_${u.callId}`.replace(/[^\w-]/g, "").slice(0, 80),
@@ -422,6 +466,7 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
 
   const reply = segments.join("\n\n").trim();
   if (job.routineId) recordRoutine(job.routineId, true, plain(reply).slice(0, 160) || "Finished.");
+  if (reply && reply !== "PASS") learnFrom(profile, job, steps, wrote);
 
   const current = getAgent(profile.id);
   if ((current?.voiceReplies || job.speak) && reply && reply !== "PASS") {
@@ -452,6 +497,28 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
       from: profile.name,
       hops: job.hops + 1,
     });
+  }
+}
+
+/* ---------- learning ---------- */
+
+/** After a reply: count the turn toward a review, and start one in the background when it's due. */
+function learnFrom(profile: AgentProfile, job: Job, steps: string[], wrote: { memory: boolean; skill: boolean }): void {
+  try {
+    const turn: ReviewTurn = {
+      helper: { key: `agent:${profile.id}`, name: profile.name, kind: "agent", job: profile.job },
+      notes: agentNotes(profile.id),
+      transcript: chatLines(job.chatId, 16),
+      steps,
+      wroteMemory: wrote.memory,
+      wroteSkill: wrote.skill,
+      fromStudent: job.source === "user",
+    };
+    const plan = planReview(turn);
+    if (!plan.memory && !plan.skills) return;
+    startReview(newId("rev"), turn, plan, (items) => post(job.chatId, { id: newId("evt"), at: Date.now(), type: "learned", agentId: profile.id, items }));
+  } catch (error) {
+    console.error("[agent] couldn't start a review:", error instanceof Error ? error.message : error);
   }
 }
 

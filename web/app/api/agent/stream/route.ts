@@ -1,10 +1,15 @@
 import { subscribe } from "@/lib/agent/hub";
 
-/** Live Agent updates for an open window, as server-sent events. */
+/**
+ * Live Agent updates for an open window, as server-sent events. `?only=file`
+ * carries just the files agents send, for the Mac app's inbox, which has no
+ * use for every streamed word.
+ */
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const filesOnly = new URL(request.url).searchParams.get("only") === "file";
   const encoder = new TextEncoder();
   let cleanup = () => {};
   const stream = new ReadableStream<Uint8Array>({
@@ -17,7 +22,10 @@ export async function GET(request: Request) {
         }
       };
       write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
-      const unsubscribe = subscribe((message) => write(`data: ${JSON.stringify(message)}\n\n`));
+      const unsubscribe = subscribe((message) => {
+        if (filesOnly && !(message.kind === "event" && message.event.type === "file")) return;
+        write(`data: ${JSON.stringify(message)}\n\n`);
+      });
       const ping = setInterval(() => write(": ping\n\n"), 15_000);
       cleanup = () => {
         unsubscribe();

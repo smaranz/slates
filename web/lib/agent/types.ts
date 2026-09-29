@@ -1,10 +1,8 @@
 /** Shared shapes for the Agent app; safe to import in the browser and on the server. */
 
-export interface MemoryItem {
-  id: string;
-  text: string;
-  at: number;
-}
+import type { Learned, MemoryBookView, MemoryEntry as MemoryItem } from "@/lib/learning/types";
+
+export type { MemoryItem };
 
 export interface AgentProfile {
   id: string;
@@ -58,8 +56,27 @@ export interface Routine {
 export interface Skill {
   id: string;
   name: string;
+  /** One line on when to use it: what the helpers see before opening it. */
+  description?: string;
   instructions: string;
   updatedAt: number;
+  /** Who last wrote it: "You", an agent's name, or "Tutor". */
+  by?: string;
+  /** Times a helper opened it to follow it. */
+  uses?: number;
+}
+
+/** A file an agent sent from the host to the student's own devices. */
+export interface SentFile {
+  id: string;
+  name: string;
+  size: number;
+  at: number;
+  agentId: string;
+  /** The agent's name when it sent it, for a notification that outlives the agent. */
+  from: string;
+  chatId: string;
+  note?: string;
 }
 
 export interface Recipient {
@@ -83,6 +100,9 @@ export type ChatEvent =
   | { id: string; at: number; type: "approval"; agentId: string; action: ApprovalAction; status: ApprovalStatus; result?: string }
   | { id: string; at: number; type: "voice"; agentId: string; file: string; transcript: string }
   | { id: string; at: number; type: "question"; agentId: string; question: string; options: string[] }
+  | { id: string; at: number; type: "file"; agentId: string; file: string; name: string; size: number; note?: string }
+  | { id: string; at: number; type: "learned"; agentId: string; items: Learned[] }
+  /** `from` is an agent's id, or "tutor" for work the School tutor passed on. */
   | { id: string; at: number; type: "handoff"; from: string; to: string; text: string }
   | { id: string; at: number; type: "notice"; text: string; tone?: "info" | "error" };
 
@@ -106,6 +126,8 @@ export interface Roster {
   models: ModelChoice[];
   browser: { running: boolean };
   workspace: string;
+  /** The student profile every agent and the tutor share. */
+  student: MemoryBookView;
 }
 
 /** What the live stream carries. */

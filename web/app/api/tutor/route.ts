@@ -1,9 +1,14 @@
 import { Agent } from "@/lib/cursor-sdk";
 import { claudeCode } from "ai-sdk-provider-claude-code";
-import { streamText, type ModelMessage } from "ai";
+import { stepCountIs, streamText, type ModelMessage, type ToolSet } from "ai";
 
+import { browserMcp, ensureBrowser } from "@/lib/agent/browser";
+import { browserTools, type BrowserSession } from "@/lib/agent/browser-tools";
 import { openaiProvider, openrouterModel } from "@/lib/ai-usage/clients";
 import { noteStreamUsage, noteUsage } from "@/lib/ai-usage/note";
+import { tutorBook } from "@/lib/learning/memory";
+import { isTutorChatId, saveTutorTranscript, type TranscriptLine } from "@/lib/learning/recall";
+import { planReview, startReview, type ReviewTurn } from "@/lib/learning/review";
 import {
   DEFAULT_THINKING,
   DEFAULT_TUTOR_MODEL,
@@ -12,6 +17,7 @@ import {
   tutorModelBackend,
   tutorModelComposer,
   tutorModelGrok,
+  tutorModelSupportsAttachments,
   type ThinkingLevel,
   type TutorModelId,
 } from "@/lib/tutor-models";
@@ -21,16 +27,26 @@ import {
   claudeSkillOptions,
   skillInstructionsForClaude,
   skillInstructionsForTextOnlyBackend,
+  WORKSPACE,
 } from "@/lib/tutor-skills";
 import { TUTOR_DOCUMENT_INSTRUCTIONS } from "@/lib/tutor-documents";
 import { TUTOR_GRAPH_INSTRUCTIONS } from "@/lib/tutor-graph";
 import { TUTOR_QUIZ_INSTRUCTIONS } from "@/lib/tutor-quiz";
-import { encodeEvent, toolLabel, type TutorEvent } from "@/lib/tutor-stream";
+import { encodeEvent, toolDetail, toolLabel, type TutorEvent } from "@/lib/tutor-stream";
+import {
+  TUTOR_BROWSER_DIR,
+  tutorAgentPrompt,
+  tutorAiTools,
+  tutorClaudeServer,
+  tutorCursorTools,
+  type TutorToolContext,
+} from "@/lib/tutor-tools";
 
 // Streaming keeps the connection alive for long answers instead of
 // hitting a request timeout. The CLI-backed models (Claude Code, Cursor)
 // spin up a subprocess, so they get more headroom than a plain API call needs.
-export const maxDuration = 90;
+// A turn that browses takes minutes, not seconds.
+export const maxDuration = 600;
 
 interface TutorRequest {
   messages: Array<{
@@ -51,6 +67,8 @@ interface TutorRequest {
   model?: string;
   /** Shared thinking level for OpenAI/Claude/OpenRouter — Grok bakes its own into the model id. */
   thinking?: string;
+  /** The conversation's id, so the host can keep a copy to recall and learn from. */
+  chatId?: string;
 }
 
 /** Converts the composer's wire format into AI SDK message content. */
@@ -138,88 +156,129 @@ function cursorModelSelection(modelId: TutorModelId): { id: string; params?: Arr
   };
 }
 
+/** What one turn does, whichever backend is doing it: the stream out, and what's kept of it. */
+interface Emit {
+  text(v: string): void;
+  reasoning(v: string): void;
+  tool(name: string, input: unknown): void;
+  toolDone(name: string, ok: boolean): void;
+  step(): void;
+  error(message: string): void;
+}
+
+/** A Cursor tool call's name and input: custom tools and MCP servers both come through as `mcp`. */
+function cursorTool(call: { type?: string; args?: Record<string, unknown> } | undefined): { name: string; input: unknown } {
+  const args = call?.args ?? {};
+  return call?.type === "mcp" ? { name: String(args.toolName ?? "tool"), input: args.args } : { name: String(call?.type ?? "tool"), input: args };
+}
+
 /**
  * Grok and Composer run through the local Cursor CLI login instead of an API
- * key, via the official `@cursor/sdk`. `mode: "plan"` keeps every run
- * read-only (no shell/file edits) — all a study tutor should ever need, and
- * the closest the SDK has to the CLI's own `--mode ask`.
+ * key, via the official `@cursor/sdk`. They run in agent mode now, with the
+ * tutor's own tools and the agents' browser, but the built-in toolset is cut
+ * down to the web and a to-do list: no shell and no editing files on the PC,
+ * which is what `mode: "plan"` used to guarantee on its own.
  */
-function streamFromCursorAgentSDK(
+async function runCursorAgent(
   modelId: TutorModelId,
   prompt: string,
-  images: CursorImage[]
-): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    async start(controller) {
-      const send = (event: TutorEvent) => controller.enqueue(encodeEvent(event));
-      try {
-        const agent = await Agent.create({ model: cursorModelSelection(modelId) });
-        const run = await agent.send(
-          { text: prompt, images: images.length ? images : undefined },
-          {
-            mode: "plan",
-            onDelta: ({ update }) => {
-              /*
-               * The Cursor agent reports its own thinking and tool use through
-               * the same delta channel as the prose, so they are separated
-               * here rather than being flattened into the answer — which is
-               * what happened before, when only `text-delta` was read and
-               * everything else was dropped on the floor.
-               */
-              const u = update as { type: string; text?: string; toolName?: string; name?: string };
-              if (u.type === "text-delta" && u.text) send({ t: "delta", v: u.text });
-              else if (u.type === "reasoning-delta" && u.text) send({ t: "reasoning", v: u.text });
-              else if (u.type === "tool-call") {
-                const name = u.toolName ?? u.name ?? "tool";
-                send({ t: "tool", name, label: toolLabel(name) });
-              } else if (u.type === "tool-result") {
-                const name = u.toolName ?? u.name ?? "tool";
-                send({ t: "tool_done", name, label: toolLabel(name), ok: true });
-              }
-            },
-          }
-        );
-        const result = await run.wait();
-        // Usage before close — the SDK clears the handle afterward.
-        try {
-          const usage = await agent.getUsage();
-          noteUsage({
-            agent: "tutor",
-            model: modelId,
-            backend: "cursor",
-            inputTokens: usage.usage.inputTokens,
-            outputTokens: usage.usage.outputTokens,
-            reasoningTokens: usage.usage.reasoningTokens ?? 0,
-            cacheReadTokens: usage.usage.cacheReadTokens,
-            covered: true,
-          });
-        } catch {
-          noteUsage({
-            agent: "tutor",
-            model: modelId,
-            backend: "cursor",
-            inputTokens: 0,
-            outputTokens: 0,
-            covered: true,
-          });
-        }
-        agent.close();
-        if (result.status === "error") {
-          send({ t: "error", v: result.error?.message ?? "Cursor agent run failed." });
-        }
-        send({ t: "done" });
-        controller.close();
-      } catch (err) {
-        send({ t: "error", v: err instanceof Error ? err.message : String(err) });
-        controller.close();
-      }
-    },
+  images: CursorImage[],
+  ctx: TutorToolContext,
+  emit: Emit,
+  signal: AbortSignal
+): Promise<void> {
+  const browser = browserMcp(TUTOR_BROWSER_DIR);
+  const browserUp = browser ? await ensureBrowser().then(() => true, () => false) : false;
+  const agent = await Agent.create({
+    model: cursorModelSelection(modelId),
+    local: { cwd: WORKSPACE, customTools: tutorCursorTools(ctx) },
+    ...(browser && browserUp ? { mcpServers: { browser } } : {}),
+    tools: ["mcp", "webSearch", "webFetch", "updateTodos", "readTodos"],
   });
+  const run = await agent.send(
+    { text: prompt, images: images.length ? images : undefined },
+    {
+      mode: "agent",
+      onDelta: ({ update }) => {
+        /*
+         * The Cursor agent reports its own thinking and tool use through
+         * the same delta channel as the prose, so they are separated
+         * here rather than being flattened into the answer — which is
+         * what happened before, when only `text-delta` was read and
+         * everything else was dropped on the floor.
+         */
+        const u = update as {
+          type: string;
+          text?: string;
+          toolName?: string;
+          name?: string;
+          toolCall?: { type?: string; args?: Record<string, unknown>; result?: { error?: unknown; status?: string } };
+        };
+        if (u.type === "text-delta" && u.text) emit.text(u.text);
+        else if ((u.type === "thinking-delta" || u.type === "reasoning-delta") && u.text) emit.reasoning(u.text);
+        else if (u.type === "tool-call-started") {
+          const call = cursorTool(u.toolCall);
+          emit.tool(call.name, call.input);
+        } else if (u.type === "tool-call-completed") {
+          emit.toolDone(cursorTool(u.toolCall).name, u.toolCall?.result?.error === undefined && u.toolCall?.result?.status !== "error");
+        } else if (u.type === "tool-call") emit.tool(u.toolName ?? u.name ?? "tool", undefined);
+        else if (u.type === "tool-result") emit.toolDone(u.toolName ?? u.name ?? "tool", true);
+      },
+    }
+  );
+  const stop = () => void run.cancel().catch(() => {});
+  signal.addEventListener("abort", stop, { once: true });
+  const result = await run.wait().finally(() => signal.removeEventListener("abort", stop));
+  // Usage before close — the SDK clears the handle afterward.
+  try {
+    const usage = await agent.getUsage();
+    noteUsage({
+      agent: "tutor",
+      model: modelId,
+      backend: "cursor",
+      inputTokens: usage.usage.inputTokens,
+      outputTokens: usage.usage.outputTokens,
+      reasoningTokens: usage.usage.reasoningTokens ?? 0,
+      cacheReadTokens: usage.usage.cacheReadTokens,
+      covered: true,
+    });
+  } catch {
+    noteUsage({
+      agent: "tutor",
+      model: modelId,
+      backend: "cursor",
+      inputTokens: 0,
+      outputTokens: 0,
+      covered: true,
+    });
+  }
+  agent.close();
+  if (result.status === "error") {
+    emit.error(result.error?.message ?? "Cursor agent run failed.");
+  }
+}
+
+/** The conversation as the host keeps it: text only, so attachments are the words pulled out of them. */
+function transcriptOf(messages: TutorRequest["messages"], reply: string): TranscriptLine[] {
+  const text = (content: string | TutorMessagePart[]) =>
+    typeof content === "string" ? content : content.filter((part) => part.type !== "image").map((part) => part.text ?? "").join("\n");
+  const clip = (value: string) => (value.length > 6_000 ? `${value.slice(0, 6_000)}…` : value);
+  return [
+    ...messages.map((m) => ({ who: m.role === "user" ? "Student" : "Tutor", text: clip(text(m.content).trim()), at: Date.now() })),
+    { who: "Tutor", text: clip(reply.trim()), at: Date.now() },
+  ].filter((line) => line.text);
+}
+
+function titleOf(messages: TutorRequest["messages"]): string {
+  const first = messages.find((m) => m.role === "user");
+  const text = (typeof first?.content === "string" ? first.content : first?.content.find((part) => part.type === "text")?.text ?? "").replace(/\s+/g, " ").trim();
+  return text.length > 60 ? `${text.slice(0, 57)}…` : text || "Tutor chat";
 }
 
 export async function POST(req: Request) {
-  const { messages, context, focus, studentName, model, thinking }: TutorRequest = await req.json();
+  const { messages, context, focus, studentName, model, thinking, chatId }: TutorRequest = await req.json();
   const thinkingLevel: ThinkingLevel = isThinkingLevel(thinking) ? thinking : DEFAULT_THINKING;
+  const chat = isTutorChatId(chatId) ? chatId : null;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response("messages required", { status: 400 });
@@ -234,6 +293,7 @@ export async function POST(req: Request) {
     migrateTutorModelId(process.env.SLATES_TUTOR_MODEL) ??
     DEFAULT_TUTOR_MODEL;
   const canRunSkills = tutorModelBackend(resolvedModel) === "claude-code";
+  const hasBrowser = !!browserMcp();
 
   const system = [
     "You are Slates Tutor, a concise high-school study coach.",
@@ -244,6 +304,9 @@ export async function POST(req: Request) {
     // After the board, so the thing being pointed at is the last context read
     // before the instructions — the foreground against that background.
     focus ? focus : "",
+    "",
+    // What it remembers of the student, and what it can do beyond answering.
+    tutorAgentPrompt({ browser: hasBrowser }),
     "",
     "For an ordinary chat reply, answer in 2-4 short sentences. Be specific:",
     "reference their actual courses and assignments when relevant, and end",
@@ -297,128 +360,197 @@ export async function POST(req: Request) {
   })) as ModelMessage[];
 
   const backend = tutorModelBackend(modelId);
+  const vision = tutorModelSupportsAttachments(modelId);
 
-  if (backend === "cursor-agent") {
-    const { text, images } = buildCursorPrompt(system, modelMessages);
-    return new Response(streamFromCursorAgentSDK(modelId, text, images), {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Accel-Buffering": "no",
+  return respond(async (send) => {
+    const turn = { reply: "", steps: [] as string[], wroteMemory: false, wroteSkill: false, failed: false };
+    const emit: Emit = {
+      text: (v) => {
+        turn.reply += v;
+        send({ t: "delta", v });
       },
-    });
-  }
+      reasoning: (v) => send({ t: "reasoning", v }),
+      tool: (name, input) => {
+        const label = toolLabel(name);
+        const detail = toolDetail(name, input);
+        turn.steps.push(detail ? `${label}: ${detail}` : label);
+        send({ t: "tool", name, label, detail });
+      },
+      toolDone: (name, ok) => send({ t: "tool_done", name, label: toolLabel(name), ok }),
+      step: () => send({ t: "step" }),
+      error: (v) => {
+        turn.failed = true;
+        send({ t: "error", v });
+      },
+    };
+    // Whatever the tutor saves while it answers shows under the reply as it happens.
+    const ctx: TutorToolContext = {
+      chatId: chat ?? "",
+      onLearned: (item) => {
+        if (item.kind === "memory") turn.wroteMemory = true;
+        else turn.wroteSkill = true;
+        send({ t: "learned", items: [item] });
+      },
+    };
 
-  const result =
-    backend === "claude-code"
-      ? streamText({
-          /*
-           * Runs through the local Claude Code CLI login — no API key needed.
-           *
-           * Skills and the sandbox are passed as model *settings*, not as
-           * `providerOptions`: that channel carries reasoning options only
-           * (`thinking`, `effort`) and silently drops everything else, so
-           * configuring the sandbox there left the session with no sandbox at
-           * all. See lib/tutor-skills.ts.
-           */
-          model: claudeCode(modelId, claudeSkillOptions()),
-          system,
-          messages: modelMessages,
-          providerOptions: {
-            "claude-code": { effort: thinkingLevel },
-          },
-        })
-      : backend === "openrouter"
-        ? streamText({
-            model: openrouterModel(modelId),
-            system,
-            messages: modelMessages,
-            providerOptions: {
-              openrouter: { reasoning: { effort: thinkingLevel } },
-            },
-          })
-        : (() => {
-            const provider = openaiProvider();
-            return streamText({
-              model: provider(modelId),
+    if (backend === "cursor-agent") {
+      const { text, images } = buildCursorPrompt(system, modelMessages);
+      await runCursorAgent(modelId, text, images, ctx, emit, req.signal);
+    } else if (backend === "claude-code") {
+      const browser = hasBrowser ? browserMcp(TUTOR_BROWSER_DIR) : null;
+      const browserUp = browser ? await ensureBrowser().then(() => true, () => false) : false;
+      const result = streamText({
+        /*
+         * Runs through the local Claude Code CLI login — no API key needed.
+         *
+         * Skills and the sandbox are passed as model *settings*, not as
+         * `providerOptions`: that channel carries reasoning options only
+         * (`thinking`, `effort`) and silently drops everything else, so
+         * configuring the sandbox there left the session with no sandbox at
+         * all. See lib/tutor-skills.ts.
+         *
+         * The tutor's own tools reach the CLI as an in-process MCP server,
+         * since it runs its own tool loop and never sees AI SDK tools.
+         */
+        model: claudeCode(
+          modelId,
+          claudeSkillOptions({ mcpServers: { slates: tutorClaudeServer(ctx), ...(browser && browserUp ? { browser } : {}) } })
+        ),
+        system,
+        messages: modelMessages,
+        providerOptions: {
+          "claude-code": { effort: thinkingLevel },
+        },
+        abortSignal: req.signal,
+      });
+      noteStreamUsage("tutor", modelId, backend, result.totalUsage);
+      await forward(result.fullStream, emit);
+    } else {
+      // Started on its first use, so a reply that never browses doesn't pay for it.
+      const browser: BrowserSession | null = hasBrowser
+        ? await browserTools({ outputDir: TUTOR_BROWSER_DIR, images: backend === "openai" && vision })
+        : null;
+      try {
+        const tools: ToolSet = { ...tutorAiTools(ctx), ...(browser?.tools ?? {}) };
+        if (backend === "openrouter") {
+          const run = (withTools: boolean) => {
+            const result = streamText({
+              model: openrouterModel(modelId),
               system,
               messages: modelMessages,
-              /*
-               * The one tool the API-backed models get. A tutor that can't look
-               * anything up has to answer exam dates and current syllabi from
-               * memory, which is exactly where it makes things up; and it is
-               * what puts visible steps in front of the student on these models,
-               * which otherwise only ever show reasoning.
-               *
-               * Taken from the same provider instance that holds the active
-               * linked key, so web search and the model don't disagree about
-               * credentials.
-               */
-              tools: { web_search: provider.tools.webSearch({}) },
+              ...(withTools ? { tools, stopWhen: stepCountIs(30) } : {}),
               providerOptions: {
-                /*
-                 * `reasoningSummary` is what makes the thinking visible. Without
-                 * it the reasoning models still reason, they just never send any
-                 * of it, and the panel above the reply has nothing to show.
-                 */
-                openai: { reasoningEffort: thinkingLevel, reasoningSummary: "auto" },
+                openrouter: { reasoning: { effort: thinkingLevel } },
               },
+              abortSignal: req.signal,
             });
-          })();
+            noteStreamUsage("tutor", modelId, backend, result.totalUsage);
+            return result;
+          };
+          // A model with no tool-calling endpoint on OpenRouter still answers, just without them.
+          const outcome = await forward(run(true).fullStream, emit, { retryOnToolRefusal: true });
+          if (outcome === "retry") await forward(run(false).fullStream, emit);
+        } else {
+          const provider = openaiProvider();
+          const result = streamText({
+            model: provider(modelId),
+            system,
+            messages: modelMessages,
+            /*
+             * The one tool the API-backed models get. A tutor that can't look
+             * anything up has to answer exam dates and current syllabi from
+             * memory, which is exactly where it makes things up; and it is
+             * what puts visible steps in front of the student on these models,
+             * which otherwise only ever show reasoning.
+             *
+             * Taken from the same provider instance that holds the active
+             * linked key, so web search and the model don't disagree about
+             * credentials.
+             *
+             * Web search is no longer the only one: the tutor's own tools and
+             * the agents' browser ride alongside it.
+             */
+            tools: { web_search: provider.tools.webSearch({}), ...tools },
+            stopWhen: stepCountIs(30),
+            providerOptions: {
+              /*
+               * `reasoningSummary` is what makes the thinking visible. Without
+               * it the reasoning models still reason, they just never send any
+               * of it, and the panel above the reply has nothing to show.
+               */
+              openai: { reasoningEffort: thinkingLevel, reasoningSummary: "auto" },
+            },
+            abortSignal: req.signal,
+          });
+          noteStreamUsage("tutor", modelId, backend, result.totalUsage);
+          await forward(result.fullStream, emit);
+        }
+      } finally {
+        await browser?.close();
+      }
+    }
 
-  noteStreamUsage("tutor", modelId, backend, result.totalUsage);
-
-  return ndjson(result.fullStream);
+    /*
+     * The host keeps the conversation so helpers can recall it later, and
+     * counts the turn toward a review: a second, small model that reads it
+     * afterwards and saves what the tutor didn't. The reply is finished
+     * before that starts, so it never waits on it. A turn that failed (a
+     * provider's usage limit comes back as text, too) isn't worth either.
+     */
+    if (chat && turn.reply.trim() && !turn.failed && !req.signal.aborted) {
+      const lines = transcriptOf(messages, turn.reply);
+      saveTutorTranscript({ id: chat, title: titleOf(messages), lines });
+      const review: ReviewTurn = {
+        helper: { key: "tutor", name: "Tutor", kind: "tutor" },
+        notes: tutorBook(),
+        transcript: lines.slice(-16),
+        steps: turn.steps,
+        wroteMemory: turn.wroteMemory,
+        wroteSkill: turn.wroteSkill,
+        fromStudent: true,
+      };
+      const plan = planReview(review);
+      if (plan.memory || plan.skills) {
+        const id = `rev_${chat}_${Date.now().toString(36)}`;
+        startReview(id, review, plan);
+        send({ t: "review", id });
+      }
+    }
+    send({ t: "done" });
+  });
 }
 
 /**
- * The model's stream, re-emitted as events the client can tell apart.
- *
- * `toTextStreamResponse()` would forward the prose and drop everything else —
- * the reasoning, the tool calls, the step boundaries — which is exactly the
- * material a student needs to see that something is happening and what.
+ * One NDJSON response for every backend.
  *
  * An error mid-stream is sent as an event rather than tearing the response
  * down: whatever the tutor already said is worth keeping on screen, and a
  * half-answer with a note beats a blank bubble.
  */
-function ndjson(parts: AsyncIterable<StreamPart>): Response {
+function respond(work: (send: (event: TutorEvent) => void) => Promise<void>): Response {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (event: TutorEvent) => controller.enqueue(encodeEvent(event));
-      try {
-        for await (const part of parts) {
-          switch (part.type) {
-            case "text-delta":
-              if (part.text) send({ t: "delta", v: part.text });
-              break;
-            case "reasoning-delta":
-              if (part.text) send({ t: "reasoning", v: part.text });
-              break;
-            case "tool-call": {
-              const name = part.toolName ?? "tool";
-              send({ t: "tool", name, label: toolLabel(name) });
-              break;
-            }
-            case "tool-result":
-            case "tool-error": {
-              const name = part.toolName ?? "tool";
-              send({ t: "tool_done", name, label: toolLabel(name), ok: part.type === "tool-result" });
-              break;
-            }
-            case "finish-step":
-              send({ t: "step" });
-              break;
-            case "error":
-              send({ t: "error", v: part.error instanceof Error ? part.error.message : String(part.error) });
-              break;
-          }
+      let open = true;
+      const send = (event: TutorEvent) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encodeEvent(event));
+        } catch {
+          // The page went away; the turn still finishes and is still kept.
+          open = false;
         }
-        send({ t: "done" });
+      };
+      try {
+        await work(send);
       } catch (err) {
         send({ t: "error", v: err instanceof Error ? err.message : "The tutor stopped unexpectedly." });
       } finally {
-        controller.close();
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the page leaving.
+        }
       }
     },
   });
@@ -432,10 +564,56 @@ function ndjson(parts: AsyncIterable<StreamPart>): Response {
   });
 }
 
+/**
+ * The model's stream, re-emitted as events the client can tell apart.
+ *
+ * `toTextStreamResponse()` would forward the prose and drop everything else —
+ * the reasoning, the tool calls, the step boundaries — which is exactly the
+ * material a student needs to see that something is happening and what.
+ *
+ * With `retryOnToolRefusal`, a provider saying it can't do tools before
+ * anything else has happened is handed back as "retry" instead of shown.
+ */
+async function forward(parts: AsyncIterable<StreamPart>, emit: Emit, options: { retryOnToolRefusal?: boolean } = {}): Promise<"done" | "retry"> {
+  let said = false;
+  for await (const part of parts) {
+    switch (part.type) {
+      case "text-delta":
+        if (part.text) {
+          said = true;
+          emit.text(part.text);
+        }
+        break;
+      case "reasoning-delta":
+        if (part.text) emit.reasoning(part.text);
+        break;
+      case "tool-call":
+        said = true;
+        emit.tool(part.toolName ?? "tool", part.input);
+        break;
+      case "tool-result":
+      case "tool-error":
+        emit.toolDone(part.toolName ?? "tool", part.type === "tool-result");
+        break;
+      case "finish-step":
+        emit.step();
+        break;
+      case "error": {
+        const message = part.error instanceof Error ? part.error.message : String(part.error);
+        if (options.retryOnToolRefusal && !said && /tool/i.test(message)) return "retry";
+        emit.error(message);
+        break;
+      }
+    }
+  }
+  return "done";
+}
+
 /** Whatever `fullStream` yields — narrowed by the switch above, not here. */
 type StreamPart = {
   type: string;
   text?: string;
   toolName?: string;
+  input?: unknown;
   error?: unknown;
 } & Record<string, unknown>;

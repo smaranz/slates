@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+import type { Learned } from "./learning/types";
 import type { Mention } from "./tutor-mentions";
 import type { Attachment } from "./attachments";
 import type { TutorDocument } from "./tutor-documents";
@@ -36,6 +37,8 @@ export interface TutorStep {
   state: "run" | "ok" | "fail";
   /** Seconds it took, stamped when it returned. */
   secs?: number;
+  /** What it was done to: the page it opened, what it searched for. */
+  detail?: string;
 }
 
 export interface TutorWork {
@@ -91,6 +94,11 @@ export interface TutorChatMessage {
   files?: { name: string; size: number }[];
   /** An illustration the tutor drew for this reply, if it drew one. */
   image?: TutorImage;
+  /**
+   * What the tutor saved to memory or its skills: while answering, and in
+   * the review after. Shown under the reply so remembering is never silent.
+   */
+  learned?: Learned[];
 }
 
 export interface TutorChat {

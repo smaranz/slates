@@ -71,11 +71,16 @@ export async function ensureBrowser(): Promise<void> {
   return launching;
 }
 
-/** Playwright's MCP server, attached to the agents' Chrome. Null when it isn't installed. */
-export function browserMcp(): { type: "stdio"; command: string; args: string[] } | null {
+/**
+ * Playwright's MCP server, attached to the agents' Chrome. Null when it isn't
+ * installed. Screenshots and saved PDFs go to `outputDir`, where an agent can
+ * send them on.
+ */
+export function browserMcp(outputDir?: string): { type: "stdio"; command: string; args: string[] } | null {
   const cli = path.join(process.cwd(), "node_modules", "@playwright", "mcp", "cli.js");
   if (!fs.existsSync(cli)) return null;
-  return { type: "stdio", command: process.execPath, args: [cli, "--cdp-endpoint", CDP] };
+  if (outputDir) fs.mkdirSync(outputDir, { recursive: true });
+  return { type: "stdio", command: process.execPath, args: [cli, "--cdp-endpoint", CDP, "--caps", "pdf", ...(outputDir ? ["--output-dir", outputDir] : [])] };
 }
 
 /* ---------- a small CDP client for the computer view ---------- */

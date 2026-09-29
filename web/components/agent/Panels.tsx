@@ -133,7 +133,7 @@ export function Skills({ skills, onClose }: { skills: Skill[]; onClose: () => vo
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     try {
-      await agentApi("/api/agent", { op: "save-skill", id: editing?.id, name: editing?.name, instructions: editing?.instructions });
+      await agentApi("/api/agent", { op: "save-skill", id: editing?.id, name: editing?.name, description: editing?.description, instructions: editing?.instructions });
       setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -144,6 +144,7 @@ export function Skills({ skills, onClose }: { skills: Skill[]; onClose: () => vo
       {editing ? (
         <>
           <label className={s.label}>Name<input className={s.field} value={editing.name ?? ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} autoFocus /></label>
+          <label className={s.label}>When to use it<input className={s.field} value={editing.description ?? ""} onChange={(e) => setEditing({ ...editing, description: e.target.value })} placeholder="One line the agents see before opening it" maxLength={200} /></label>
           <label className={s.label}>Instructions<textarea className={s.field} rows={10} value={editing.instructions ?? ""} onChange={(e) => setEditing({ ...editing, instructions: e.target.value })} placeholder="When to use it, the steps, how to check the result, what to return, and what needs your approval." /></label>
           {error && <p className={s.bad}>{error}</p>}
           <div className={s.modalActions}>
@@ -155,12 +156,15 @@ export function Skills({ skills, onClose }: { skills: Skill[]; onClose: () => vo
         </>
       ) : (
         <>
-          <p className={s.muted}>Reusable instructions every agent can follow. Type / in a message to use one; agents can save new ones too.</p>
+          <p className={s.muted}>Reusable instructions every agent and the tutor can follow. Type / in a message to use one. They also learn new ones from what works, and fix ones that turn out wrong.</p>
           <div className={s.skillList}>
             {skills.map((k) => (
               <button key={k.id} type="button" className={s.skillRow} onClick={() => setEditing(k)}>
                 <strong>/{k.name}</strong>
-                <span>{k.instructions.split("\n")[0]}</span>
+                <span>{k.description || k.instructions.split("\n")[0]}</span>
+                {(k.by && k.by !== "You") || k.uses ? (
+                  <span className={s.muted}>{[k.by && k.by !== "You" ? `Learned by ${k.by}` : "", k.uses ? `used ${k.uses} ${k.uses === 1 ? "time" : "times"}` : ""].filter(Boolean).join(" · ")}</span>
+                ) : null}
               </button>
             ))}
             {!skills.length && <p className={s.muted}>No skills yet.</p>}
@@ -261,17 +265,30 @@ export function AgentDetails({ agent, roster, onClose, onDeleted }: { agent: Ros
           <Toggle on={agent.voiceReplies} label="Reply with voice memos" onClick={() => void update({ voiceReplies: !agent.voiceReplies })} />
         </div>
 
-        <h3 className={s.section}>Memory</h3>
+        <h3 className={s.section}>About you</h3>
+        <p className={s.muted}>Shared by every agent and the tutor. They save what they learn about you as you talk, and review chats afterwards for anything they missed.</p>
+        {roster.student.entries.length ? (
+          <ul className={s.memory}>
+            {roster.student.entries.map((m) => (
+              <li key={m.id}>
+                <span>{m.text}</span>
+                <button type="button" aria-label={`Forget: ${m.text}`} title="Forget" onClick={() => void agentApi("/api/memory", { op: "forget", book: "student", id: m.id }).catch((err: Error) => setError(err.message))}><Icon path={ICON.close} size={10} /></button>
+              </li>
+            ))}
+          </ul>
+        ) : <p className={s.muted}>Nothing yet. Tell any agent or the tutor what to remember.</p>}
+
+        <h3 className={s.section}>Its notes</h3>
         {agent.memory.length ? (
           <ul className={s.memory}>
             {agent.memory.map((m) => (
               <li key={m.id}>
                 <span>{m.text}</span>
-                <button type="button" aria-label="Forget" onClick={() => void agentApi("/api/agent", { op: "forget", id: agent.id, memoryId: m.id })}><Icon path={ICON.close} size={10} /></button>
+                <button type="button" aria-label={`Forget: ${m.text}`} title="Forget" onClick={() => void agentApi("/api/agent", { op: "forget", id: agent.id, memoryId: m.id })}><Icon path={ICON.close} size={10} /></button>
               </li>
             ))}
           </ul>
-        ) : <p className={s.muted}>Nothing yet. Tell it what to remember, or it saves preferences as it learns them.</p>}
+        ) : <p className={s.muted}>What {agent.name} learns about doing its job for you: what worked, how you like things done.</p>}
 
         <h3 className={s.section}>Routines</h3>
         {mine.map((r) => (

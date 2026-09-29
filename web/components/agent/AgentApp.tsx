@@ -7,6 +7,7 @@ import { Icon, ICON, Spinner } from "../ui";
 import Chat, { Face } from "./Chat";
 import Computer from "./Computer";
 import AgentDrawer from "./Drawer";
+import FilesPanel from "./FilesPanel";
 import { AgentDetails, GroupDetails, NewAgent, NewGroup, Skills, TEMPLATES } from "./Panels";
 import s from "./agent.module.css";
 import { agentApi, useAgentLive } from "./useAgentData";
@@ -26,7 +27,7 @@ const TALK_KEY = "slates.agent.talk";
 const DRAWER_KEY = "slates.agent.drawer";
 const PHONE = "(max-width: 760px)";
 
-type Panel = "details" | "computer" | null;
+type Panel = "details" | "computer" | "files" | null;
 type Dialog = "agent" | "group" | "skills" | null;
 
 /**
@@ -123,6 +124,9 @@ export default function AgentApp() {
           <button type="button" className={`ui-back ${panel === "computer" ? s.headerOn : ""}`} onClick={() => setPanel(panel === "computer" ? null : "computer")} aria-pressed={panel === "computer"} aria-label="Computer">
             <Icon path={MONITOR} size={13} /> <span className={s.headerLabel}>Computer</span>
           </button>
+          <button type="button" className={`ui-back ${panel === "files" ? s.headerOn : ""}`} onClick={() => setPanel(panel === "files" ? null : "files")} aria-pressed={panel === "files"} aria-label="Files">
+            <Icon path={ICON.folder} size={13} /> <span className={s.headerLabel}>Files</span>
+          </button>
           <button type="button" className="ui-back" onClick={() => setDialog("skills")} aria-label="Skills">
             <Icon path={ICON.checklist} size={13} /> <span className={s.headerLabel}>Skills</span>
           </button>
@@ -210,6 +214,7 @@ export default function AgentApp() {
           </div>
 
           {panel === "computer" && <Computer onClose={() => setPanel(null)} />}
+          {panel === "files" && <FilesPanel onClose={() => setPanel(null)} onEvent={live.onEvent} />}
           {panel === "details" && roster && current && (
             <AgentDetails key={current.id} agent={current} roster={roster} onClose={() => setPanel(null)} onDeleted={() => { setPanel(null); setOpen(null); }} />
           )}

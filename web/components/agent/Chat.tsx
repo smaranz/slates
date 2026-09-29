@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentGroup, ChatEvent, RosterAgent, Skill } from "@/lib/agent/types";
 import { useDictation } from "@/lib/dictation";
+import { FileCard, LearnedNote } from "../HostFile";
 import TutorMarkdown from "../TutorMarkdown";
 import { Icon, ICON, Spinner } from "../ui";
 import s from "./agent.module.css";
@@ -27,7 +28,7 @@ export function Face({ agent, size = 28 }: { agent: Pick<RosterAgent, "name" | "
 }
 
 type WorkItem = Extract<ChatEvent, { type: "tool" | "thinking" }>;
-type AgentPart = Extract<ChatEvent, { type: "agent" | "approval" | "voice" | "question" }> | { type: "work"; id: string; items: WorkItem[] };
+type AgentPart = Extract<ChatEvent, { type: "agent" | "approval" | "voice" | "question" | "file" | "learned" }> | { type: "work"; id: string; items: WorkItem[] };
 type Turn =
   | { kind: "user"; event: Extract<ChatEvent, { type: "user" }> }
   | { kind: "agent"; id: string; agentId: string; parts: AgentPart[] }
@@ -332,7 +333,7 @@ export default function Chat({
             if (turn.kind === "other") {
               const event = turn.event;
               if (event.type === "notice") return <p key={event.id} className={event.tone === "error" ? s.noticeBad : s.notice}>{event.text}</p>;
-              return <HandoffLine key={event.id} from={byId.get(event.from)?.name ?? "An agent"} to={byId.get(event.to)?.name ?? "an agent"} text={event.text} />;
+              return <HandoffLine key={event.id} from={event.from === "tutor" ? "Tutor" : byId.get(event.from)?.name ?? "An agent"} to={byId.get(event.to)?.name ?? "an agent"} text={event.text} />;
             }
             const agent = byId.get(turn.agentId);
             const said = turn.parts.filter((p): p is Extract<AgentPart, { type: "agent" }> => p.type === "agent" && p.text.trim() !== "PASS");
@@ -360,6 +361,10 @@ export default function Chat({
                           )}
                         </div>
                       );
+                    case "file":
+                      return <FileCard key={part.id} url={`/api/agent/outbox?id=${encodeURIComponent(part.file)}`} name={part.name} size={part.size} note={part.note} />;
+                    case "learned":
+                      return <LearnedNote key={part.id} items={part.items} />;
                   }
                 })}
                 {last && busyInTurn && busyLine}

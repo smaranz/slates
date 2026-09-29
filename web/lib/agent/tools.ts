@@ -6,11 +6,15 @@ import path from "node:path";
 import type { SDKCustomTool, SDKJsonValue } from "@cursor/sdk";
 
 import { noteUsage } from "@/lib/ai-usage/note";
+import { NOTES_LIMIT, type Book } from "@/lib/learning/memory";
+import { asCursorTools, learningTools } from "@/lib/learning/tools";
+import type { Learned } from "@/lib/learning/types";
 import { tts } from "@/lib/media/elevenlabs";
 import { DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE } from "@/lib/media/catalog";
 import { SCRAPER_URL } from "@/lib/ports";
+import { sendFile } from "./outbox";
 import { describeSchedule, nextRunAfter, normalizeSchedule } from "./schedule";
-import { agents, FILES_DIR, getAgent, newId, routines, skills, updateAgent } from "./store";
+import { agents, FILES_DIR, getAgent, newId, routines, updateAgent } from "./store";
 import type { ChatEvent, Recipient, Routine } from "./types";
 
 /**
@@ -26,6 +30,19 @@ export interface ToolContext {
   chatId: string;
   post: (event: ChatEvent) => void;
   handoff: (to: string, message: string) => string;
+  /** Told when the agent saves a memory or a skill, to show the student. */
+  onLearned?: (item: Learned) => void;
+}
+
+/** An agent's own notes, kept on its profile. */
+export function agentNotes(agentId: string): Book {
+  return {
+    kind: "self",
+    title: "YOUR NOTES (only you see these)",
+    limit: NOTES_LIMIT,
+    read: () => getAgent(agentId)?.memory ?? [],
+    write: (entries) => void updateAgent(agentId, (agent) => ({ ...agent, memory: entries })),
+  };
 }
 
 type Args = Record<string, SDKJsonValue>;
@@ -67,6 +84,13 @@ async function scraper<T>(pathAndQuery: string, init?: RequestInit, timeout = 60
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok || body.error) throw new Error(body.error ?? `The Schoology service answered ${response.status}.`);
   return body;
+}
+
+/** The board as the scraper last synced it (or freshly, with `fresh`), as text for a model. */
+export async function readBoard(section: string, course: string, fresh: boolean): Promise<string> {
+  const data = await scraper<{ snapshot?: Snapshot }>(`/snapshot${fresh ? "?fresh=1" : ""}`, undefined, 110_000);
+  if (!data.snapshot) throw new Error("There's no synced board yet.");
+  return boardText(data.snapshot, section || "all", course);
 }
 
 function boardText(snap: Snapshot, section: string, course: string): string {
@@ -124,7 +148,11 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
     return "Saved as a draft card in the chat. The student will send or discard it; do not try to send it any other way.";
   };
 
+  const learning = asCursorTools(learningTools({ name: getAgent(ctx.agentId)?.name ?? "Agent", notes: agentNotes(ctx.agentId), chatId: ctx.chatId, onLearned: ctx.onLearned }));
+
   return {
+    ...learning,
+
     slates_board: tool(
       "Read the student's Schoology board as Slates last synced it: classes and grades, open assignments with due dates, recent messages (with thread ids for replies), and the updates teachers posted to their classes (announcements such as a test moved or cancelled).",
       {
@@ -133,10 +161,21 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
         fresh: { type: "boolean", description: "Sync with Schoology first (slower). Default false." },
       },
       [],
-      async (args) => {
-        const data = await scraper<{ snapshot?: Snapshot }>(`/snapshot${args.fresh === true ? "?fresh=1" : ""}`, undefined, 110_000);
-        if (!data.snapshot) throw new Error("There's no synced board yet.");
-        return boardText(data.snapshot, str(args.section) || "all", str(args.course));
+      (args) => readBoard(str(args.section), str(args.course), args.fresh === true),
+    ),
+
+    send_file: tool(
+      "Send a file from this PC to the student. It appears in this chat as a card they can open, and their Mac saves it to Downloads › Slates on its own. Use it for anything you make for them (documents, slides, spreadsheets, PDFs, images) instead of telling them a path on the PC, which they can't open from their laptop or phone.",
+      {
+        path: { type: "string", description: "The file, relative to your working folder or absolute." },
+        note: { type: "string", description: "One line on what it is, shown on the card." },
+      },
+      ["path"],
+      (args) => {
+        const agent = self();
+        const file = sendFile({ path: str(args.path), agentId: agent.id, from: agent.name, chatId: ctx.chatId, note: str(args.note) });
+        ctx.post({ id: newId("evt"), at: Date.now(), type: "file", agentId: agent.id, file: file.id, name: file.name, size: file.size, note: file.note });
+        return `Sent ${file.name} (${file.size < 1024 * 1024 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}) to the student. It's in the chat and on their computer; don't paste its contents again.`;
       },
     ),
 
@@ -178,60 +217,6 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
       (args) => {
         if (!/^\d+$/.test(str(args.threadId))) throw new Error("threadId must be the numeric id shown in slates_board.");
         return draft({ kind: "reply", threadId: str(args.threadId), subject: str(args.subject) || undefined, body: str(args.body) });
-      },
-    ),
-
-    remember: tool(
-      "Save a durable fact or preference about the student or how they like work done. It is shown to you at the start of every task.",
-      { fact: { type: "string" } },
-      ["fact"],
-      (args) => {
-        const fact = str(args.fact).trim();
-        if (!fact) throw new Error("Nothing to remember.");
-        updateAgent(ctx.agentId, (agent) => ({
-          ...agent,
-          memory: [...agent.memory.filter((m) => m.text.toLowerCase() !== fact.toLowerCase()), { id: newId("mem"), text: fact, at: Date.now() }].slice(-60),
-        }));
-        return "Remembered.";
-      },
-    ),
-
-    forget: tool(
-      "Remove a saved memory by its id or exact text.",
-      { memory: { type: "string" } },
-      ["memory"],
-      (args) => {
-        const key = str(args.memory).trim().toLowerCase();
-        const before = self().memory.length;
-        const after = updateAgent(ctx.agentId, (agent) => ({ ...agent, memory: agent.memory.filter((m) => m.id !== key && m.text.toLowerCase() !== key) }));
-        return (after?.memory.length ?? before) < before ? "Forgotten." : "No memory matched.";
-      },
-    ),
-
-    list_skills: tool("List the saved skills (reusable instructions) every agent can use.", {}, [], () => {
-      const all = skills.all();
-      return all.length ? all.map((s) => `- ${s.name}: ${s.instructions.split("\n")[0]!.slice(0, 120)}`).join("\n") : "No skills saved yet.";
-    }),
-
-    get_skill: tool("Read a saved skill's full instructions.", { name: { type: "string" } }, ["name"], (args) => {
-      const skill = skills.all().find((s) => s.name.toLowerCase() === str(args.name).trim().toLowerCase());
-      return skill ? `# ${skill.name}\n\n${skill.instructions}` : "No skill by that name.";
-    }),
-
-    save_skill: tool(
-      "Save or update a reusable skill: when to use it, inputs, steps, how to check the result, what to return, and what needs approval.",
-      { name: { type: "string" }, instructions: { type: "string" } },
-      ["name", "instructions"],
-      (args) => {
-        const name = str(args.name).trim().slice(0, 60);
-        const instructions = str(args.instructions).trim();
-        if (!name || !instructions) throw new Error("A skill needs a name and instructions.");
-        const all = skills.all();
-        const existing = all.find((s) => s.name.toLowerCase() === name.toLowerCase());
-        if (existing) Object.assign(existing, { name, instructions, updatedAt: Date.now() });
-        else all.push({ id: newId("skl"), name, instructions, updatedAt: Date.now() });
-        skills.save(all);
-        return `Saved the skill "${name}".`;
       },
     ),
 

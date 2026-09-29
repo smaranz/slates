@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./wide.css";
+import DesktopInbox from "@/components/DesktopInbox";
 import { CounselorProvider } from "@/lib/counselor/store";
 import { IdentityProvider } from "@/lib/identity";
 import { ModeProvider } from "@/lib/mode";
@@ -35,6 +36,8 @@ export default function RootLayout(props: LayoutProps<"/">) {
           for this element's own attributes only — one level deep, so genuine
           mismatches inside the app still surface. */}
       <body suppressHydrationWarning>
+        {/* On the Mac app, files agents send land in Downloads wherever you are in Slates. */}
+        <DesktopInbox />
         {/* Identity is outermost: both halves of the app read the student's
             name and photo from it, so it has to exist before either store. */}
         <IdentityProvider>

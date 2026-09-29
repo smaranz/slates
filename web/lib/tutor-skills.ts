@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { BROWSER_ALLOWED } from "./agent/browser-tools";
+
 /**
  * Agent Skills, and what the tutor is allowed to do with them.
  *
@@ -132,7 +134,7 @@ const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
  * its tool *before* the callback is consulted, which silently disables the
  * boundary — the SDK warns about exactly this.
  */
-export function claudeSkillOptions(): ClaudeCodeSettings {
+export function claudeSkillOptions(extra: Pick<ClaudeCodeSettings, "mcpServers"> = {}): ClaudeCodeSettings {
   ensureWorkspace();
 
   return {
@@ -141,6 +143,8 @@ export function claudeSkillOptions(): ClaudeCodeSettings {
     // document skills gets real file output without Slates shipping them.
     settingSources: ["user", "project"] as const,
     skills: "all" as const,
+    // The tutor's own tools (memory, recall, the board) and the agents' browser.
+    ...extra,
     canUseTool: async (tool, input) => {
       /*
        * Bash is refused outright. A shell command can write anywhere no
@@ -151,6 +155,11 @@ export function claudeSkillOptions(): ClaudeCodeSettings {
        */
       if (tool === "Bash" || tool === "BashOutput" || tool === "KillShell") {
         return { behavior: "deny", message: "The tutor can't run shell commands." };
+      }
+
+      // The browser, minus uploading the PC's files or running scripts in a page.
+      if (tool.startsWith("mcp__browser__") && !BROWSER_ALLOWED.has(tool.slice("mcp__browser__".length))) {
+        return { behavior: "deny", message: "The tutor can't use that part of the browser." };
       }
 
       if (WRITE_TOOLS.has(tool)) {

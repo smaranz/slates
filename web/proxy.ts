@@ -21,7 +21,7 @@ import { DEVICE_COOKIE, DEVICE_COOKIE_OPTIONS, enroll, isOwner, touch, verifyKey
  */
 
 /** GET endpoints that open as documents — a new tab, or the system browser. */
-const DOCUMENTS = new Set(["/api/tutor/files", "/api/materials/file", "/api/media/file"]);
+const DOCUMENTS = new Set(["/api/tutor/files", "/api/materials/file", "/api/media/file", "/api/agent/outbox"]);
 
 const EXTRA_HOSTS = new Set(
   (process.env.SLATES_ALLOWED_HOSTS ?? "")

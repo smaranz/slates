@@ -36,14 +36,18 @@ import { tutorModelSupportsAttachments, type TutorModelId } from "@/lib/tutor-mo
 import { parseTutorQuiz, stripTutorQuiz, type QuizFRQuestion } from "@/lib/tutor-quiz";
 import { buildTutorStarters } from "@/lib/tutor-starters";
 import { useDictation } from "@/lib/dictation";
+import type { Learned } from "@/lib/learning/types";
 import { createEventParser, tidyReasoning } from "@/lib/tutor-stream";
 import { useTutorModel, useTutorThinking } from "@/lib/use-tutor-model";
+import Computer from "./agent/Computer";
 import AITextLoading from "./AITextLoading";
 import ArtifactChip from "./ArtifactChip";
 import ArtifactPanel from "./ArtifactPanel";
 import DocumentCard from "./DocumentCard";
 import GeneratedImageCard from "./GeneratedImageCard";
 import GraphCard from "./GraphCard";
+import { LEARNED_ICON, LearnedNote } from "./HostFile";
+import MemoryPanel from "./MemoryPanel";
 import ModelPicker from "./ModelPicker";
 import LessonCard from "./LessonCard";
 import OutputFiles from "./OutputFiles";
@@ -58,6 +62,9 @@ const ACCEPTED_FILE_TYPES =
 
 /** Shared so "no chat open" doesn't hand every render a brand-new array. */
 const NO_MESSAGES: TutorChatMessage[] = [];
+
+/** The agents' browser on the PC, which the tutor now shares. */
+const MONITOR = "M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z";
 
 export default function TutorView() {
   const s = useStore();
@@ -227,6 +234,18 @@ export default function TutorView() {
    */
   const [openArtifact, setOpenArtifact] = useState<{ kind: "quiz" | "document"; messageId: string } | null>(null);
   const [artifactFullscreen, setArtifactFullscreen] = useState(false);
+  /**
+   * The side panel that isn't an artifact: the shared browser to watch or
+   * take over, or what the tutor remembers. One column at a time beside the
+   * thread, so opening either closes an open artifact and the other way round.
+   */
+  const [sidePanel, setSidePanel] = useState<"computer" | "memory" | null>(null);
+  /** Bumped whenever a reply saves something, so an open Memory panel reloads. */
+  const [memoryVersion, setMemoryVersion] = useState(0);
+  const showArtifact = useCallback((next: { kind: "quiz" | "document"; messageId: string } | null) => {
+    setOpenArtifact(next);
+    if (next) setSidePanel(null);
+  }, []);
   // A different conversation has nothing to do with whatever was pinned open —
   // reset during render rather than in an effect, so the old artifact never
   // paints for a frame against the newly-opened chat.
@@ -570,6 +589,7 @@ export default function TutorView() {
             studentName: s.studentName || undefined,
             model,
             thinking: effort,
+            chatId,
           }),
           signal: controller.signal,
         });
@@ -585,6 +605,9 @@ export default function TutorView() {
         let reasoning = "";
         let steps: TutorStep[] = [];
         let streamError: string | null = null;
+        /** What it saved while answering; the review after may add more. */
+        let learned: Learned[] = [];
+        let reviewId: string | null = null;
         const startedAt = new Map<string, number>();
         const turnBegan = Date.now();
 
@@ -602,9 +625,16 @@ export default function TutorView() {
               case "reasoning":
                 reasoning += event.v;
                 break;
+              case "learned":
+                learned = [...learned, ...event.items];
+                setMemoryVersion((v) => v + 1);
+                break;
+              case "review":
+                reviewId = event.id;
+                break;
               case "tool":
                 startedAt.set(event.label, Date.now());
-                steps = [...steps, { label: event.label, state: "run" }];
+                steps = [...steps, { label: event.label, state: "run", detail: event.detail }];
                 break;
               case "tool_done": {
                 const began = startedAt.get(event.label);
@@ -639,6 +669,7 @@ export default function TutorView() {
                     ...m,
                     ...(shown === null ? {} : { text: shown }),
                     work: { reasoning: tidyReasoning(reasoning), steps },
+                    ...(learned.length ? { learned } : {}),
                   }
                 : m
             )
@@ -666,6 +697,7 @@ export default function TutorView() {
                   quiz: quiz ?? undefined,
                   document: doc ?? undefined,
                   graph: graph ?? undefined,
+                  learned: learned.length ? learned : undefined,
                   work:
                     reasoning || steps.length
                       ? {
@@ -685,8 +717,8 @@ export default function TutorView() {
         // wins if a reply somehow produced both; only one panel shows at once.
         // Only auto-open when this chat is still the one being watched.
         if (chats.activeId === chatId) {
-          if (doc) setOpenArtifact({ kind: "document", messageId: replyId });
-          else if (quiz) setOpenArtifact({ kind: "quiz", messageId: replyId });
+          if (doc) showArtifact({ kind: "document", messageId: replyId });
+          else if (quiz) showArtifact({ kind: "quiz", messageId: replyId });
         }
 
         // Started after the reply lands rather than awaited inside it: a video
@@ -711,6 +743,25 @@ export default function TutorView() {
 
         const drawing = actions.find((a) => a.kind === "generate_image");
         if (drawing) void beginImage(chatId, replyId, drawing.prompt);
+
+        /*
+         * The review that reads this turn afterwards. The reply is already
+         * on screen; this just waits for it and adds whatever it saved under
+         * the reply, so something being remembered is never silent.
+         */
+        if (reviewId) {
+          void fetch(`/api/tutor/review?id=${encodeURIComponent(reviewId)}`, { cache: "no-store" })
+            .then((r) => (r.ok ? r.json() : { items: null }))
+            .then((body: { items?: Learned[] | null }) => {
+              if (!body.items?.length) return;
+              const more = body.items;
+              setMemoryVersion((v) => v + 1);
+              chats.updateMessages(chatId, (prev) =>
+                prev.map((m) => (m.id === replyId ? { ...m, learned: [...(m.learned ?? []), ...more] } : m))
+              );
+            })
+            .catch(() => {});
+        }
         clearLive();
       } catch (e) {
         // Stopping is something the student did on purpose, not a failure.
@@ -739,6 +790,7 @@ export default function TutorView() {
       lessonBusy,
       model,
       pending,
+      showArtifact,
     ]
   );
 
@@ -873,7 +925,11 @@ export default function TutorView() {
           chats.openChat(id);
           setError(null);
         }}
-        onDelete={chats.deleteChat}
+        onDelete={(id) => {
+          chats.deleteChat(id);
+          // The host's copy too, so a deleted chat can't turn up in a helper's recall.
+          void fetch(`/api/tutor/history?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+        }}
         onRename={chats.renameChat}
       />
 
@@ -901,6 +957,35 @@ export default function TutorView() {
           />
 
           <span className="gpt-header-gap" />
+
+          {/* What makes it an agent: the browser it shares with the agents,
+              and what it remembers about you. */}
+          <button
+            type="button"
+            className="gpt-icon-btn"
+            onClick={() => {
+              setSidePanel((cur) => (cur === "computer" ? null : "computer"));
+              setOpenArtifact(null);
+            }}
+            aria-label="Computer"
+            aria-pressed={sidePanel === "computer"}
+            title="The browser on your PC: watch the tutor, or take over to sign in"
+          >
+            <Icon path={MONITOR} size={18} />
+          </button>
+          <button
+            type="button"
+            className="gpt-icon-btn"
+            onClick={() => {
+              setSidePanel((cur) => (cur === "memory" ? null : "memory"));
+              setOpenArtifact(null);
+            }}
+            aria-label="Memory"
+            aria-pressed={sidePanel === "memory"}
+            title="What the tutor remembers about you"
+          >
+            <Icon path={LEARNED_ICON} size={18} />
+          </button>
 
           <button
             type="button"
@@ -1043,6 +1128,8 @@ export default function TutorView() {
                     </div>
                   )}
 
+                  {m.learned && m.learned.length > 0 && <LearnedNote items={m.learned} />}
+
                   {m.quiz && (
                     <ArtifactChip
                       icon={ICON.assignments}
@@ -1050,8 +1137,8 @@ export default function TutorView() {
                       subtitle={`${m.quiz.questions.length} question${m.quiz.questions.length === 1 ? "" : "s"}`}
                       active={openArtifact?.kind === "quiz" && openArtifact.messageId === m.id}
                       onClick={() =>
-                        setOpenArtifact((cur) =>
-                          cur?.kind === "quiz" && cur.messageId === m.id ? null : { kind: "quiz", messageId: m.id }
+                        showArtifact(
+                          openArtifact?.kind === "quiz" && openArtifact.messageId === m.id ? null : { kind: "quiz", messageId: m.id }
                         )
                       }
                     />
@@ -1077,8 +1164,8 @@ export default function TutorView() {
                       subtitle={`${m.document.body.trim().split(/\s+/).filter(Boolean).length} words`}
                       active={openArtifact?.kind === "document" && openArtifact.messageId === m.id}
                       onClick={() =>
-                        setOpenArtifact((cur) =>
-                          cur?.kind === "document" && cur.messageId === m.id
+                        showArtifact(
+                          openArtifact?.kind === "document" && openArtifact.messageId === m.id
                             ? null
                             : { kind: "document", messageId: m.id }
                         )
@@ -1340,6 +1427,9 @@ export default function TutorView() {
           <DocumentCard document={openDoc} />
         </ArtifactPanel>
       )}
+
+      {!openQuiz && !openDoc && sidePanel === "computer" && <Computer onClose={() => setSidePanel(null)} />}
+      {!openQuiz && !openDoc && sidePanel === "memory" && <MemoryPanel onClose={() => setSidePanel(null)} version={memoryVersion} />}
     </div>
   );
 }
@@ -1696,8 +1786,9 @@ function TutorWorkPanel({ work, live }: { work: TutorWork; live: boolean }) {
           {work.steps.map((step, i) => (
             <div key={`${step.label}-${i}`} className={`tutor-step is-${step.state}`}>
               <span className="tutor-step-dot" />
-              <span className="truncate" style={{ flex: 1 }}>
+              <span className="truncate" style={{ flex: 1 }} title={step.detail}>
                 {step.label}
+                {step.detail && <span style={{ color: "var(--dim)" }}> · {step.detail}</span>}
               </span>
               {/* A provider-executed tool "returns" the instant it is called,
                   so anything this fast is an artefact of how it was reported

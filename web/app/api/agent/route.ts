@@ -4,6 +4,7 @@ import { publish } from "@/lib/agent/hub";
 import { nextRunAfter, normalizeSchedule } from "@/lib/agent/schedule";
 import { agents, clearChat, ensureDirs, getAgent, groups, newId, routines, skills, updateAgent, WORKSPACE } from "@/lib/agent/store";
 import { DEFAULT_MODEL, type AgentProfile, type Roster } from "@/lib/agent/types";
+import { studentBook, viewBook } from "@/lib/learning/memory";
 
 /** The Agent app's roster and settings: agents, groups, routines, skills. */
 
@@ -22,6 +23,7 @@ export async function GET() {
     models: await listModels(),
     browser: { running: await browserRunning() },
     workspace: WORKSPACE,
+    student: viewBook(studentBook()),
   };
   return Response.json(roster);
 }
@@ -126,11 +128,12 @@ export async function POST(request: Request) {
       case "save-skill": {
         const name = text(body.name, 60);
         const instructions = text(body.instructions, 20_000);
+        const description = text(body.description, 200) || undefined;
         if (!name || !instructions) return fail("A skill needs a name and instructions.");
         const all = skills.all();
         const existing = all.find((s) => s.id === id) ?? all.find((s) => s.name.toLowerCase() === name.toLowerCase());
-        if (existing) Object.assign(existing, { name, instructions, updatedAt: Date.now() });
-        else all.push({ id: newId("skl"), name, instructions, updatedAt: Date.now() });
+        if (existing) Object.assign(existing, { name, instructions, description, updatedAt: Date.now(), by: "You" });
+        else all.push({ id: newId("skl"), name, description, instructions, updatedAt: Date.now(), by: "You", uses: 0 });
         skills.save(all);
         publish({ kind: "roster" });
         return Response.json({ ok: true });
