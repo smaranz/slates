@@ -1,0 +1,200 @@
+/* Signing in to Schoology: the sync browser's page, over the whole window. */
+.overlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: color-mix(in oklab, var(--bg) 88%, black);
+  color: var(--text);
+}
+
+.bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.title i {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.icon {
+  width: 32px;
+  height: 32px;
+}
+
+.icon:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.stage {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  outline: none;
+  touch-action: none;
+}
+
+/* At the page's own size when there's room, scaled down to fit when there isn't. */
+.frame {
+  position: absolute;
+  inset: 0;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--sunken);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.stage:focus .frame {
+  border-color: var(--ring);
+}
+
+.placeholder,
+.ended {
+  display: grid;
+  height: 100%;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.ended {
+  min-height: 0;
+  flex: 1;
+  height: auto;
+}
+
+.ended p {
+  max-width: 420px;
+  margin: 0;
+}
+
+.placeholder {
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.done {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: oklch(0.3 0.06 145);
+  box-shadow: var(--shadow-pop);
+  color: var(--good);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateX(-50%);
+}
+
+.foot {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.type {
+  display: none;
+}
+
+.hint,
+.problem {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.problem {
+  color: var(--warn);
+}
+
+.touch {
+  display: none;
+}
+
+/* A touch screen brings up no keyboard for a picture of a page, so a phone types here. */
+@media (hover: none) {
+  .overlay {
+    gap: 8px;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .type {
+    display: flex;
+    gap: 6px;
+  }
+
+  .type input {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .mouse {
+    display: none;
+  }
+
+  .touch {
+    display: inline;
+  }
+}

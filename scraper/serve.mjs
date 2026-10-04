@@ -7,9 +7,10 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { scrape, closeShared, getSharedContext, forgetMessageBody, importSession } from "./scrape.mjs";
-import { readConfig, writeConfig, HOME } from "./browser.mjs";
+import { scrape, closeShared, getSharedContext, forgetMessageBody } from "./scrape.mjs";
+import { readConfig, HOME } from "./browser.mjs";
 import * as attempt from "./attempt.mjs";
+import * as signin from "./signin.mjs";
 import { submitAssignment } from "./submit.mjs";
 import { composeMessage, replyToThread, searchRecipients } from "./message.mjs";
 import { readMaterials, resolveDocument, fetchAttachment, inlineTypeFor, readPage, fetchGoogleFile } from "./materials.mjs";
@@ -104,7 +105,9 @@ async function refresh(reason) {
     console.log(`[${new Date().toLocaleTimeString()}] ${reason} skipped — attempt in progress`);
     return;
   }
-  if (Date.now() < pausedUntil) {
+  // A sign-in from Settings has the browser too, and a scrape's SSO hops in
+  // another tab would race the student's.
+  if (Date.now() < pausedUntil || signin.isActive()) {
     console.log(`[${new Date().toLocaleTimeString()}] ${reason} skipped — signing in`);
     return;
   }
@@ -154,6 +157,13 @@ function readableError(e) {
   }
 
   return head.length > 300 ? `${head.slice(0, 300)}…` : head;
+}
+
+/** A sign-in from Settings went through: the board is worth reading now, not at the next poll. */
+function signedIn() {
+  lastSync = { at: null, ok: null, error: null };
+  console.log(`[${new Date().toLocaleTimeString()}] signed in to Schoology from Slates`);
+  void refresh("after sign-in");
 }
 
 setInterval(() => void refresh("auto"), POLL_MS);
@@ -239,6 +249,7 @@ const server = http.createServer(async (req, res) => {
    */
   if (url.pathname === "/browser/release") {
     pausedUntil = Date.now() + PAUSE_MS;
+    await signin.stop("released");
     await closeShared().catch(() => {});
     console.log(`[${new Date().toLocaleTimeString()}] released the browser profile for sign-in`);
     return send(res, 200, { released: true, until: pausedUntil });
@@ -253,27 +264,76 @@ const server = http.createServer(async (req, res) => {
   }
 
   /*
-   * Sign in from cookies the portal read out of the agents' browser, after
-   * the student signed in there from their own device. Waits out a scrape in
-   * progress (they share the browser), then syncs at once on success.
+   * Signing in from Settings (signin.mjs): Schoology opens in this browser,
+   * streamed to the student's device, so an expired session is fixed from
+   * wherever they are instead of a terminal here.
    */
-  if (url.pathname === "/session/import") {
+  if (url.pathname === "/signin/status") return send(res, 200, await signin.status());
+
+  if (url.pathname === "/signin/start") {
     if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+    if (attempt.isActive()) {
+      return send(res, 409, { error: "Close the assessment that's open first. It's using the same browser." });
+    }
     try {
-      const { cookies } = JSON.parse(await readBody(req, 2 * 1024 * 1024));
-      if (!Array.isArray(cookies) || !cookies.length) return send(res, 400, { error: "No cookies to sign in with." });
-      await inFlight?.catch(() => {});
-      const result = await importSession(cookies);
-      if (result.signedIn) {
-        writeConfig({ loggedInAt: new Date().toISOString() });
-        pausedUntil = 0;
-        console.log(`[${new Date().toLocaleTimeString()}] signed in from the agents' browser`);
-        void refresh("after reconnect");
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const typed = body.domain ? signin.schoologyDomain(body.domain) : null;
+      if (body.domain && !typed) {
+        return send(res, 400, { error: "That isn't a Schoology address. It looks like yourschool.schoology.com." });
       }
-      return send(res, 200, result);
+      const domain = typed ?? signin.schoologyDomain(readConfig().domain);
+      if (!domain) {
+        return send(res, 400, { error: "Enter your school's Schoology address in Settings › School first, like yourschool.schoology.com." });
+      }
+      const ctx = await getSharedContext(true);
+      return send(res, 200, await signin.start(ctx, { domain, width: body.width, height: body.height, onSignedIn: signedIn }));
     } catch (e) {
+      console.error("sign-in didn't open:", e.message);
       return send(res, 500, { error: readableError(e) });
     }
+  }
+
+  if (url.pathname === "/signin/input") {
+    if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+    // Never logged: this is what the student types into their sign-in.
+    try {
+      const body = JSON.parse(await readBody(req));
+      await signin.input(body.id, body.events);
+      return send(res, 200, { ok: true });
+    } catch (e) {
+      return send(res, e.status ?? 400, { error: e.status ? e.message : "That didn't reach the page." });
+    }
+  }
+
+  if (url.pathname === "/signin/stream") {
+    if (!signin.isActive()) return send(res, 409, { error: "Sign-in isn't open." });
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "access-control-allow-origin": `http://localhost:${PORTAL_ORIGIN_PORT}`,
+    });
+    // A page that isn't repainting sends nothing, and a silent stream gets cut somewhere on the way.
+    const beat = setInterval(() => res.write(": still here\n\n"), 20_000);
+    const close = () => {
+      clearInterval(beat);
+      unsubscribe();
+      res.end();
+    };
+    const unsubscribe = signin.subscribe({ frame: (frame) => res.write(`data: ${frame}\n\n`), end: close });
+    req.on("close", close);
+    return;
+  }
+
+  if (url.pathname === "/signin/stop") {
+    let id;
+    try {
+      id = JSON.parse((await readBody(req)) || "{}").id ?? null;
+    } catch {
+      return send(res, 400, { error: "Bad request" });
+    }
+    await signin.stop("closed", id);
+    return send(res, 200, { ok: true });
   }
 
   if (url.pathname === "/health") {
@@ -288,7 +348,7 @@ const server = http.createServer(async (req, res) => {
       domain: domain ?? null,
       loggedInAt: loggedInAt ?? null,
       lastSyncAt: lastSync.at,
-      // Surfaced verbatim: "Signed out of Schoology. Reconnect it…" is the
+      // Surfaced verbatim: "Signed out of Schoology. Sign in again…" is the
       // whole fix, and burying it behind a generic failure helps nobody.
       error: lastSync.error,
       /** Whether anything is being served at all, stale or not. */
@@ -592,6 +652,13 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname !== "/snapshot") return send(res, 404, { error: "Not found" });
 
+  // A sign-in has the browser: answer from what's saved and leave Schoology alone until it's done.
+  if (signin.isActive()) {
+    return cache
+      ? send(res, 200, { ...cache.payload, cached: true, ageMs: Date.now() - cache.at })
+      : send(res, 409, { error: "Signing in to Schoology. The sync starts once that's done." });
+  }
+
   const fresh = url.searchParams.get("fresh") === "1";
 
   // Always answer from cache when we have one. A background refresh keeps it
@@ -622,6 +689,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, async () => {
     console.log("\n  shutting down…");
     await attempt.stop();
+    await signin.stop();
     await closeShared();
     process.exit(0);
   });
@@ -630,6 +698,6 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
 server.listen(PORT, "127.0.0.1", () => {
   const { domain } = readConfig();
   console.log(`\n  Slates scraper listening on http://127.0.0.1:${PORT}`);
-  console.log(`  Schoology domain: ${domain ?? "(not set — run: npm run login -- <district>.schoology.com)"}`);
-  console.log(`  Endpoints: /health  /snapshot  /snapshot?fresh=1  /browser/release\n`);
+  console.log(`  Schoology domain: ${domain ?? "(not set — sign in from Slates' Settings › School)"}`);
+  console.log(`  Endpoints: /health  /snapshot  /snapshot?fresh=1  /signin/start  /browser/release\n`);
 });

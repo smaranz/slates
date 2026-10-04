@@ -7,7 +7,7 @@ import { inScope } from "@/lib/counselor/essays";
 import { useCounselor } from "@/lib/counselor/store";
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
-import ReconnectSchoology from "./ReconnectSchoology";
+import SchoologySignIn from "./SchoologySignIn";
 import { Avatar, Icon, ICON } from "./ui";
 
 /** What the scraper says about its own last sync (`/api/scrape` → `/health`). */
@@ -22,10 +22,12 @@ interface SyncHealth {
  *
  * Having a board isn't being connected: a saved snapshot keeps the board up
  * through an expired Schoology session, so the footer asks the scraper how its
- * last sync actually went instead.
+ * last sync actually went instead. The second value asks again now, as after
+ * a sign-in, rather than at the next minute.
  */
-function useSyncHealth(): SyncHealth | null {
+function useSyncHealth(): [SyncHealth | null, () => void] {
   const [health, setHealth] = useState<SyncHealth | null>(null);
+  const [asked, setAsked] = useState(0);
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
@@ -46,16 +48,18 @@ function useSyncHealth(): SyncHealth | null {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", check);
     };
-  }, []);
-  return health;
+  }, [asked]);
+  return [health, () => setAsked((n) => n + 1)];
 }
 
 function connectionLabel(connected: boolean, demoMode: boolean, health: SyncHealth | null): { text: string; warn: boolean; signedOut?: boolean } {
   if (demoMode) return { text: "Sample data", warn: false };
   if (health && !health.running) return { text: "Sync service offline", warn: true };
   if (health?.ok === false) {
-    const signedOut = /signed out/i.test(health.error ?? "");
-    return { text: signedOut ? "Signed out of Schoology" : "Schoology sync failing", warn: true, signedOut };
+    const never = /not signed in/i.test(health.error ?? "");
+    const signedOut = never || /signed out/i.test(health.error ?? "");
+    const text = never ? "Not signed in to Schoology" : signedOut ? "Signed out of Schoology" : "Schoology sync failing";
+    return { text, warn: true, signedOut };
   }
   if (health?.ok) return { text: "Schoology connected", warn: false };
   return { text: connected ? "Checking Schoology…" : "Not connected", warn: false };
@@ -76,7 +80,8 @@ export default function Sidebar() {
   // empty — the two halves keep separate essays.
   const essayCount = useCounselor().essays.filter(inScope("school")).length;
   const { clear, openSettings } = useMode();
-  const status = connectionLabel(s.connected, s.demoMode, useSyncHealth());
+  const [health, recheckHealth] = useSyncHealth();
+  const status = connectionLabel(s.connected, s.demoMode, health);
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
@@ -255,7 +260,11 @@ export default function Sidebar() {
         </button>
         {/* Its own button, not inside the one above: that one opens Settings. */}
         {status.signedOut && (
-          <ReconnectSchoology label="Reconnect Schoology" className="btn btn--primary" style={{ width: "100%", height: 30, marginTop: 6 }} />
+          <SchoologySignIn
+            className="btn btn--primary"
+            style={{ width: "100%", height: 30, marginTop: 6 }}
+            onSignedIn={recheckHealth}
+          />
         )}
       </div>
     </aside>

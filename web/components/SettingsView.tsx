@@ -23,7 +23,7 @@ import {
   ZaiLogo,
 } from "./ui";
 import NotificationSettingsCard from "./NotificationSettingsCard";
-import ReconnectSchoology from "./ReconnectSchoology";
+import SchoologySignIn, { schoologyDomain } from "./SchoologySignIn";
 
 interface ProviderInfo {
   /** Tutor backends plus ElevenLabs, which powers narration rather than chat. */
@@ -82,8 +82,9 @@ export default function SettingsView({ section = "all" }: { section?: "all" | "s
     lastSyncAt?: number | null;
   } | null>(null);
 
-  const checkScraper = useCallback(async () => {
-    setScraper(null);
+  /** `quiet` keeps the last answer on screen while asking, rather than blanking the card. */
+  const checkScraper = useCallback(async (quiet = false) => {
+    if (!quiet) setScraper(null);
     try {
       const res = await fetch("/api/scrape", { cache: "no-store" });
       setScraper(await res.json());
@@ -95,6 +96,12 @@ export default function SettingsView({ section = "all" }: { section?: "all" | "s
   useEffect(() => {
     void checkScraper();
   }, [checkScraper]);
+
+  /** Running, with no Schoology session to sync with: signed out, or never signed in. */
+  const needsSignIn = !!scraper?.running && (!scraper.domain || /signed out|not signed in/i.test(scraper.error ?? ""));
+  /** The school's Schoology address, asked for only before the first sign-in. */
+  const [address, setAddress] = useState("");
+  const typedDomain = schoologyDomain(address);
 
   /*
    * "Connected" has two layers, and conflating them was the whole reason
@@ -277,19 +284,14 @@ export default function SettingsView({ section = "all" }: { section?: "all" | "s
             >
               Check
             </button>
-            {/* Signing in needs a person, and the PC's sync browser has no window: sign in from here instead. */}
-            {scraper?.ok === false && /signed out/i.test(scraper.error ?? "") ? (
-              <ReconnectSchoology className="btn btn--primary" style={{ height: 28 }} />
-            ) : (
-              <button
-                type="button"
-                className={`btn btn--primary ${s.connecting ? "btn--busy" : ""}`}
-                style={{ height: 28 }}
-                onClick={() => void s.syncScraper(true)}
-              >
-                {s.connecting ? "Syncing..." : "Sync now"}
-              </button>
-            )}
+            <button
+              type="button"
+              className={`btn ${needsSignIn ? "btn--quiet" : "btn--primary"} ${s.connecting ? "btn--busy" : ""}`}
+              style={{ height: 28 }}
+              onClick={() => void s.syncScraper(true)}
+            >
+              {s.connecting ? "Syncing..." : "Sync now"}
+            </button>
           </div>
 
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -298,19 +300,65 @@ export default function SettingsView({ section = "all" }: { section?: "all" | "s
           </p>
 
           {scraper?.running ? (
-            scraper.ok === false ? (
-              <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
-                {/* Capped as well as summarized at the source: a stack trace
-                    or a browser command line should never be able to push the
-                    rest of this screen off the page. */}
-                Running, but the last sync failed —{" "}
-                <span style={{ display: "inline-block", maxHeight: "4.5em", overflow: "hidden", verticalAlign: "bottom" }}>
-                  {(scraper.error ?? "unknown error").slice(0, 300)}
-                </span>
-                <br />
-                Your board is showing the last good copy, so nothing new will appear
-                until this is fixed.
-              </p>
+            needsSignIn ? (
+              /* Signing in needs a person, and the sync browser has no window, so it's streamed here. */
+              <form
+                onSubmit={(e) => e.preventDefault()}
+                style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}
+              >
+                <p style={{ margin: 0, fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
+                  {scraper.domain
+                    ? "Schoology signed the sync browser out, so nothing new is syncing. Sign in again and it picks up where it left off."
+                    : "Slates isn't signed in to Schoology yet. Enter your school's Schoology address, then sign in."}
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                  {!scraper.domain && (
+                    <input
+                      className="input"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="yourschool.schoology.com"
+                      aria-label="Your school's Schoology address"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      style={{ width: "auto", flexGrow: 1, flexBasis: 220 }}
+                    />
+                  )}
+                  <SchoologySignIn
+                    submit
+                    domain={scraper.domain ? undefined : (typedDomain ?? undefined)}
+                    disabled={!scraper.domain && !typedDomain}
+                    style={{ height: 32 }}
+                    onSignedIn={() => void checkScraper(true)}
+                  />
+                </div>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                  It opens Schoology right here, in the browser that does the syncing. Sign in the way you
+                  usually do, Google and two-step included.
+                </p>
+              </form>
+            ) : scraper.ok === false ? (
+              <>
+                <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
+                  {/* Capped as well as summarized at the source: a stack trace
+                      or a browser command line should never be able to push the
+                      rest of this screen off the page. */}
+                  Running, but the last sync failed —{" "}
+                  <span style={{ display: "inline-block", maxHeight: "4.5em", overflow: "hidden", verticalAlign: "bottom" }}>
+                    {(scraper.error ?? "unknown error").slice(0, 300)}
+                  </span>
+                  <br />
+                  Your board is showing the last good copy, so nothing new will appear
+                  until this is fixed.
+                </p>
+                <SchoologySignIn
+                  label="Sign in again"
+                  className="btn btn--quiet"
+                  style={{ height: 26, padding: "0 10px", fontSize: 11.5, marginTop: 8 }}
+                  onSignedIn={() => void checkScraper(true)}
+                />
+              </>
             ) : (
               <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--good)", lineHeight: 1.5 }}>
                 Running · {scraper.domain ?? "no domain set"}
@@ -338,7 +386,8 @@ npm run serve      # leave this running`}
             </pre>
           )}
 
-          {s.syncError && (
+          {/* The sign-in above already says it when that's the trouble. */}
+          {s.syncError && !(needsSignIn && /signed out|not signed in|signing in/i.test(s.syncError)) && (
             <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--warn)", lineHeight: 1.5 }}>
               {s.syncError}
             </p>

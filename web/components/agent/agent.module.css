@@ -1115,13 +1115,3 @@ textarea.field {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-
-/* The Computer inside a dialog (signing Schoology back in): no side-panel framing, at any width. */
-.panel.embedded {
-  position: static;
-  width: 100%;
-  min-height: min(520px, 60dvh);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: none;
-}
