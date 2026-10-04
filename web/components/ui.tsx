@@ -183,6 +183,11 @@ function BrandMark({ d, size, style }: { d: string; size: number; style?: CSSPro
   );
 }
 
+/** A terminal prompt: Devin runs here as its terminal agent, and this isn't pretending to be its logo. */
+export function DevinLogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {
+  return <BrandMark size={size} style={style} d="M4.3 6.3 9.99 12l-5.7 5.7-1.4-1.4 4.29-4.3L2.9 7.7zM11 17h10v2H11z" />;
+}
+
 export function OpenAILogo({ size = 14, style }: { size?: number; style?: CSSProperties }) {
   return (
     <BrandMark

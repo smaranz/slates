@@ -23,6 +23,7 @@ import {
   AnthropicLogo,
   CursorLogo,
   DeepSeekLogo,
+  DevinLogo,
   GeminiLogo,
   Icon,
   ICON,
@@ -70,6 +71,8 @@ function CreatorLogo({
       return <GeminiLogo size={size} style={style} />;
     case "minimax":
       return <MiniMaxLogo size={size} style={style} />;
+    case "devin":
+      return <DevinLogo size={size} style={style} />;
     case "openai":
     default:
       return <OpenAILogo size={size} style={style} />;

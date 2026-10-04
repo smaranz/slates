@@ -6,9 +6,9 @@ import { DEFAULT_MODEL, type ModelChoice } from "./types";
 
 /** The Cursor catalog the agents pick from, cached for ten minutes. */
 
-const PREFERRED = ["grok-4.7", "claude-opus-5-5", "claude-sonnet-5", "gpt-5.6-sol", "gemini-3.1-pro", "composer-2.5", "kimi-k3", "claude-haiku-4-5", "gpt-5.6-luna", "gemini-3.8-flash"];
+const PREFERRED = ["grok-4.7", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-5.6-sol", "gemini-3.1-pro", "composer-2.5", "kimi-k3", "claude-haiku-4-5", "gpt-5.6-luna", "gemini-3.8-flash"];
 /** Models Slates has moved past: hidden from the picker, and agents still set to one run on its successor. */
-export const REPLACED: Record<string, string> = { "claude-opus-5": "claude-opus-5-5" };
+export const REPLACED: Record<string, string> = { "claude-opus-5": "claude-opus-5-5", "claude-sonnet-5": "claude-sonnet-5-5" };
 
 const state = globalThis as typeof globalThis & { __slatesAgentModels?: { at: number; list: ModelChoice[] } };
 

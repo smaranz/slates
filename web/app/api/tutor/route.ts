@@ -3,6 +3,7 @@ import { claudeCode } from "ai-sdk-provider-claude-code";
 import { stepCountIs, streamText, type ModelMessage, type ToolSet } from "ai";
 
 import { browserMcp, ensureBrowser } from "@/lib/agent/browser";
+import { runDevin } from "@/lib/devin-acp";
 import { browserTools, type BrowserSession } from "@/lib/agent/browser-tools";
 import { openaiProvider, openrouterModel } from "@/lib/ai-usage/clients";
 import { noteStreamUsage, noteUsage } from "@/lib/ai-usage/note";
@@ -12,6 +13,7 @@ import { planReview, startReview, type ReviewTurn } from "@/lib/learning/review"
 import {
   DEFAULT_THINKING,
   DEFAULT_TUTOR_MODEL,
+  devinModelUid,
   isThinkingLevel,
   migrateTutorModelId,
   tutorModelBackend,
@@ -396,6 +398,17 @@ export async function POST(req: Request) {
     if (backend === "cursor-agent") {
       const { text, images } = buildCursorPrompt(system, modelMessages);
       await runCursorAgent(modelId, text, images, ctx, emit, req.signal);
+    } else if (backend === "devin") {
+      // Like Cursor, Devin takes one prompt rather than a conversation; it brings its own web tools.
+      const { text, images } = buildCursorPrompt(system, modelMessages);
+      await runDevin({
+        model: devinModelUid(modelId, thinkingLevel) ?? "adaptive",
+        prompt: text,
+        images,
+        cwd: WORKSPACE,
+        signal: req.signal,
+        on: emit,
+      });
     } else if (backend === "claude-code") {
       const browser = hasBrowser ? browserMcp(TUTOR_BROWSER_DIR) : null;
       const browserUp = browser ? await ensureBrowser().then(() => true, () => false) : false;

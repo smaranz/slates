@@ -16,7 +16,7 @@ import type { StudyCard, StudyQuestion, StudySource } from "./types";
  */
 
 export const SET_MODEL = "claude-opus-5-5";
-export const ROUND_MODEL = "claude-sonnet-5";
+export const ROUND_MODEL = "claude-sonnet-5-5";
 
 const source = z.number().int().positive().nullish();
 

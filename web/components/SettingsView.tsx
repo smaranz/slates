@@ -12,6 +12,7 @@ import {
   Avatar,
   CursorLogo,
   DeepSeekLogo,
+  DevinLogo,
   ElevenLabsLogo,
   Dot,
   GeminiLogo,
@@ -40,6 +41,7 @@ const PROVIDER_ICON: Record<ProviderInfo["backend"], ReactNode> = {
   elevenlabs: <ElevenLabsLogo size={15} />,
   "claude-code": <AnthropicLogo size={16} />,
   "cursor-agent": <CursorLogo size={16} />,
+  devin: <DevinLogo size={16} />,
   openrouter: (
     <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
       <DeepSeekLogo size={13} />

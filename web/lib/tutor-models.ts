@@ -1,3 +1,5 @@
+import { DEVIN_FAMILIES, devinVariant } from "./devin-models";
+
 /** Who actually built a model — drives the logo and the picker's grouping. */
 export type TutorModelCreator =
   | "openai"
@@ -8,10 +10,11 @@ export type TutorModelCreator =
   | "zai"
   | "qwen"
   | "google"
-  | "minimax";
+  | "minimax"
+  | "devin";
 
 /** How we actually reach a model — drives which SDK/credentials the route uses. */
-export type TutorModelBackend = "openai" | "claude-code" | "cursor-agent" | "openrouter";
+export type TutorModelBackend = "openai" | "claude-code" | "cursor-agent" | "openrouter" | "devin";
 
 export const CREATOR_LABEL: Record<TutorModelCreator, string> = {
   openai: "OpenAI",
@@ -23,6 +26,7 @@ export const CREATOR_LABEL: Record<TutorModelCreator, string> = {
   qwen: "Qwen",
   google: "Google",
   minimax: "MiniMax",
+  devin: "Devin",
 };
 
 interface TutorModelDef {
@@ -43,13 +47,16 @@ interface TutorModelDef {
   grok?: { thinking: ThinkingLevel; fast: boolean };
   /** Only set on the 2 Composer variants — drives its speed toggle. */
   composer?: { fast: boolean };
+  /** Only set on Devin's models: the family `devin --model` runs. */
+  devin?: string;
 }
 
 /**
  * The four thinking levels every backend has some real lever for: Grok's
  * model id encodes it directly; OpenAI (`reasoningEffort`), Claude Code
  * (`effort`), and OpenRouter (`reasoning.effort`) all take it as a provider
- * option instead, shared across every model on that backend.
+ * option instead, shared across every model on that backend. Devin bakes it
+ * into the model UID, picked per family by `devinVariant`.
  */
 export const THINKING_LEVELS = [
   { id: "low", label: "Low" },
@@ -67,7 +74,7 @@ export function isThinkingLevel(value: unknown): value is ThinkingLevel {
 
 /** Backends whose thinking level is a shared provider option, not baked into the model id. */
 export function backendSupportsThinking(backend: TutorModelBackend): boolean {
-  return backend === "openai" || backend === "claude-code" || backend === "openrouter";
+  return backend === "openai" || backend === "claude-code" || backend === "openrouter" || backend === "devin";
 }
 
 /**
@@ -117,6 +124,25 @@ const COMPOSER_MODELS: TutorModelDef[] = [false, true].map((fast) => ({
   composer: { fast },
 }));
 
+/**
+ * Every model Devin offers, one row per family, through the local Devin login
+ * (`devin auth login`, or a copy of its credentials.toml). Ids are prefixed so
+ * Devin's Claude or GPT never collides with the same model on its own backend.
+ */
+const DEVIN_MODELS: TutorModelDef[] = DEVIN_FAMILIES.map((family) => ({
+  id: `devin:${family.slug}`,
+  label: family.label,
+  creator: "devin" as const,
+  backend: "devin" as const,
+  devin: family.slug,
+}));
+
+/** The model UID Devin runs for a pick at a thinking level. */
+export function devinModelUid(id: TutorModelId, thinking: ThinkingLevel): string | undefined {
+  const family = DEVIN_FAMILIES.find((f) => f.slug === findModel(id).devin);
+  return family && devinVariant(family, thinking);
+}
+
 /** Models the student can pick between in the tutor, grouped by creator. */
 export const TUTOR_MODELS = [
   { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", creator: "openai", backend: "openai" },
@@ -124,7 +150,7 @@ export const TUTOR_MODELS = [
   { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", creator: "openai", backend: "openai" },
 
   // Served through the local Claude Code CLI login — no ANTHROPIC_API_KEY needed.
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5", creator: "anthropic", backend: "claude-code" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", creator: "anthropic", backend: "claude-code" },
   {
     id: "claude-haiku-4-5-20251001",
     label: "Claude Haiku 4.5",
@@ -172,6 +198,8 @@ export const TUTOR_MODELS = [
     backend: "openrouter",
     vision: true,
   },
+
+  ...DEVIN_MODELS,
 ] as const satisfies ReadonlyArray<TutorModelDef>;
 
 export type TutorModelId = (typeof TUTOR_MODELS)[number]["id"];
@@ -184,13 +212,14 @@ export function isTutorModel(value: unknown): value is TutorModelId {
 
 /**
  * Map a persisted catalog id onto today's catalog. Grok 4.6 picks become the
- * matching 4.7 variant, and Opus 5 becomes Opus 5.5, so a stored choice still
- * resolves after the upgrade.
+ * matching 4.7 variant, Opus 5 becomes Opus 5.5 and Sonnet 5 becomes Sonnet
+ * 5.5, so a stored choice still resolves after the upgrade.
  */
 export function migrateTutorModelId(value: unknown): TutorModelId | null {
   if (isTutorModel(value)) return value;
   if (typeof value !== "string") return null;
   if (value === "claude-opus-5") return "claude-opus-5-5";
+  if (value === "claude-sonnet-5") return "claude-sonnet-5-5";
   const grok46 = /^cursor-grok-4\.6-(low|medium|high|xhigh)(-fast)?$/.exec(value);
   if (grok46) return grokModelId(grok46[1] as ThinkingLevel, !!grok46[2]) as TutorModelId;
   return null;

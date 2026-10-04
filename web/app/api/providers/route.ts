@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { generateText } from "ai";
@@ -6,10 +8,12 @@ import { claudeCode } from "ai-sdk-provider-claude-code";
 
 import { activeApiSecret, hasSecret } from "@/lib/ai-usage/clients";
 import { Agent } from "@/lib/cursor-sdk";
+import { devinBin, runDevin } from "@/lib/devin-acp";
+import { DEVIN_FAMILIES } from "@/lib/devin-models";
 import type { TutorModelBackend } from "@/lib/tutor-models";
 
 /**
- * The tutor's four backends, checked independently of any one model: an API
+ * The tutor's five backends, checked independently of any one model: an API
  * key or a CLI login is shared across every model that backend drives, so
  * "is OpenAI connected" answers it for GPT-5.6 Sol, Terra, and Luna at once.
  *
@@ -60,6 +64,9 @@ export async function GET() {
 
   const cursorInstalled = await cliInstalled("cursor-agent");
 
+  // Found where its installer puts it, or on PATH.
+  const devinInstalled = devinBin() !== "devin" || (await cliInstalled("devin"));
+
   const providers: ProviderStatus[] = [
     {
       backend: "openai",
@@ -71,7 +78,7 @@ export async function GET() {
     {
       backend: "claude-code",
       label: "Claude Code CLI",
-      powers: "Claude Sonnet 5, Haiku 4.5, Opus 5.5",
+      powers: "Claude Sonnet 5.5, Haiku 4.5, Opus 5.5",
       configured: claudeInstalled,
       detail: "Local `claude auth login` — no API key needed.",
     },
@@ -89,6 +96,13 @@ export async function GET() {
        * `npm run dev` / `npm run start` are unaffected. See tutor-models.ts.
        */
       detail: "Local `cursor-agent login` — no API key needed.",
+    },
+    {
+      backend: "devin",
+      label: "Devin",
+      powers: `All ${DEVIN_FAMILIES.length} of Devin's models: SWE-2, Claude, GPT-6, Gemini, Grok, Kimi, GLM and more`,
+      configured: devinInstalled,
+      detail: "Local `devin auth login` — no API key needed.",
     },
     {
       backend: "openrouter",
@@ -177,6 +191,19 @@ export async function POST(req: Request) {
       } finally {
         agent.close();
       }
+      return Response.json({ ok: true });
+    }
+
+    if (backend === "devin") {
+      let text = "";
+      await runDevin({
+        model: "swe-2-medium",
+        prompt: "Reply with exactly one word: ok",
+        cwd: path.join(os.homedir(), ".slates", "tutor-workspace"),
+        signal: AbortSignal.timeout(45_000),
+        on: { text: (v) => void (text += v), reasoning() {}, tool() {}, toolDone() {} },
+      });
+      if (!text.trim()) throw new Error("Devin returned nothing — check `devin auth status`.");
       return Response.json({ ok: true });
     }
 
