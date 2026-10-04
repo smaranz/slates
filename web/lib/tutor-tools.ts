@@ -19,9 +19,9 @@ import { OUTPUT_DIR, WORKSPACE, ensureWorkspace } from "./tutor-skills";
 
 /**
  * What makes the tutor an agent rather than a chat box: the same memory,
- * recall and skills the agents have, their browser, the Schoology board, a
- * way to hand work to an agent, and a way to write a file. Defined once and
- * handed to whichever backend the student picked.
+ * recall and skills the agents have, a browser like theirs, the Schoology
+ * board, a way to hand work to an agent, and a way to write a file. Defined
+ * once and handed to whichever backend the student picked.
  *
  * Deliberately not here: a shell, or writing anywhere but the tutor's own
  * output folder. Work that needs the PC itself goes to an agent.
@@ -91,7 +91,7 @@ export function tutorAgentPrompt(options: { browser: boolean }): string {
     "",
     "You're more than a chat window: you can act, the way the student's agents in Slates do. Reach for a tool when it makes the answer better; for an ordinary question, just answer.",
     options.browser
-      ? "- A real Chrome browser on the student's always-on PC (the browser_* tools), shared with their agents; its sign-ins persist. Use it for pages web search can't reach or doesn't summarise well: a teacher's site, a textbook page, an online practice set. Take a snapshot to read a page before clicking. If a page needs a password, 2FA or a CAPTCHA, stop and ask the student to take over in the Computer panel (the screen button at the top of this chat). Never ask for a password in chat, and never submit, post, buy or send anything."
+      ? "- A real Chrome browser on the student's always-on PC (the browser_* tools), shared with Study builds; each of their agents has its own. Its sign-ins persist. Use it for pages web search can't reach or doesn't summarise well: a teacher's site, a textbook page, an online practice set. Take a snapshot to read a page before clicking. If a page needs a password, 2FA or a CAPTCHA, stop and ask the student to take over in the Computer panel (the screen button at the top of this chat). Never ask for a password in chat, and never submit, post, buy or send anything."
       : "",
     "- slates_board: their Schoology board as last synced, or synced now with fresh: true.",
     `- ${RECALL_GUIDANCE}`,

@@ -74,6 +74,13 @@ export default function AgentApp() {
   const current = agents.find((a) => a.id === open) ?? null;
   const group = groups.find((g) => g.id === open) ?? null;
 
+  // Every agent has a browser of its own. The Computer shows the open chat's
+  // (a group's first member's) until you pick another, for as long as that chat stays open.
+  const [pickedBrowser, setPickedBrowser] = useState<{ chat: string | null; id: string } | null>(null);
+  const browsers = useMemo(() => [...agents.map((a) => ({ id: a.id, name: a.name })), { id: "", name: "Tutor & Study" }], [agents]);
+  const chatBrowser = current?.id ?? group?.members.find((id) => agents.some((a) => a.id === id)) ?? "";
+  const browser = pickedBrowser?.chat === open && browsers.some((b) => b.id === pickedBrowser.id) ? pickedBrowser.id : chatBrowser;
+
   useEffect(() => {
     if (!roster || current || group) return;
     // A remembered chat that's gone falls back to the first agent; on a phone the list itself is the start.
@@ -213,7 +220,9 @@ export default function AgentApp() {
             )}
           </div>
 
-          {panel === "computer" && <Computer onClose={() => setPanel(null)} />}
+          {panel === "computer" && (
+            <Computer onClose={() => setPanel(null)} browser={browser} browsers={browsers} onBrowser={(id) => setPickedBrowser({ chat: open, id })} />
+          )}
           {panel === "files" && <FilesPanel onClose={() => setPanel(null)} onEvent={live.onEvent} />}
           {panel === "details" && roster && current && (
             <AgentDetails key={current.id} agent={current} roster={roster} onClose={() => setPanel(null)} onDeleted={() => { setPanel(null); setOpen(null); }} />

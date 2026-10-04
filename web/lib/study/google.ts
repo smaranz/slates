@@ -5,8 +5,9 @@ import { SCRAPER_URL } from "../ports";
  * Google Docs, Slides, Sheets and Drive files a class posts in Schoology.
  *
  * Most are shared only inside the school, so they're read as the student:
- * first with the Agent app's browser session (sign in once in Agent ›
- * Computer), then through the sync service's browser, then as a public link.
+ * first with the session of the browser the tutor and Study builds share
+ * (sign in once in Agent › Computer › Tutor & Study), then through the sync
+ * service's browser, then as a public link.
  */
 
 /** Thrown when every way in ended at Google's sign-in page. */
@@ -54,13 +55,14 @@ export async function readGoogle(url: string, limits: TextLimits): Promise<strin
     if (text) return text;
     throw new Error("Slates can't read text from that kind of Google Drive file.");
   }
-  throw new NeedsGoogleSignIn("A Google file shared only inside your school. Sign in to your school Google account once in Agent › Computer, then rebuild.");
+  throw new NeedsGoogleSignIn("A Google file shared only inside your school. Sign in to your school Google account once in Agent › Computer › Tutor & Study, then rebuild.");
 }
 
 /**
- * The Agent app's Chrome keeps its sign-ins; its Google cookies let a plain
- * request read what the student can. Read over the DevTools port that only
- * listens on this machine, used only for Google's own hosts, and never logged.
+ * The tutor and Study's Chrome keeps its sign-ins; its Google cookies let a
+ * plain request read what the student can. Read over the DevTools port that
+ * only listens on this machine, used only for Google's own hosts, and never
+ * logged.
  */
 async function agentBrowserCookies(host: string): Promise<string | null> {
   // Same port as lib/agent/browser.ts, which can't be imported outside Next.

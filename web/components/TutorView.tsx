@@ -63,7 +63,7 @@ const ACCEPTED_FILE_TYPES =
 /** Shared so "no chat open" doesn't hand every render a brand-new array. */
 const NO_MESSAGES: TutorChatMessage[] = [];
 
-/** The agents' browser on the PC, which the tutor now shares. */
+/** The browser on the PC that the tutor shares with Study builds. */
 const MONITOR = "M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4z";
 
 export default function TutorView() {
@@ -958,7 +958,7 @@ export default function TutorView() {
 
           <span className="gpt-header-gap" />
 
-          {/* What makes it an agent: the browser it shares with the agents,
+          {/* What makes it an agent: a browser like the agents' own,
               and what it remembers about you. */}
           <button
             type="button"

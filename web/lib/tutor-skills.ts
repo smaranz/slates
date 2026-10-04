@@ -143,7 +143,7 @@ export function claudeSkillOptions(extra: Pick<ClaudeCodeSettings, "mcpServers">
     // document skills gets real file output without Slates shipping them.
     settingSources: ["user", "project"] as const,
     skills: "all" as const,
-    // The tutor's own tools (memory, recall, the board) and the agents' browser.
+    // The tutor's own tools (memory, recall, the board) and the shared browser.
     ...extra,
     canUseTool: async (tool, input) => {
       /*

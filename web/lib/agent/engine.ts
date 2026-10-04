@@ -9,7 +9,7 @@ import { Agent, JsonlLocalAgentStore, type SDKImage } from "@cursor/sdk";
 import { noteUsage } from "@/lib/ai-usage/note";
 import { renderBooks } from "@/lib/learning/memory";
 import { planReview, startReview, type ReviewTurn } from "@/lib/learning/review";
-import { browserMcp, ensureBrowser } from "./browser";
+import { agentBrowserMcp } from "./browser";
 import { publish } from "./hub";
 import { listModels, REPLACED } from "./models";
 import { hasCutOffTurn } from "./runs";
@@ -317,14 +317,8 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const wanted = REPLACED[profile.model] ?? profile.model;
   const modelId = models.some((m) => m.id === wanted) ? wanted : DEFAULT_MODEL;
 
-  let mcp = browserMcp(path.join(WORKSPACE, "browser"));
-  if (mcp) {
-    try {
-      await ensureBrowser();
-    } catch {
-      mcp = null;
-    }
-  }
+  // A Chrome of its own: its own tabs, and its own sign-ins.
+  const mcp = await agentBrowserMcp(profile.id, path.join(WORKSPACE, "browser"));
 
   // What this turn saved by itself, so the review afterwards doesn't redo it.
   const wrote = { memory: false, skill: false };

@@ -177,7 +177,7 @@ function cursorTool(call: { type?: string; args?: Record<string, unknown> } | un
 /**
  * Grok and Composer run through the local Cursor CLI login instead of an API
  * key, via the official `@cursor/sdk`. They run in agent mode now, with the
- * tutor's own tools and the agents' browser, but the built-in toolset is cut
+ * tutor's own tools and the shared browser, but the built-in toolset is cut
  * down to the web and a to-do list: no shell and no editing files on the PC,
  * which is what `mode: "plan"` used to guarantee on its own.
  */
@@ -481,7 +481,7 @@ export async function POST(req: Request) {
              * credentials.
              *
              * Web search is no longer the only one: the tutor's own tools and
-             * the agents' browser ride alongside it.
+             * the shared browser ride alongside it.
              */
             tools: { web_search: provider.tools.webSearch({}), ...tools },
             stopWhen: stepCountIs(30),

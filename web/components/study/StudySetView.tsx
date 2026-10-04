@@ -54,7 +54,7 @@ function Building({ set }: { set: StudySet }) {
       )}
       <p className="study-muted">
         The study agent can use the browser, the web and your class’s Schoology files, so this can take a few minutes. It keeps going if you leave.
-        {browsing ? " You can watch its browser in Agent › Computer." : ""}
+        {browsing ? " You can watch its browser in Agent › Computer › Tutor & Study." : ""}
       </p>
     </div>
   );

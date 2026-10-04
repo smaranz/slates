@@ -7,9 +7,9 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import { browserMcp, ensureBrowser } from "./browser";
 
 /**
- * The agents' browser as AI SDK tools, for a helper that isn't a Cursor
- * agent: the tutor's API-backed models. Same Chrome, same sign-ins, same
- * Computer view to watch or take over in.
+ * The shared browser as AI SDK tools, for a helper that isn't a Cursor
+ * agent: the tutor's API-backed models. Same Chrome and sign-ins as its other
+ * backends and Study builds, same Computer view to watch or take over in.
  *
  * Playwright's MCP server only starts when a browser tool is first called,
  * so a turn that never browses costs nothing; the list of tools is read once

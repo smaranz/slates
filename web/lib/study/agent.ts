@@ -18,10 +18,11 @@ import { finishSet, GROUNDING, SET_WRITING, SetSchema, type WrittenSet } from ".
 
 /**
  * The study agent: a study set written by an agent with everything the Agent
- * app's teammates have — the host's shell and files, web search, the shared
- * Chrome (whose sign-ins persist, and which you can watch or take over in
- * Agent → Computer), the Slates board — plus tools for reading the class's
- * Schoology Materials through Slates' own signed-in session.
+ * app's teammates have — the host's shell and files, web search, the Chrome
+ * it shares with the tutor (whose sign-ins persist, and which you can watch
+ * or take over in Agent → Computer → Tutor & Study), the Slates board — plus
+ * tools for reading the class's Schoology Materials through Slates' own
+ * signed-in session.
  *
  * It starts from what `gather` already found, goes after what that couldn't
  * read (Google Docs and Slides, outside links, other folders), and hands the
@@ -231,7 +232,7 @@ function brief(build: AgentBuild, sources: StudySource[], absolute: (url: string
     "WHAT YOU HAVE",
     "- The student's always-on computer: shell, files (your working folder is private to this build) and web search.",
     browser
-      ? "- A real Chrome browser (browser_* tools) shared with the student's other agents; its sign-ins persist. If a page wants a password, 2FA or a CAPTCHA, skip it — the student isn't watching this run — and say which source needed a sign-in in your final sentence."
+      ? "- A real Chrome browser (browser_* tools) shared with the student's tutor; its sign-ins persist. If a page wants a password, 2FA or a CAPTCHA, skip it — the student isn't watching this run — and say which source needed a sign-in in your final sentence."
       : "- No browser this time (Chrome isn't available on the host); use web search and the Schoology tools.",
     "- schoology_materials and schoology_read: this class's Schoology Materials (folders, files, Pages, link views, Google Docs and Slides posted by link), through Slates' own signed-in Schoology session. Use these rather than the browser for anything on Schoology: the browser isn't signed in to Schoology.",
     "- slates_board: the student's classes, grades and assignments. list_skills / get_skill: the student's saved instructions; check for one about study guides.",

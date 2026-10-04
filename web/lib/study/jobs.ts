@@ -75,7 +75,7 @@ export async function startBuild(request: BuildRequest): Promise<StudySet> {
   const job = (async () => {
     const stopBeat = heartbeat(target.id);
     try {
-      // The Agent app's browser holds the student's Google sign-in, which the gatherer uses for school-only Google files.
+      // The browser the tutor and Study share holds the student's Google sign-in, which the gatherer uses for school-only Google files.
       await ensureBrowser().catch(() => {});
       const found = await gather(request, (step) => void updateSet(target.id, (current) => ({ ...current, step })));
       const material = [...found.texts].map(([n, text]) => ({ n, title: found.sources[n - 1]!.title, text }));

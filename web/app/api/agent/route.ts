@@ -1,4 +1,4 @@
-import { browserRunning } from "@/lib/agent/browser";
+import { browserRunning, deleteBrowser } from "@/lib/agent/browser";
 import { agentState, listModels, resetRuntime, runRoutine, stop } from "@/lib/agent/engine";
 import { publish } from "@/lib/agent/hub";
 import { nextRunAfter, normalizeSchedule } from "@/lib/agent/schedule";
@@ -93,6 +93,8 @@ export async function POST(request: Request) {
         routines.save(routines.all().filter((r) => r.agentId !== id));
         groups.save(groups.all().map((g) => ({ ...g, members: g.members.filter((m) => m !== id) })));
         clearChat(id);
+        // Its browser goes too, sign-ins and all; that can take Chrome a few seconds, so it isn't waited for.
+        void deleteBrowser(id).catch((error: unknown) => console.error("[agent] couldn't delete an agent's browser:", error instanceof Error ? error.message : error));
         publish({ kind: "roster" });
         return Response.json({ ok: true });
       }

@@ -8,9 +8,10 @@ import s from "./agent.module.css";
 import { agentApi } from "./useAgentData";
 
 /**
- * The agents' browser on the host, live. View-only until you take control;
- * then clicks, scrolling and typing go straight to the page — for sign-ins,
- * 2FA and CAPTCHAs, which agents hand to you rather than work around.
+ * A browser on the host, live: an agent's own, or the one the tutor and Study
+ * builds share. View-only until you take control; then clicks, scrolling and
+ * typing go straight to the page — for sign-ins, 2FA and CAPTCHAs, which
+ * agents hand to you rather than work around.
  *
  * The panel is small enough to watch in beside a chat, too small to sign in
  * through, so taking control opens the screen large in a popup until you give
@@ -27,11 +28,30 @@ interface Frame {
   error?: string;
 }
 
+/** A browser to pick: an agent's, by its id, or the shared one, as "". */
+export interface BrowserChoice {
+  id: string;
+  name: string;
+}
+
 const SPECIAL = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"]);
 
-export default function Computer({ onClose }: { onClose: () => void }) {
-  const [frame, setFrame] = useState<Frame | null>(null);
-  const [control, setControl] = useState(false);
+/**
+ * `browser` is whose: an agent's id, or "" for the one the tutor and Study
+ * builds share. `browsers` adds a picker that switches between them.
+ */
+export default function Computer({ onClose, browser = "", browsers, onBrowser }: {
+  onClose: () => void;
+  browser?: string;
+  browsers?: BrowserChoice[];
+  onBrowser?: (id: string) => void;
+}) {
+  // Each frame and the control are kept with their browser, so switching never shows one under another's name.
+  const [shot, setShot] = useState<{ of: string; frame: Frame } | null>(null);
+  const frame = shot?.of === browser ? shot.frame : null;
+  const [controlOf, setControlOf] = useState<string | null>(null);
+  const control = controlOf === browser;
+  const name = browsers?.find((choice) => choice.id === browser)?.name;
   const [address, setAddress] = useState("");
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -43,42 +63,45 @@ export default function Computer({ onClose }: { onClose: () => void }) {
   const typed = useRef("");
   const flushTimer = useRef<number | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch("/api/agent/computer", { cache: "no-store" });
+      const response = await fetch(`/api/agent/computer${browser ? `?agent=${encodeURIComponent(browser)}` : ""}`, { cache: "no-store", signal });
       const data = (await response.json()) as Frame;
-      setFrame(data);
-      if (!data.running) setControl(false);
+      setShot({ of: browser, frame: data });
+      if (!data.running) setControlOf(null);
       if (!editing && data.url) setAddress(data.url);
     } catch {
       // Keep the last frame.
     }
-  }, [editing]);
+  }, [editing, browser]);
 
   useEffect(() => {
     let alive = true;
+    // A frame still on its way from the browser you just left is dropped.
+    const stale = new AbortController();
     let timer: number | undefined;
     const loop = async () => {
       if (!alive) return;
-      if (document.visibilityState === "visible") await load();
+      if (document.visibilityState === "visible") await load(stale.signal);
       timer = window.setTimeout(loop, control ? 450 : 1100);
     };
     void loop();
     return () => {
       alive = false;
+      stale.abort();
       window.clearTimeout(timer);
     };
   }, [load, control]);
 
   const send = useCallback(async (input: Record<string, unknown>) => {
     try {
-      await agentApi("/api/agent/computer", { input });
+      await agentApi("/api/agent/computer", { input, ...(browser ? { agent: browser } : {}) });
       setError(null);
       window.setTimeout(() => void load(), 150);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [load]);
+  }, [load, browser]);
 
   const flushTyped = useCallback(() => {
     window.clearTimeout(flushTimer.current);
@@ -97,7 +120,7 @@ export default function Computer({ onClose }: { onClose: () => void }) {
   const start = async () => {
     setStarting(true);
     try {
-      await agentApi("/api/agent/computer", { op: "start" });
+      await agentApi("/api/agent/computer", { op: "start", ...(browser ? { agent: browser } : {}) });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -119,7 +142,7 @@ export default function Computer({ onClose }: { onClose: () => void }) {
 
   const giveBack = () => {
     flushTyped();
-    setControl(false);
+    setControlOf(null);
   };
 
   const addressBar = (
@@ -142,7 +165,7 @@ export default function Computer({ onClose }: { onClose: () => void }) {
       <img
         ref={live ? img : undefined}
         src={`data:image/jpeg;base64,${frame.image}`}
-        alt={frame.title || "The agents' browser"}
+        alt={frame.title || (name ? `${name}'s browser` : "The PC's browser")}
         draggable={false}
         onClick={
           live
@@ -161,8 +184,13 @@ export default function Computer({ onClose }: { onClose: () => void }) {
     <aside className={`${s.panel} ${s.computer}`} aria-label="Computer">
       <div className={s.panelHead}>
         <h2>Computer</h2>
+        {browsers && (
+          <select className={`${s.field} ${s.browserPick}`} value={browser} onChange={(e) => { setError(null); onBrowser?.(e.target.value); }} aria-label="Whose browser">
+            {browsers.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
+          </select>
+        )}
         {frame?.running && (
-          <button ref={toggle} type="button" className={control ? s.controlOn : s.quiet} onClick={() => (control ? giveBack() : setControl(true))} aria-pressed={control}>
+          <button ref={toggle} type="button" className={control ? s.controlOn : s.quiet} onClick={() => (control ? giveBack() : setControlOf(browser))} aria-pressed={control}>
             {control ? "Give back control" : "Take control"}
           </button>
         )}
@@ -172,7 +200,11 @@ export default function Computer({ onClose }: { onClose: () => void }) {
         <div className={s.center}><Spinner size={16} /></div>
       ) : !frame.running ? (
         <div className={s.computerIdle}>
-          <p>The agents&apos; browser runs on the PC. It starts when an agent opens a page.</p>
+          <p>
+            {browser
+              ? `${name ?? "This agent"}'s own browser runs on the PC. It starts when ${name ?? "the agent"} opens a page.`
+              : "The tutor and Study builds share this browser on the PC. It starts when one of them opens a page."}
+          </p>
           <button type="button" className={s.primary} disabled={starting} onClick={() => void start()}>{starting && <Spinner size={12} />} Start browser</button>
         </div>
       ) : (

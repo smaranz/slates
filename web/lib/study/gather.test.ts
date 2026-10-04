@@ -16,7 +16,7 @@ import type { BuildRequest } from "./types";
 // alone, read files, Pages and link views, and put the review sheet first.
 
 process.env.HOME = fsSync.mkdtempSync(path.join(os.tmpdir(), "slates-study-gather-"));
-// Keep the Agent app's browser (if one is running here) out of the test.
+// Keep the tutor and Study's browser (if one is running here) out of the test.
 process.env.SLATES_AGENT_CDP_PORT = "9";
 const requests: string[] = [];
 let materialsDown = false;

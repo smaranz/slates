@@ -437,7 +437,7 @@ export async function gather(request: BuildRequest, onStep: (step: string) => vo
   if (lockedGoogle) {
     notice = [
       notice,
-      `${lockedGoogle === 1 ? "One of the class’s Google files is" : `${lockedGoogle} of the class’s Google files are`} shared only inside your school. Sign in to your school Google account once in Agent › Computer, then rebuild, and Slates can read ${lockedGoogle === 1 ? "it" : "them"}.`,
+      `${lockedGoogle === 1 ? "One of the class’s Google files is" : `${lockedGoogle} of the class’s Google files are`} shared only inside your school. Sign in to your school Google account once in Agent › Computer › Tutor & Study, then rebuild, and Slates can read ${lockedGoogle === 1 ? "it" : "them"}.`,
     ].filter(Boolean).join(" ");
   }
   return { sources, texts, notice };
