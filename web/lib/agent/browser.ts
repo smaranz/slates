@@ -204,6 +204,63 @@ const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   ArrowDown: { code: "ArrowDown", keyCode: 40 },
 };
 
+export interface BrowserCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+/**
+ * Every cookie the agents' browser holds for the hosts `match` accepts,
+ * HttpOnly ones included, read over the browser's own CDP connection. Used to
+ * hand a sign-in the student made here to the Schoology sync browser.
+ */
+export async function browserCookies(match: (host: string) => boolean): Promise<BrowserCookie[]> {
+  const version = (await (await fetch(`${CDP}/json/version`, { signal: AbortSignal.timeout(3000) })).json()) as { webSocketDebuggerUrl: string };
+  const socket = new WebSocket(version.webSocketDebuggerUrl);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener("open", () => resolve(), { once: true });
+      socket.addEventListener("error", () => reject(new Error("Couldn't attach to the browser.")), { once: true });
+    });
+    const cookies = await new Promise<BrowserCookie[]>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("The browser didn't answer.")), 10_000);
+      socket.addEventListener("message", (event) => {
+        const data = JSON.parse(String(event.data)) as { id?: number; result?: { cookies?: BrowserCookie[] }; error?: { message: string } };
+        if (data.id !== 1) return;
+        clearTimeout(timer);
+        if (data.error) reject(new Error(data.error.message));
+        else resolve(data.result?.cookies ?? []);
+      });
+      socket.send(JSON.stringify({ id: 1, method: "Storage.getCookies" }));
+    });
+    return cookies.filter((cookie) => match(cookie.domain.replace(/^\./, "")));
+  } finally {
+    socket.close();
+  }
+}
+
+/** Where the agents' browser is now: the page the Computer view shows. */
+export async function activeUrl(): Promise<string | null> {
+  if (!(await browserRunning())) return null;
+  try {
+    return (await activePage()).target.url;
+  } catch {
+    return null;
+  }
+}
+
+/** Point the agents' browser at a page, starting it if it isn't running. */
+export async function openInBrowser(url: string): Promise<void> {
+  await ensureBrowser();
+  await sendInput({ type: "navigate", url });
+}
+
 export async function sendInput(input: ComputerInput): Promise<void> {
   const { page } = await activePage();
   switch (input.type) {

@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { launch, readConfig, isLoggedIn, openHome, HOME } from "./browser.mjs";
+import { launch, readConfig, isLoggedIn, onSchoologyHome, openHome, HOME } from "./browser.mjs";
 import { readUpdates } from "./updates.mjs";
+
+/** What the portal shows when the session is gone; the Sidebar and Settings key off "Signed out". */
+export const SIGNED_OUT = "Signed out of Schoology. Reconnect it in Slates: Settings › Schoology › Reconnect.";
 
 /**
  * Scrape Schoology from a real, rendered page.
@@ -1135,6 +1138,28 @@ export async function getSharedContext(headless = true) {
   return getContext(headless);
 }
 
+/**
+ * Sign this browser in with cookies from one the student signed in to.
+ *
+ * Signing in needs a person, and the person is on their laptop or phone, not
+ * at the PC. They sign in through the agents' browser instead (its screen is
+ * in Slates, with their clicks and keys passed through), and the Schoology and
+ * Google cookies it ends up with are copied here. The Google ones matter as
+ * much as Schoology's: this profile re-completes Google SSO on its own when
+ * Schoology's short session runs out (`continueSso` in browser.mjs).
+ *
+ * Only reports success once Schoology's own signed-in home has rendered.
+ */
+export async function importSession(cookies) {
+  const { domain } = readConfig();
+  if (!domain) throw new Error("Not set up yet — run: npm run login -- <district>.schoology.com");
+  const ctx = await getContext(true);
+  await ctx.addCookies(cookies);
+  const page = await openHome(ctx, domain);
+  const signedIn = (await isLoggedIn(page)) && (await onSchoologyHome(page));
+  return { signedIn, url: page.url() };
+}
+
 export async function closeShared() {
   if (!shared) return;
   await shared.ctx.close().catch(() => {});
@@ -1148,8 +1173,14 @@ export async function scrape({ headless = true, reuse = false } = {}) {
   const ctx = reuse ? await getContext(headless) : await launch({ headless });
   try {
     const page = await openHome(ctx, domain);
-    if (!(await isLoggedIn(page))) {
-      throw new Error("Signed out of Schoology — run: npm run login");
+    /*
+     * Both checks, not just "no password box": a session that's half gone can
+     * land on a page with neither a password field nor any of Schoology's own
+     * chrome, and reading that once produced an empty board that replaced the
+     * last good one everywhere.
+     */
+    if (!(await isLoggedIn(page)) || !(await onSchoologyHome(page))) {
+      throw new Error(SIGNED_OUT);
     }
 
     const todo = await readTodo(page);
@@ -1204,6 +1235,10 @@ export async function scrape({ headless = true, reuse = false } = {}) {
           : null;
       return { ...post, courseId: course?.id ?? "" };
     });
+
+    // A signed-in student is enrolled in something. No classes at all is a page
+    // that didn't really load, and must not replace a real board.
+    if (!courses.length && !todo.length) throw new Error(`${SIGNED_OUT} (Schoology showed no classes.)`);
 
     const stats = {
       todo: todo.length,

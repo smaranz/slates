@@ -92,7 +92,7 @@ export async function isLoggedIn(page) {
 }
 
 /** True once we're on Schoology with the app chrome rendered. */
-async function onSchoologyHome(page) {
+export async function onSchoologyHome(page) {
   try {
     if (!new URL(page.url()).hostname.endsWith("schoology.com")) return false;
     if ((await page.locator('input[type="password"]').count()) > 0) return false;

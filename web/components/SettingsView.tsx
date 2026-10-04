@@ -22,6 +22,7 @@ import {
   ZaiLogo,
 } from "./ui";
 import NotificationSettingsCard from "./NotificationSettingsCard";
+import ReconnectSchoology from "./ReconnectSchoology";
 
 interface ProviderInfo {
   /** Tutor backends plus ElevenLabs, which powers narration rather than chat. */
@@ -274,14 +275,19 @@ export default function SettingsView({ section = "all" }: { section?: "all" | "s
             >
               Check
             </button>
-            <button
-              type="button"
-              className={`btn btn--primary ${s.connecting ? "btn--busy" : ""}`}
-              style={{ height: 28 }}
-              onClick={() => void s.syncScraper(true)}
-            >
-              {s.connecting ? "Syncing..." : "Sync now"}
-            </button>
+            {/* Signing in needs a person, and the PC's sync browser has no window: sign in from here instead. */}
+            {scraper?.ok === false && /signed out/i.test(scraper.error ?? "") ? (
+              <ReconnectSchoology className="btn btn--primary" style={{ height: 28 }} />
+            ) : (
+              <button
+                type="button"
+                className={`btn btn--primary ${s.connecting ? "btn--busy" : ""}`}
+                style={{ height: 28 }}
+                onClick={() => void s.syncScraper(true)}
+              >
+                {s.connecting ? "Syncing..." : "Sync now"}
+              </button>
+            )}
           </div>
 
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>

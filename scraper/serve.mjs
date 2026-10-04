@@ -7,8 +7,8 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { scrape, closeShared, getSharedContext, forgetMessageBody } from "./scrape.mjs";
-import { readConfig, HOME } from "./browser.mjs";
+import { scrape, closeShared, getSharedContext, forgetMessageBody, importSession } from "./scrape.mjs";
+import { readConfig, writeConfig, HOME } from "./browser.mjs";
 import * as attempt from "./attempt.mjs";
 import { submitAssignment } from "./submit.mjs";
 import { composeMessage, replyToThread, searchRecipients } from "./message.mjs";
@@ -252,6 +252,30 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { resumed: true });
   }
 
+  /*
+   * Sign in from cookies the portal read out of the agents' browser, after
+   * the student signed in there from their own device. Waits out a scrape in
+   * progress (they share the browser), then syncs at once on success.
+   */
+  if (url.pathname === "/session/import") {
+    if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+    try {
+      const { cookies } = JSON.parse(await readBody(req, 2 * 1024 * 1024));
+      if (!Array.isArray(cookies) || !cookies.length) return send(res, 400, { error: "No cookies to sign in with." });
+      await inFlight?.catch(() => {});
+      const result = await importSession(cookies);
+      if (result.signedIn) {
+        writeConfig({ loggedInAt: new Date().toISOString() });
+        pausedUntil = 0;
+        console.log(`[${new Date().toLocaleTimeString()}] signed in from the agents' browser`);
+        void refresh("after reconnect");
+      }
+      return send(res, 200, result);
+    } catch (e) {
+      return send(res, 500, { error: readableError(e) });
+    }
+  }
+
   if (url.pathname === "/health") {
     const { domain, loggedInAt } = readConfig();
     /*
@@ -264,8 +288,8 @@ const server = http.createServer(async (req, res) => {
       domain: domain ?? null,
       loggedInAt: loggedInAt ?? null,
       lastSyncAt: lastSync.at,
-      // Surfaced verbatim: "Signed out of Schoology — run: npm run login" is
-      // the whole fix, and burying it behind a generic failure helps nobody.
+      // Surfaced verbatim: "Signed out of Schoology. Reconnect it…" is the
+      // whole fix, and burying it behind a generic failure helps nobody.
       error: lastSync.error,
       /** Whether anything is being served at all, stale or not. */
       hasBoard: !!cache?.payload?.snapshot?.assignments?.length,

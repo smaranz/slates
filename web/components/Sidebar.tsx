@@ -7,6 +7,7 @@ import { inScope } from "@/lib/counselor/essays";
 import { useCounselor } from "@/lib/counselor/store";
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
+import ReconnectSchoology from "./ReconnectSchoology";
 import { Avatar, Icon, ICON } from "./ui";
 
 /** What the scraper says about its own last sync (`/api/scrape` → `/health`). */
@@ -49,12 +50,12 @@ function useSyncHealth(): SyncHealth | null {
   return health;
 }
 
-function connectionLabel(connected: boolean, demoMode: boolean, health: SyncHealth | null) {
+function connectionLabel(connected: boolean, demoMode: boolean, health: SyncHealth | null): { text: string; warn: boolean; signedOut?: boolean } {
   if (demoMode) return { text: "Sample data", warn: false };
   if (health && !health.running) return { text: "Sync service offline", warn: true };
   if (health?.ok === false) {
     const signedOut = /signed out/i.test(health.error ?? "");
-    return { text: signedOut ? "Signed out of Schoology" : "Schoology sync failing", warn: true };
+    return { text: signedOut ? "Signed out of Schoology" : "Schoology sync failing", warn: true, signedOut };
   }
   if (health?.ok) return { text: "Schoology connected", warn: false };
   return { text: connected ? "Checking Schoology…" : "Not connected", warn: false };
@@ -252,6 +253,10 @@ export default function Sidebar() {
             </p>
           </div>
         </button>
+        {/* Its own button, not inside the one above: that one opens Settings. */}
+        {status.signedOut && (
+          <ReconnectSchoology label="Reconnect Schoology" className="btn btn--primary" style={{ width: "100%", height: 30, marginTop: 6 }} />
+        )}
       </div>
     </aside>
   );

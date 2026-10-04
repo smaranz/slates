@@ -29,7 +29,8 @@ interface Frame {
 
 const SPECIAL = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"]);
 
-export default function Computer({ onClose }: { onClose: () => void }) {
+/** `embedded` drops the side-panel framing, for a Computer that sits inside a dialog. */
+export default function Computer({ onClose, embedded = false }: { onClose: () => void; embedded?: boolean }) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const [control, setControl] = useState(false);
   const [address, setAddress] = useState("");
@@ -158,7 +159,7 @@ export default function Computer({ onClose }: { onClose: () => void }) {
     ) : <div className={s.center}>{frame?.error ?? <Spinner size={16} />}</div>;
 
   return (
-    <aside className={`${s.panel} ${s.computer}`} aria-label="Computer">
+    <aside className={`${s.panel} ${s.computer}${embedded ? ` ${s.embedded}` : ""}`} aria-label="Computer">
       <div className={s.panelHead}>
         <h2>Computer</h2>
         {frame?.running && (
