@@ -53,12 +53,12 @@ Slates opens on a launcher, like a home screen. Each room is its own app, and yo
 | **AI Usage** | Every coding agent and account on your computer, with what each request would cost | ![Ready](https://img.shields.io/badge/ready-2ea043?style=flat-square) |
 | **Slates MCP server** | Hands coding agents your UI components | ![Ready](https://img.shields.io/badge/ready-2ea043?style=flat-square) |
 | **Mobile app** | Your rooms on your phone, connected to Slates on your computer | ![Ready](https://img.shields.io/badge/ready-2ea043?style=flat-square) |
+| **Health** | Calories and macros from a photo of your plate, weight, and your F45 studio's workouts and classes | ![Ready](https://img.shields.io/badge/ready-2ea043?style=flat-square) |
 | **Counselor** | Your college list, applications, and essays, with a counselor that remembers you | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Media Gen Studio** | Images, video, voice, sound, and music with ElevenLabs | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Agent** | AI teammates that work on your PC | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Notification Hub** | Work, personal, and school email in one view | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Calendar** | Your whole schedule, beyond school deadlines | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
-| **Health** | Gym days, calories, and workouts you design | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Hackathon Planner** | Winning ideas, research, a plan to win, and a prompt ready for a coding agent | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Hosting** | Vercel-style hosting for what you build | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
 | **Backend** | Supabase-style databases and backends, next to your hosting | ![In progress](https://img.shields.io/badge/in_progress-6e7681?style=flat-square) |
@@ -239,7 +239,6 @@ An agentic college counselor, not a chat window with a prompt on it.
 | **Agent** | AI teammates that work on your PC: they use a browser, run routines, ask before anything risky, work together in group chats, and can answer out loud. |
 | **Notification Hub** | Every inbox in one place, cycling through work, personal, and school email in one view. |
 | **Calendar** | Your whole schedule, beyond school deadlines, so "find me a free hour on Thursday" has an answer. |
-| **Health** | A fitness tracker for gym days, a calorie tracker, and a workout creator. |
 | **Hackathon Planner** | Winning ideas, research on similar projects, what it takes to win, a tagline and demo hook, and a prompt you can hand straight to a coding agent. |
 | **Hosting and Backend** | Vercel-style hosting and Supabase-style databases for what you build, next to everything else. |
 | **Agent power** | Keeps the laptop awake while agents are running, and lets it sleep when the last one stops. |

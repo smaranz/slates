@@ -26,7 +26,8 @@ export type UsageAgent =
   | "narration"
   | "image"
   | "media"
-  | "agent";
+  | "agent"
+  | "health";
 
 export type PlanKind = "api" | "subscription";
 
@@ -165,6 +166,7 @@ export const ALL_AGENTS: UsageAgent[] = [
   "image",
   "media",
   "agent",
+  "health",
 ];
 
 export const AGENT_LABEL: Record<UsageAgent, string> = {
@@ -182,6 +184,7 @@ export const AGENT_LABEL: Record<UsageAgent, string> = {
   image: "Image",
   media: "Media Gen Studio",
   agent: "Agent",
+  health: "Health",
 };
 
 /** Which providers each agent can draw credentials from. */
@@ -200,6 +203,7 @@ export const AGENT_PROVIDERS: Record<UsageAgent, UsageProvider[]> = {
   image: ["elevenlabs"],
   media: ["elevenlabs"],
   agent: ["cursor", "elevenlabs"],
+  health: ["openrouter", "openai"],
 };
 
 export const PROVIDER_LABEL: Record<UsageProvider, string> = {

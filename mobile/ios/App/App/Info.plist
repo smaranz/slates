@@ -29,6 +29,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Photograph a meal, a nutrition label or a barcode, and Health logs its calories and macros.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a photo of a meal to log in Health, or a picture to attach to your work.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Slates connects to the trusted computer on your network that runs your private workspace and Schoology sync service.</string>
 	<key>NSMicrophoneUsageDescription</key>

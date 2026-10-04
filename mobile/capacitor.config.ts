@@ -29,7 +29,7 @@ const config: CapacitorConfig = {
   backgroundColor: SHELL_BG,
   // Appended to the web view's user agent, so Slates lists a paired phone as
   // its app rather than a browser (web/lib/devices.ts).
-  appendUserAgent: "SlatesApp",
+  appendUserAgent: "SlatesApp SlatesCamera",
   ios: {
     contentInset: "never",
     preferredContentMode: "mobile",

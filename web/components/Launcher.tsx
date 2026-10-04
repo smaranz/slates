@@ -24,6 +24,7 @@ const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolea
   { mode: "usage", title: "AI Usage", accent: "oklch(0.82 0.12 85)", mark: (h) => <MeterMark hovered={h} /> },
   { mode: "media", title: "Media Gen Studio", accent: "oklch(0.8 0.13 25)", mark: (h) => <MediaMark hovered={h} /> },
   { mode: "agent", title: "Agent", accent: "oklch(0.8 0.12 215)", mark: (h) => <AgentMark hovered={h} /> },
+  { mode: "health", title: "Health", accent: "oklch(0.86 0.17 132)", mark: (h) => <HealthMark hovered={h} /> },
 ];
 
 export default function Launcher() {
@@ -304,6 +305,37 @@ function AgentMark({ hovered }: { hovered: boolean }) {
         initial={false}
         animate={{ opacity: hovered ? [1, 0.15, 1] : 0.85 }}
         transition={{ duration: 1, repeat: hovered ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }}
+      />
+    </svg>
+  );
+}
+
+/** A day's calorie ring, filling further on hover, with a heartbeat drawn across it. */
+function HealthMark({ hovered }: { hovered: boolean }) {
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      <circle cx="27" cy="27" r="21" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+      <motion.circle
+        cx="27"
+        cy="27"
+        r="21"
+        stroke="var(--accent)"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        style={{ rotate: -90, transformOrigin: "27px 27px" }}
+        initial={false}
+        animate={{ pathLength: hovered ? 0.86 : 0.62 }}
+        transition={{ type: "spring", stiffness: 140, damping: 20 }}
+      />
+      <motion.path
+        d="M15 28h6l3-6 4.5 11 3-5H39"
+        stroke="var(--accent)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={false}
+        animate={{ pathLength: hovered ? [0, 1] : 1, opacity: hovered ? 1 : 0.75 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       />
     </svg>
   );

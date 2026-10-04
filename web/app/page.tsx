@@ -28,6 +28,7 @@ import UiApp from "@/components/UiApp";
 import UsageApp from "@/components/usage/UsageApp";
 import MediaApp from "@/components/media/MediaApp";
 import AgentApp from "@/components/agent/AgentApp";
+import HealthApp from "@/components/health/HealthApp";
 
 export default function Page() {
   const { mode, ready, settingsOpen } = useMode();
@@ -47,6 +48,7 @@ export default function Page() {
   if (mode === "usage") return <UsageApp />;
   if (mode === "media") return <MediaApp />;
   if (mode === "agent") return <AgentApp />;
+  if (mode === "health") return <HealthApp />;
   return <School />;
 }
 
