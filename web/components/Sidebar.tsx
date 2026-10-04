@@ -1,13 +1,64 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { inScope } from "@/lib/counselor/essays";
 import { useCounselor } from "@/lib/counselor/store";
 import { useMode } from "@/lib/mode";
 import { useStore, type View } from "@/lib/store";
 import { Avatar, Icon, ICON } from "./ui";
+
+/** What the scraper says about its own last sync (`/api/scrape` → `/health`). */
+interface SyncHealth {
+  running: boolean;
+  ok?: boolean | null;
+  error?: string | null;
+}
+
+/**
+ * The scraper's real state, checked every minute and on return to the window.
+ *
+ * Having a board isn't being connected: a saved snapshot keeps the board up
+ * through an expired Schoology session, so the footer asks the scraper how its
+ * last sync actually went instead.
+ */
+function useSyncHealth(): SyncHealth | null {
+  const [health, setHealth] = useState<SyncHealth | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await fetch("/api/scrape", { cache: "no-store" });
+        const data = (await res.json()) as SyncHealth;
+        if (!cancelled) setHealth(data);
+      } catch {
+        /* the portal itself is unreachable; keep the last answer */
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 60_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
+  return health;
+}
+
+function connectionLabel(connected: boolean, demoMode: boolean, health: SyncHealth | null) {
+  if (demoMode) return { text: "Sample data", warn: false };
+  if (health && !health.running) return { text: "Sync service offline", warn: true };
+  if (health?.ok === false) {
+    const signedOut = /signed out/i.test(health.error ?? "");
+    return { text: signedOut ? "Signed out of Schoology" : "Schoology sync failing", warn: true };
+  }
+  if (health?.ok) return { text: "Schoology connected", warn: false };
+  return { text: connected ? "Checking Schoology…" : "Not connected", warn: false };
+}
 
 interface NavDef {
   label: string;
@@ -24,6 +75,7 @@ export default function Sidebar() {
   // empty — the two halves keep separate essays.
   const essayCount = useCounselor().essays.filter(inScope("school")).length;
   const { clear, openSettings } = useMode();
+  const status = connectionLabel(s.connected, s.demoMode, useSyncHealth());
 
   // In the desktop app the macOS traffic lights are drawn over the top-left of
   // the window, which is exactly where the brand sits. Flag the shell so the
@@ -192,8 +244,11 @@ export default function Sidebar() {
             <p className="truncate" style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "var(--text)" }}>
               {s.studentName || "Not signed in"}
             </p>
-            <p style={{ margin: "1px 0 0", fontSize: 11, color: "var(--muted)" }}>
-              {s.connected ? (s.demoMode ? "Sample data" : "Schoology connected") : "Not connected"}
+            <p
+              title={status.warn ? "Open Settings to see what's wrong" : undefined}
+              style={{ margin: "1px 0 0", fontSize: 11, color: status.warn ? "var(--warn)" : "var(--muted)" }}
+            >
+              {status.text}
             </p>
           </div>
         </button>
