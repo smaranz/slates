@@ -20,9 +20,9 @@ import type { ChatEvent, Recipient, Routine } from "./types";
 /**
  * What an agent can do inside Slates, as in-process tools.
  *
- * Reads are free. Anything that speaks for the student to another person —
- * a new message or a reply to a teacher — only ever becomes a draft card the
- * student sends or discards; there is deliberately no tool that submits work.
+ * General agents get task tools and their own memory. School tools and
+ * shared learning are available only to callers that explicitly opt in,
+ * such as Study Studio. School messages remain drafts for user approval.
  */
 
 export interface ToolContext {
@@ -136,7 +136,7 @@ function boardText(snap: Snapshot, section: string, course: string): string {
 
 /* ---------- the toolset ---------- */
 
-export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
+export function buildTools(ctx: ToolContext, options: { school?: boolean } = {}): Record<string, SDKCustomTool> {
   const self = () => {
     const agent = getAgent(ctx.agentId);
     if (!agent) throw new Error("This agent no longer exists.");
@@ -148,24 +148,26 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
     return "Saved as a draft card in the chat. The student will send or discard it; do not try to send it any other way.";
   };
 
-  const learning = asCursorTools(learningTools({ name: getAgent(ctx.agentId)?.name ?? "Agent", notes: agentNotes(ctx.agentId), chatId: ctx.chatId, onLearned: ctx.onLearned }));
+  const learning = asCursorTools(learningTools({ name: getAgent(ctx.agentId)?.name ?? "Agent", notes: agentNotes(ctx.agentId), selfOnly: !options.school, chatId: ctx.chatId, onLearned: ctx.onLearned }));
 
   return {
     ...learning,
 
-    slates_board: tool(
-      "Read the student's Schoology board as Slates last synced it: classes and grades, open assignments with due dates, recent messages (with thread ids for replies), and the updates teachers posted to their classes (announcements such as a test moved or cancelled).",
-      {
-        section: { type: "string", enum: ["all", "assignments", "grades", "messages", "updates"], description: "Which part to read. Default all." },
-        course: { type: "string", description: "Only this class (part of its name)." },
-        fresh: { type: "boolean", description: "Sync with Schoology first (slower). Default false." },
-      },
-      [],
-      (args) => readBoard(str(args.section), str(args.course), args.fresh === true),
-    ),
+    ...(options.school ? {
+      slates_board: tool(
+        "Read the student's Schoology board as Slates last synced it: classes and grades, open assignments with due dates, recent messages (with thread ids for replies), and the updates teachers posted to their classes (announcements such as a test moved or cancelled).",
+        {
+          section: { type: "string", enum: ["all", "assignments", "grades", "messages", "updates"], description: "Which part to read. Default all." },
+          course: { type: "string", description: "Only this class (part of its name)." },
+          fresh: { type: "boolean", description: "Sync with Schoology first (slower). Default false." },
+        },
+        [],
+        (args) => readBoard(str(args.section), str(args.course), args.fresh === true),
+      ),
+    } : {}),
 
     send_file: tool(
-      "Send a file from this PC to the student. It appears in this chat as a card they can open, and their Mac saves it to Downloads › Slates on its own. Use it for anything you make for them (documents, slides, spreadsheets, PDFs, images) instead of telling them a path on the PC, which they can't open from their laptop or phone.",
+      "Send a file from this PC to the user. It appears in this chat as a card they can open, and their Mac saves it to Downloads › Slates on its own. Use it for anything you make for them (documents, slides, spreadsheets, PDFs, images) instead of telling them a path on the PC, which they can't open from their laptop or phone.",
       {
         path: { type: "string", description: "The file, relative to your working folder or absolute." },
         note: { type: "string", description: "One line on what it is, shown on the card." },
@@ -175,53 +177,55 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
         const agent = self();
         const file = sendFile({ path: str(args.path), agentId: agent.id, from: agent.name, chatId: ctx.chatId, note: str(args.note) });
         ctx.post({ id: newId("evt"), at: Date.now(), type: "file", agentId: agent.id, file: file.id, name: file.name, size: file.size, note: file.note });
-        return `Sent ${file.name} (${file.size < 1024 * 1024 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}) to the student. It's in the chat and on their computer; don't paste its contents again.`;
+        return `Sent ${file.name} (${file.size < 1024 * 1024 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}) to the user. It's in the chat and on their computer; don't paste its contents again.`;
       },
     ),
 
-    slates_find_person: tool(
-      "Look someone up in the school's Schoology directory to get the uid needed to address a message.",
-      { query: { type: "string", description: "Part of their name, at least 2 letters." } },
-      ["query"],
-      async (args) => {
-        const { people } = await scraper<{ people: { uid: string; name: string; school?: string }[] }>(`/message/recipients?q=${encodeURIComponent(str(args.query))}`);
-        return people.length ? people.map((p) => `- uid ${p.uid}: ${p.name}${p.school ? ` (${p.school})` : ""}`).join("\n") : "No one matched.";
-      },
-    ),
+    ...(options.school ? {
+      slates_find_person: tool(
+        "Look someone up in the school's Schoology directory to get the uid needed to address a message.",
+        { query: { type: "string", description: "Part of their name, at least 2 letters." } },
+        ["query"],
+        async (args) => {
+          const { people } = await scraper<{ people: { uid: string; name: string; school?: string }[] }>(`/message/recipients?q=${encodeURIComponent(str(args.query))}`);
+          return people.length ? people.map((p) => `- uid ${p.uid}: ${p.name}${p.school ? ` (${p.school})` : ""}`).join("\n") : "No one matched.";
+        },
+      ),
 
-    slates_draft_message: tool(
-      "Draft a new Schoology message for the student to review. It is NOT sent: it appears as a card the student sends or discards.",
-      {
-        recipients: { type: "array", items: { type: "object", properties: { uid: { type: "string" }, name: { type: "string" } }, required: ["uid", "name"] }, description: "People from slates_find_person." },
-        subject: { type: "string" },
-        body: { type: "string" },
-      },
-      ["recipients", "subject", "body"],
-      (args) => {
-        const recipients = (Array.isArray(args.recipients) ? args.recipients : []) as unknown as Recipient[];
-        if (!recipients.length || !recipients.every((r) => /^\d+$/.test(String(r?.uid ?? "")) && r?.name)) {
-          throw new Error("Each recipient needs a numeric uid and a name from slates_find_person.");
-        }
-        return draft({ kind: "message", recipients: recipients.map((r) => ({ uid: String(r.uid), name: String(r.name) })), subject: str(args.subject), body: str(args.body) });
-      },
-    ),
+      slates_draft_message: tool(
+        "Draft a new Schoology message for the student to review. It is NOT sent: it appears as a card the student sends or discards.",
+        {
+          recipients: { type: "array", items: { type: "object", properties: { uid: { type: "string" }, name: { type: "string" } }, required: ["uid", "name"] }, description: "People from slates_find_person." },
+          subject: { type: "string" },
+          body: { type: "string" },
+        },
+        ["recipients", "subject", "body"],
+        (args) => {
+          const recipients = (Array.isArray(args.recipients) ? args.recipients : []) as unknown as Recipient[];
+          if (!recipients.length || !recipients.every((r) => /^\d+$/.test(String(r?.uid ?? "")) && r?.name)) {
+            throw new Error("Each recipient needs a numeric uid and a name from slates_find_person.");
+          }
+          return draft({ kind: "message", recipients: recipients.map((r) => ({ uid: String(r.uid), name: String(r.name) })), subject: str(args.subject), body: str(args.body) });
+        },
+      ),
 
-    slates_draft_reply: tool(
-      "Draft a reply in an existing Schoology message thread for the student to review. It is NOT sent until they approve it.",
-      {
-        threadId: { type: "string", description: "The thread id from slates_board's messages." },
-        subject: { type: "string", description: "The thread's subject, for the card." },
-        body: { type: "string" },
-      },
-      ["threadId", "body"],
-      (args) => {
-        if (!/^\d+$/.test(str(args.threadId))) throw new Error("threadId must be the numeric id shown in slates_board.");
-        return draft({ kind: "reply", threadId: str(args.threadId), subject: str(args.subject) || undefined, body: str(args.body) });
-      },
-    ),
+      slates_draft_reply: tool(
+        "Draft a reply in an existing Schoology message thread for the student to review. It is NOT sent until they approve it.",
+        {
+          threadId: { type: "string", description: "The thread id from slates_board's messages." },
+          subject: { type: "string", description: "The thread's subject, for the card." },
+          body: { type: "string" },
+        },
+        ["threadId", "body"],
+        (args) => {
+          if (!/^\d+$/.test(str(args.threadId))) throw new Error("threadId must be the numeric id shown in slates_board.");
+          return draft({ kind: "reply", threadId: str(args.threadId), subject: str(args.subject) || undefined, body: str(args.body) });
+        },
+      ),
+    } : {}),
 
     create_routine: tool(
-      "Schedule recurring work for yourself. It runs on the host even when the student's laptop is closed, and the result posts in your chat.",
+      "Schedule recurring work for yourself. It runs on the host even when the user's laptop is closed, and the result posts in your chat.",
       {
         name: { type: "string" },
         prompt: { type: "string", description: "Exactly what to do each run, including the output format and what to do if data is missing." },
@@ -298,7 +302,7 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
     ),
 
     send_voice_memo: tool(
-      "Send the student a short spoken voice memo (in addition to your text reply).",
+      "Send the user a short spoken voice memo (in addition to your text reply).",
       { text: { type: "string", description: "What to say, under about 800 characters." } },
       ["text"],
       async (args) => {
@@ -311,7 +315,7 @@ export function buildTools(ctx: ToolContext): Record<string, SDKCustomTool> {
     ),
 
     ask_user: tool(
-      "Ask the student a question when you need a decision. Offer short options when there are clear choices. Then end your turn; their answer arrives as the next message.",
+      "Ask the user a question when you need a decision. Offer short options when there are clear choices. Then end your turn; their answer arrives as the next message.",
       { question: { type: "string" }, options: { type: "array", items: { type: "string" } } },
       ["question"],
       (args) => {

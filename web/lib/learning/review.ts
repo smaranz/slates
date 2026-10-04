@@ -32,6 +32,8 @@ import type { Learned } from "./types";
 export interface ReviewTurn {
   helper: { key: string; name: string; kind: "agent" | "tutor"; job?: string };
   notes: Book;
+  /** General agents review only their own notes. */
+  selfOnly?: boolean;
   /** The conversation, oldest first, ending with the reply just given. */
   transcript: { who: string; text: string }[];
   /** What the helper did this turn, by label. */
@@ -83,9 +85,9 @@ export function planReview(turn: ReviewTurn): ReviewPlan {
   if (turn.wroteMemory) count.turns = 0;
   if (turn.wroteSkill) count.tools = 0;
 
-  const lastStudent = [...turn.transcript].reverse().find((line) => line.who === "Student")?.text ?? "";
+  const lastStudent = [...turn.transcript].reverse().find((line) => line.who === (turn.selfOnly ? "User" : "Student"))?.text ?? "";
   const memory = turn.fromStudent && !turn.wroteMemory && (count.turns >= MEMORY_EVERY || MEMORY_SIGNAL.test(lastStudent));
-  const skills = !turn.wroteSkill && (count.tools >= SKILLS_EVERY || turn.steps.length >= BIG_TURN);
+  const skills = !turn.selfOnly && !turn.wroteSkill && (count.tools >= SKILLS_EVERY || turn.steps.length >= BIG_TURN);
   if (memory) count.turns = 0;
   if (skills) count.tools = 0;
 
@@ -130,6 +132,14 @@ export function reviewPrompt(turn: ReviewTurn, plan: ReviewPlan): string {
   const { name, kind, job } = turn.helper;
   const who = kind === "tutor" ? "their tutor (the chat in Slates' School app)" : `${name}, one of their AI agents in Slates${job ? ` (its job: ${job})` : ""}`;
   const notes = { ...turn.notes, title: `${name.toUpperCase()}'S NOTES (target "self")` };
+  if (turn.selfOnly) {
+    return [
+      `Review the recent conversation with ${name}, a general-purpose agent${job ? ` assigned to ${job}` : ""}. You are maintaining its own notes for future tasks, not replying to the user.`,
+      `<memory>\n${renderBooks([notes])}\n</memory>`,
+      `<conversation>\n${transcriptText(turn.transcript)}\n</conversation>`,
+      'Save useful user preferences, corrections and working conventions with memory (target "self"). Keep entries short; replace duplicates. Skip one-off details and never save passwords, codes or keys. If nothing is worth saving, stop.',
+    ].join("\n\n");
+  }
   const student = { ...studentBook(), title: 'STUDENT PROFILE (target "student", shared by every helper)' };
   return [
     `You look after the long-term memory of Slates, a high-school student's study app. Below is a recent conversation between the student and ${who}.\n` +
@@ -194,7 +204,7 @@ export function setReviewRunner(next: ReviewRunner | null): void {
 
 export async function review(turn: ReviewTurn, plan: ReviewPlan): Promise<Learned[]> {
   const learned: Learned[] = [];
-  const all = learningTools({ name: turn.helper.name, notes: turn.notes, onLearned: (item) => learned.push(item) });
+  const all = learningTools({ name: turn.helper.name, notes: turn.notes, selfOnly: turn.selfOnly, onLearned: (item) => learned.push(item) });
   const keep = ["memory", ...(plan.skills ? ["get_skill", "save_skill", "patch_skill"] : [])];
   const tools = Object.fromEntries(Object.entries(all).filter(([name]) => keep.includes(name)));
   await runner(reviewPrompt(turn, plan), asCursorTools(tools), turn);

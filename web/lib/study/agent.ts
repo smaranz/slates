@@ -98,7 +98,7 @@ export async function studyWithAgent(build: AgentBuild): Promise<{ model: string
     chatId: "study",
     post: () => {},
     handoff: () => "Handoffs aren't available while building a study set.",
-  });
+  }, { school: true });
 
   const tools: Record<string, SDKCustomTool> = {
     slates_board: slates.slates_board!,

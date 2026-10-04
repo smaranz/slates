@@ -7,14 +7,13 @@ import path from "node:path";
 import { Agent, JsonlLocalAgentStore, type SDKImage } from "@cursor/sdk";
 
 import { noteUsage } from "@/lib/ai-usage/note";
-import { memoryPrompt, studentBook } from "@/lib/learning/memory";
+import { renderBooks } from "@/lib/learning/memory";
 import { planReview, startReview, type ReviewTurn } from "@/lib/learning/review";
-import { skillIndex } from "@/lib/learning/skills";
-import { RECALL_GUIDANCE, SKILL_GUIDANCE } from "@/lib/learning/tools";
 import { browserMcp, ensureBrowser } from "./browser";
 import { publish } from "./hub";
 import { listModels, REPLACED } from "./models";
 import { hasCutOffTurn } from "./runs";
+import { generalAgentPrompt } from "./prompt";
 import { nextRunAfter } from "./schedule";
 import {
   agents, chatEvents, ensureDirs, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, updateAgent, WORKSPACE,
@@ -56,7 +55,8 @@ interface Worker {
 }
 
 const MAX_HOPS = 6;
-const runtimeStore = new JsonlLocalAgentStore(RUNTIME_DIR);
+// Start general agents in a new store so old school tools and context are not resumed.
+const runtimeStore = new JsonlLocalAgentStore(path.join(RUNTIME_DIR, "general-v1"));
 
 const state = globalThis as typeof globalThis & {
   __slatesAgentWorkers?: Map<string, Worker>;
@@ -215,7 +215,7 @@ function chatLines(chatId: string, limit: number): Line[] {
     .slice(-limit)
     .map((e) =>
       e.type === "user"
-        ? { who: "Student", text: e.text }
+        ? { who: "User", text: e.text }
         : e.type === "agent"
           ? { who: names.get(e.agentId) ?? "Agent", text: e.text }
           : e.type === "handoff"
@@ -233,22 +233,20 @@ function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: b
   const team = agents.all().filter((a) => a.id !== profile.id);
   const pending = notes.get(profile.id) ?? [];
   notes.delete(profile.id);
-  const skillList = skillIndex();
   const lines = [
     "<slates_context>",
-    `You are ${profile.name}, one of the student's AI teammates in Slates (the Agent app). Your job: ${profile.job || "general help"}.`,
-    profile.rules.trim() ? `Standing rules from the student:\n${profile.rules.trim()}` : "",
-    `You run on the student's always-on PC (${os.type()}), with full access to it: shell, files and apps. Your working folder is ${WORKSPACE}, shared with the other agents; keep project files in clear subfolders there. The student isn't at this PC: they talk to you from their Mac or phone.`,
-    browser
-      ? "You also have a real Chrome browser (the browser_* tools) whose sign-ins persist between tasks. When a site needs a password, 2FA or a CAPTCHA, ask the student to take over in the Computer panel and wait. Never ask for passwords in chat."
-      : "",
-    "Slates tools: slates_board (their Schoology classes, grades, assignments, messages), slates_find_person, slates_draft_message and slates_draft_reply (drafts only; the student sends them), memory, search_chats, list_skills/get_skill/save_skill/patch_skill, send_file, create_routine/list_routines/update_routine, list_agents/message_agent, send_voice_memo, ask_user.",
-    "When you make a file for the student (a document, slides, a spreadsheet, a PDF, an image), send it with send_file: it lands on their own computer and in this chat. Don't just say where it is on the PC; they can't open that from their laptop or phone.",
-    "Help the student learn and stay organized; never produce graded work for them to hand in as their own. Be concise; lead with the result. Link sources for facts from the web.",
+    generalAgentPrompt({
+      name: profile.name,
+      job: profile.job,
+      rules: profile.rules,
+      style: "",
+      platform: os.type(),
+      workspace: WORKSPACE,
+      browser,
+    }),
     `It is ${localNow()}.`,
-    memoryPrompt([studentBook(), agentNotes(profile.id)]),
-    RECALL_GUIDANCE,
-    `${SKILL_GUIDANCE}${skillList ? `\nSaved skills:\n${skillList}\nIf the student names one with /, open it with get_skill first.` : ""}`,
+    `<memory>\n${renderBooks([agentNotes(profile.id)])}\n</memory>`,
+    'Keep useful preferences and working conventions in your own notes with memory (target "self"). Replace duplicates; skip one-off task details. Never save passwords, codes or keys.',
     team.length ? `Teammates (message_agent, or @Name in a group chat): ${team.map((a) => `${a.name} (${a.job || "general"})`).join("; ")}` : "",
     pending.length ? `Since your last turn:\n${pending.map((n) => `- ${n}`).join("\n")}` : "",
   ];
@@ -263,12 +261,12 @@ function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: b
     const members = (group?.members ?? []).map((id) => getAgent(id)?.name).filter(Boolean).join(", ");
     lines.push(`This message is in the group chat "${group?.name ?? "Group"}" with ${members}. Recent messages:\n${transcriptTail(job.chatId)}\nReply to the group. To bring in a teammate, @mention them by name in your reply. Stay silent on things another member owns: reply with just "PASS" if you have nothing to add.`);
   } else if (job.viaTutor) {
-    lines.push("This was passed on by the student's tutor in Slates' School app, from a conversation with the student. Do it, and post the result here: the student reads it in this chat.");
+    lines.push("Another assistant passed you this task. Complete it using the supplied information and post the result in this chat.");
   } else if (job.source === "agent") {
     lines.push(`This is a handoff from your teammate ${job.from ?? "another agent"}. Do the work, then reply with the answer for them.`);
   } else if (job.source === "routine") {
     const routine = routines.all().find((r) => r.id === job.routineId);
-    lines.push(`This is a scheduled run of your routine "${routine?.name ?? "routine"}". The student isn't watching; post the result for them to read later. If a source is unavailable, report that instead of using stale data.`);
+    lines.push(`This is a scheduled run of your routine "${routine?.name ?? "routine"}". The user isn't watching; post the result for them to read later. If a source is unavailable, report that instead of using stale data.`);
   }
   lines.push("</slates_context>");
   return `${lines.filter(Boolean).join("\n\n")}\n\n${job.text}`;
@@ -291,8 +289,6 @@ function toolView(toolCall: { type?: string; args?: Record<string, unknown> } | 
       const inner = (args.args ?? {}) as Record<string, unknown>;
       if (name === "browser_navigate") return { label: "Opened a page", detail: String(inner.url ?? "") };
       if (name.startsWith("browser_")) return { label: `Browser: ${name.slice(8).replace(/_/g, " ")}` };
-      if (name === "slates_board") return { label: "Read your Schoology board" };
-      if (name.startsWith("slates_draft")) return { label: "Drafted a message for you" };
       if (name === "memory") return { label: "Updated its memory", detail: String(inner.content ?? inner.old_text ?? "") };
       if (name === "search_chats") return { label: "Searched past chats", detail: String(inner.query ?? inner.chat ?? "") };
       if (name === "get_skill") return { label: "Opened a skill", detail: String(inner.name ?? "") };
@@ -348,8 +344,11 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     ...(mcp ? { mcpServers: { browser: mcp } } : {}),
   };
 
-  let sdk = profile.runtimeId
-    ? await Agent.resume(profile.runtimeId, options).catch((error: unknown) => {
+  const runtimeId = profile.runtimeId && await runtimeStore.agents.get({ agentId: profile.runtimeId }).catch(() => null)
+    ? profile.runtimeId
+    : undefined;
+  let sdk = runtimeId
+    ? await Agent.resume(runtimeId, options).catch((error: unknown) => {
         console.error(`[agent] couldn't resume ${profile.name}'s context, starting a new one:`, error instanceof Error ? error.message : error);
         return null;
       })
@@ -363,7 +362,7 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   // A turn the host's restart cut off still counts as going, and the SDK
   // refuses this one until it's expired. The student and the agent both hear
   // why the work stopped, and the send below forces past it.
-  const cutOff = profile.runtimeId === sdk.agentId && (await hasCutOffTurn(runtimeStore, sdk.agentId));
+  const cutOff = runtimeId === sdk.agentId && (await hasCutOffTurn(runtimeStore, sdk.agentId));
   if (cutOff) {
     addNote(profile.id, "Your previous turn was cut off partway through: Slates restarted on the PC. Anything it was doing may be unfinished, and programs it started may have stopped. Check before carrying on.");
     post(job.chatId, { id: newId("evt"), at: Date.now(), type: "notice", text: `${profile.name}'s last turn was cut off when Slates restarted on the PC, so it's picking up from here.` });
@@ -508,6 +507,7 @@ function learnFrom(profile: AgentProfile, job: Job, steps: string[], wrote: { me
     const turn: ReviewTurn = {
       helper: { key: `agent:${profile.id}`, name: profile.name, kind: "agent", job: profile.job },
       notes: agentNotes(profile.id),
+      selfOnly: true,
       transcript: chatLines(job.chatId, 16),
       steps,
       wroteMemory: wrote.memory,

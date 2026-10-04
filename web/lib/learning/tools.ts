@@ -59,6 +59,8 @@ export function asAiTools(caps: Record<string, Capability>): ToolSet {
 export interface Helper {
   /** How memory and skills credit it: an agent's name, or "Tutor". */
   name: string;
+  /** General agents only keep their own notes; no shared profile, recall or skills. */
+  selfOnly?: boolean;
   /** Its own notes. */
   notes: Book;
   /** The chat it's in, left out of recall since it's already in context. */
@@ -76,6 +78,26 @@ export function learningTools(helper: Helper): Record<string, Capability> {
       // Showing it is a courtesy; the change is already saved.
     }
   };
+
+  if (helper.selfOnly) {
+    return {
+      memory: capability(
+        "Save, change or remove your own notes for future tasks. Use target self. Replace and remove find an entry by a short piece of its text.",
+        z.object({
+          action: z.enum(["add", "replace", "remove"]),
+          target: z.literal("self"),
+          content: z.string().optional(),
+          old_text: z.string().optional(),
+        }),
+        (args) => {
+          const outcome = editBook(helper.notes, args, helper.name);
+          if (!outcome.ok) throw new Error(outcome.message);
+          if (outcome.change) learned(outcome.change);
+          return outcome.message;
+        },
+      ),
+    };
+  }
 
   return {
     memory: capability(
