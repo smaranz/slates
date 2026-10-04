@@ -34,7 +34,9 @@ export async function POST(request: Request) {
     body = {};
   }
   try {
-    const { domain } = await scraper<{ domain: string | null }>("/health");
+    // Not through `scraper()`: health reports the last sync's error ("Signed out…"), which is why we're here.
+    const health = await fetch(`${SCRAPER_URL}/health`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const { domain } = (await health.json()) as { domain: string | null };
     if (!domain) return Response.json({ error: "Schoology isn't set up on the PC yet." }, { status: 400 });
 
     if (body.op === "open") {
