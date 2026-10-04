@@ -152,7 +152,7 @@ export default function F45View({
             {selected <= today &&
               (logged ? (
                 <button type="button" className={s.loggedLine} onClick={() => onExercise(logged)}>
-                  <Icon path={ICON.check} size={14} /> Logged{logged.f45?.time ? ` the ${clock(logged.f45.time)} class` : ""} · {num(logged.calories)} cal
+                  <Icon path={ICON.check} size={14} /> Logged{logged.f45?.time ? ` ${clock(logged.f45.time)}` : ""} · {num(logged.calories)} cal
                 </button>
               ) : (
                 <button type="button" className={s.primaryBtn} onClick={() => onLog(selected)}>

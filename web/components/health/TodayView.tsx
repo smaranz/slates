@@ -144,8 +144,7 @@ function nextClassLine(f45: F45Day, isToday: boolean): string {
   const next = f45.classes.find((c) => c.start > hhmm);
   if (!next) return `Last class ${clock(f45.classes.at(-1)!.start)}`;
   const left = next.size - next.booked;
-  const spots = next.status !== "active" ? "booking closed" : left > 0 ? `${left} spots` : "full";
-  return `Next ${clock(next.start)}${next.coach ? ` · ${next.coach.split(" ")[0]}` : ""} · ${spots}`;
+  return `Next ${clock(next.start)} · ${next.status !== "active" ? "booking closed" : left > 0 ? `${left} open` : "full"}`;
 }
 
 function F45Today({ f45, day, today, logged, onLog, studio }: { f45: F45Day; day: string; today: string; logged: ExerciseEntry | undefined; onLog: () => void; studio: string }) {
