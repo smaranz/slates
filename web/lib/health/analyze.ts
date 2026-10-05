@@ -2,7 +2,7 @@ import { estimateHealthScore, reconcileHealthScore, roundNutrition } from "./nut
 import type { FoodAnalysis, Nutrition } from "./types";
 
 /**
- * A meal's nutrition from a photo or a few typed words, read by a vision model.
+ * A meal's nutrition from a photo or a few typed words, read by Claude.
  *
  * The prompts are CalAi's (conservative portions, one serving, macros that add
  * up, a 1–10 score), widened to take the two other things people photograph
@@ -12,14 +12,12 @@ import type { FoodAnalysis, Nutrition } from "./types";
  */
 
 /**
- * GPT-6 Luna, which reads photos: through OpenRouter first, since that's the
- * key that works on the host, then straight from OpenAI. The same order Study
- * Studio reads scans in.
+ * Claude Sonnet 5.5, the student's pick for reading meals, through the Claude
+ * Code login on the computer that runs Slates, the way Study reaches Claude.
+ * It gets no tools and keeps no session: it looks at the photo or the words
+ * and answers.
  */
-export const FOOD_READERS = [
-  { backend: "openrouter", model: "openai/gpt-6-luna" },
-  { backend: "openai", model: "gpt-6-luna" },
-] as const;
+export const FOOD_MODEL = "claude-sonnet-5-5";
 
 export interface ReadInput {
   prompt: string;
@@ -59,47 +57,45 @@ const SCORE = `healthScore rates one serving's overall nutritional quality:
 1-2 deep-fried combos, sugary desserts, ultra-processed snacks.
 Avocado toast on whole grain is about 7-8; veggie tenders with fries about 3-4. Do not inflate scores for plant-based junk food.`;
 
-/** A provider's "wrong key" error, which for OpenAI also echoes part of the key: never shown as is. */
-const REFUSED = /api key|unauthori[sz]ed|\b401\b|auth(?:entication)? credentials|no auth/i;
+/** Claude Code's own wording when its login is missing or spent. */
+const UNAVAILABLE = /not logged in|unauthor|authentication|no api key|credit balance|usage limit|spend limit|rate limit|command not found|ENOENT/i;
 
 async function readWithModel({ prompt, image }: ReadInput): Promise<string> {
-  // Loaded on first use: the provider clients are server-only, and tests swap the reader out.
-  const [{ generateText }, { openaiModel, openrouterModel }, { noteFromUsage }] = await Promise.all([
+  // Loaded on first use: the provider is server-only, and tests swap the reader out.
+  const [{ generateText }, { claudeCode }, { noteFromUsage }] = await Promise.all([
     import("ai"),
-    import("../ai-usage/clients"),
+    import("ai-sdk-provider-claude-code"),
     import("../ai-usage/note"),
   ]);
-  const refused: string[] = [];
-  let failure: string | null = null;
-  for (const { backend, model } of FOOD_READERS) {
-    try {
-      const { text, usage } = await generateText({
-        model: backend === "openrouter" ? openrouterModel(model) : openaiModel(model),
-        system: SYSTEM,
-        messages: [
-          {
-            role: "user",
-            content: image
-              ? [
-                  { type: "text", text: prompt },
-                  { type: "file", data: image.data, mediaType: image.mediaType, filename: "meal.jpg" },
-                ]
-              : [{ type: "text", text: prompt }],
-          },
-        ],
-        // Reading a plate is quick work; low effort keeps a scan to a few seconds.
-        providerOptions: backend === "openai" ? { openai: { reasoningEffort: "low" } } : { openrouter: { reasoning: { effort: "low" } } },
-        abortSignal: AbortSignal.timeout(90_000),
-      });
-      noteFromUsage("health", model, backend, usage);
-      return text;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (REFUSED.test(message)) refused.push(backend === "openai" ? "OpenAI" : "OpenRouter");
-      else failure ??= message.split("\n")[0]!;
+  try {
+    const { text, usage } = await generateText({
+      model: claudeCode(FOOD_MODEL, { tools: [], persistSession: false }),
+      system: SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: image
+            ? [
+                { type: "text", text: prompt },
+                { type: "file", data: image.data, mediaType: image.mediaType, filename: "meal.jpg" },
+              ]
+            : [{ type: "text", text: prompt }],
+        },
+      ],
+      // Reading a plate is quick work; low effort keeps a scan to seconds.
+      providerOptions: { "claude-code": { effort: "low" } },
+      abortSignal: AbortSignal.timeout(90_000),
+    });
+    noteFromUsage("health", FOOD_MODEL, "claude-code", usage);
+    return text;
+  } catch (error) {
+    const message = error instanceof Error ? error.message.split("\n")[0]! : String(error);
+    if (UNAVAILABLE.test(message)) {
+      throw new Error(`Claude Sonnet 5.5 reads meals through the Claude Code login on the computer that runs Slates, and it isn't available (${message}). Run \`claude\` there to sign in`);
     }
+    if (/abort|timed? ?out/i.test(message)) throw new Error("Claude took too long. Try again");
+    throw error;
   }
-  throw new Error(failure ?? `the ${refused.join(" and ")} ${refused.length === 1 ? "key was" : "keys were"} refused. Add a working one in AI Usage`);
 }
 
 let reader: FoodReader = readWithModel;

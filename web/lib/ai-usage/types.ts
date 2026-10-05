@@ -203,7 +203,7 @@ export const AGENT_PROVIDERS: Record<UsageAgent, UsageProvider[]> = {
   image: ["elevenlabs"],
   media: ["elevenlabs"],
   agent: ["cursor", "elevenlabs"],
-  health: ["openrouter", "openai"],
+  health: ["claude-code"],
 };
 
 export const PROVIDER_LABEL: Record<UsageProvider, string> = {
