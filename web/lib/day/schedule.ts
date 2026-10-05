@@ -6,8 +6,10 @@
  * Thursday, 11:00 on Wednesday, 10:00 on Friday. After school (home at 4:00,
  * or 3:15 on Wednesday and Friday) every day has the same shape: a snack and
  * freshening up, coding and product work until dinner at 7:00, Instagram
- * content after dinner, free time, sleep at 10:30. Weekends are for studying,
- * building and content.
+ * content after dinner, free time, sleep at 10:30. Weekends are seven hours
+ * of study in three sessions (9:00–12:00, 1:00–3:30 and 4:00–5:30, with lunch
+ * and a snack between them), then coding and product work, dinner, Instagram
+ * content and free time.
  *
  * Kept as a timetable so a change is one line: each row starts a block that
  * runs until the next row, and the last one runs until sleep. The device's
@@ -87,13 +89,15 @@ const FRIDAY: Template = {
 const WEEKEND: Template = {
   rows: [
     ["08:00", "routine", "Get ready + breakfast"],
-    ["09:00", "study", "Study"],
+    ["09:00", "study", "Study session 1"],
     ["12:00", "meal", "Lunch"],
-    ["13:00", "build", "Coding + product"],
-    ["16:00", "routine", "Snack + break"],
-    ["16:30", "content", "Instagram content"],
+    ["13:00", "study", "Study session 2"],
+    ["15:30", "routine", "Snack + break"],
+    ["16:00", "study", "Study session 3"],
+    ["17:30", "build", "Coding + product"],
     ["19:00", "meal", "Dinner"],
-    ["19:30", "free", "Free time"],
+    ["19:30", "content", "Instagram content"],
+    ["21:00", "free", "Free time"],
   ],
   sleep: "22:30",
 };
@@ -107,7 +111,7 @@ export const KIND_LABEL: Record<Kind, string> = {
   school: "School",
   study: "Study",
   meal: "Meals",
-  routine: "Getting ready + snacks",
+  routine: "Getting ready + breaks",
   free: "Free time",
   sleep: "Sleep",
 };
@@ -158,11 +162,31 @@ export function planFor(day: string): DayPlan {
   return { day, wake: blocks[0]!.start, sleep, school: school ? { leave: school.start, home: school.end } : null, blocks };
 }
 
-/** Minutes spent on each kind of block, most first. */
-export function splitOf(plan: DayPlan): { kind: Kind; minutes: number }[] {
+/** Minutes spent on each kind of block, most first, over one day or several. */
+export function splitOf(...plans: DayPlan[]): { kind: Kind; minutes: number }[] {
   const by = new Map<Kind, number>();
-  for (const b of plan.blocks) by.set(b.kind, (by.get(b.kind) ?? 0) + b.end - b.start);
+  for (const b of plans.flatMap((p) => p.blocks)) by.set(b.kind, (by.get(b.kind) ?? 0) + b.end - b.start);
   return [...by].map(([kind, minutes]) => ({ kind, minutes })).sort((a, b) => b.minutes - a.minutes);
+}
+
+/** How long the night after `day` is: its bedtime to the next morning's wake-up. */
+export function nightAfter(day: string): { sleep: number; wake: number; minutes: number } {
+  const { sleep } = planFor(day);
+  const { wake } = planFor(addDays(day, 1));
+  return { sleep, wake, minutes: DAY_MINUTES - sleep + wake };
+}
+
+/** Half an hour of night drawn past the latest bedtime, so every day visibly ends in sleep. */
+export const NIGHT_TAIL = 30;
+
+/**
+ * The stretch of the clock a timeline covers for these days: the earliest
+ * wake-up, on the hour, to the latest bedtime plus a sliver of night. Days
+ * drawn side by side share one, so the same hour sits at the same height.
+ */
+export function axisOf(plans: DayPlan[]): { start: number; end: number } {
+  const start = Math.floor(Math.min(...plans.map((p) => p.wake)) / 60) * 60;
+  return { start, end: Math.max(...plans.map((p) => p.sleep)) + NIGHT_TAIL };
 }
 
 /* ── now ───────────────────────────────────────────────────────────────── */
@@ -214,7 +238,21 @@ export function clock(minutes: number): string {
 
 /** "4:30 – 7:00 PM", or "11:00 AM – 3:15 PM" across noon. */
 export function span(start: number, end: number): string {
-  const a = clock(start);
-  const b = clock(end);
+  return joined(clock(start), clock(end));
+}
+
+/** The same span with whole hours bare, for narrow columns: "4:30 – 7 PM", "9 AM – 12 PM". */
+export function brief(start: number, end: number): string {
+  const bare = (t: string) => t.replace(":00 ", " ");
+  return joined(bare(clock(start)), bare(clock(end)));
+}
+
+/** An hour on the timeline's edge: "6 AM", "12 PM". */
+export function hourLabel(minutes: number): string {
+  return clock(minutes).replace(":00 ", " ");
+}
+
+/** Two times as a span, saying AM or PM once when both share it. */
+function joined(a: string, b: string): string {
   return a.slice(-2) === b.slice(-2) ? `${a.slice(0, -3)} – ${b}` : `${a} – ${b}`;
 }

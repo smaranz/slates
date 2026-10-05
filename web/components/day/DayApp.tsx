@@ -4,12 +4,15 @@ import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties }
 
 import {
   addDays,
+  axisOf,
+  brief,
   clock,
   clockAt,
   dayDate,
-  DAY_MINUTES,
+  hourLabel,
   KIND_LABEL,
   momentAt,
+  nightAfter,
   planFor,
   span,
   splitOf,
@@ -23,18 +26,22 @@ import { Icon, ICON } from "../ui";
 import s from "./day.module.css";
 
 /**
- * Schedule: the student's day, hour by hour, and where the clock is in it.
+ * Schedule: the student's week as time you can see.
  *
- * It opens on today: what's on now, how long it has left and what comes
- * next, above the whole day as a timeline that fills in as the hours pass.
- * The next six days are a tap away. One column on a phone; on a wider window
- * now and the day's split sit beside the timeline.
+ * Every block is drawn as long as it lasts, on one clock from the first
+ * wake-up to bedtime, so a three-hour study session looks like three hours
+ * and half an hour of dinner like half an hour, and a line marks now. Beside
+ * the timeline: what's on this minute, how long it has left and what follows,
+ * tonight's sleep, and where the hours go.
+ *
+ * A phone gets one day with the now card first. A window wide enough for it
+ * gets the whole coming week side by side, a column a day; Day narrows it to
+ * one, and a column's heading opens that day.
  */
 
 /* ── icons (24×24, filled, in Slates' own style) ───────────────────────── */
 
 const D = {
-  sun: "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zM11 1h2v3h-2zm0 19h2v3h-2zM1 11h3v2H1zm19 0h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z",
   cap: "M12 3 1 8.5 12 14l11-5.5zM5 11.6v4.9c0 1.9 3.1 3.5 7 3.5s7-1.6 7-3.5v-4.9l-7 3.5zm15.4-1.8H22V16h-1.6z",
   code: "M8.6 6.6 3.2 12l5.4 5.4 1.4-1.4L6 12l4-4zm6.8 0-1.4 1.4 4 4-4 4 1.4 1.4 5.4-5.4z",
   camera:
@@ -88,6 +95,34 @@ function useMinute(): number {
   return useSyncExternalStore(subscribeClock, thisMinute, thisMinute);
 }
 
+/* ── the window ────────────────────────────────────────────────────────── */
+
+/** Wide enough for seven columns that can still hold "Coding + product". */
+const WEEK_FITS = "(min-width: 1360px)";
+
+function subscribeWidth(onChange: () => void) {
+  const media = window.matchMedia(WEEK_FITS);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function useWeekFits(): boolean {
+  return useSyncExternalStore(subscribeWidth, () => window.matchMedia(WEEK_FITS).matches, () => false);
+}
+
+type View = "day" | "week";
+
+const VIEW_KEY = "slates.schedule.view";
+
+/** The view last chosen with the Day / Week switch; the week until then, wherever it fits. */
+function savedView(): View {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === "day" ? "day" : "week";
+  } catch {
+    return "week";
+  }
+}
+
 /* ── words ─────────────────────────────────────────────────────────────── */
 
 function dayName(day: string, today: string): string {
@@ -102,20 +137,34 @@ function dateLine(day: string, today: string): string {
   return dayDate(day).toLocaleDateString("en-US", named ? { weekday: "long", month: "long", day: "numeric" } : { month: "long", day: "numeric" });
 }
 
-/** Tall enough to read at 30 minutes, longer for longer blocks, capped so school doesn't swallow the page. */
-const pillHeight = (minutes: number) => Math.round(Math.min(132, Math.max(44, minutes * 0.6)));
+const minutesOf = (plan: DayPlan, kind: Kind) => plan.blocks.reduce((sum, b) => sum + (b.kind === kind ? b.end - b.start : 0), 0);
 
 /* ── the room ──────────────────────────────────────────────────────────── */
 
 export default function DayApp() {
   const { clear } = useMode();
   const { day: today, minutes } = clockAt(useMinute());
+  const weekFits = useWeekFits();
+  const [preferred, setPreferred] = useState<View>(savedView);
   const [picked, setPicked] = useState<string | null>(null);
   const week = Array.from({ length: 7 }, (_, i) => addDays(today, i));
   // A picked day holds while it's still in the coming week; after that it's today again.
-  const day = picked && week.includes(picked) ? picked : today;
+  const chosen = picked && week.includes(picked) ? picked : null;
+  const view: View = weekFits && preferred === "week" && !chosen ? "week" : "day";
+  const day = view === "day" && chosen ? chosen : today;
   const isToday = day === today;
   const plan = planFor(day);
+  const plans = view === "week" ? week.map(planFor) : [plan];
+
+  const show = (next: View) => {
+    setPreferred(next);
+    if (next === "week") setPicked(null);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // Storage blocked: the choice holds until the room closes.
+    }
+  };
 
   // The traffic lights sit over the header's left end in the desktop shell.
   useEffect(() => {
@@ -130,8 +179,19 @@ export default function DayApp() {
             <Icon path={ICON.chevronLeft} size={13} /> Slates
           </button>
           <span className="ui-top-title">Schedule</span>
+          {weekFits && (
+            <div className={s.views} role="group" aria-label="Show">
+              <button type="button" aria-pressed={view === "day"} onClick={() => show("day")}>
+                Day
+              </button>
+              <button type="button" aria-pressed={view === "week"} onClick={() => show("week")}>
+                Week
+              </button>
+            </div>
+          )}
           <span className={s.spacer} />
-          {!isToday && (
+          {/* With the week preferred, the switch is the way back. */}
+          {!isToday && !(weekFits && preferred === "week") && (
             <button type="button" className={s.todayBtn} onClick={() => setPicked(null)}>
               Back to today
             </button>
@@ -139,24 +199,16 @@ export default function DayApp() {
         </header>
 
         <div className={s.scroll}>
-          <div className={s.page}>
-            <div className={s.layout}>
-              <div className={s.side}>
-                <div className={s.head}>
-                  <h1>{dayName(day, today)}</h1>
-                  <p>
-                    <span>{dateLine(day, today)}</span>
-                    <span className={s.dayChip} data-kind={plan.school ? "school" : "free"}>
-                      <Icon path={plan.school ? D.cap : D.spark} size={13} />
-                      {plan.school ? `School ${span(plan.school.leave, plan.school.home)}` : "No school"}
-                    </span>
-                  </p>
-                </div>
-                <WeekStrip week={week} day={day} today={today} onPick={(d) => setPicked(d === today ? null : d)} />
-                {isToday && <NowCard moment={momentAt(today, minutes)} />}
-                <Split plan={plan} />
-              </div>
-              <Timeline key={day} plan={plan} minutes={isToday ? minutes : null} />
+          <div className={s.page} data-view={view}>
+            <div className={s.rail}>
+              <DayHead day={day} today={today} plan={plan} />
+              {view === "day" && <WeekStrip week={week} day={day} today={today} onPick={setPicked} />}
+              {isToday && <NowCard moment={momentAt(today, minutes)} />}
+              <Tonight day={day} today={today} />
+              <Hours plans={plans} title={view === "week" ? "The next 7 days" : `${dayName(day, today)}'s hours`} />
+            </div>
+            <div className={s.stage}>
+              <TimeGrid key={view === "week" ? "week" : day} plans={plans} today={today} minutes={minutes} view={view} onOpen={setPicked} />
             </div>
           </div>
         </div>
@@ -165,9 +217,25 @@ export default function DayApp() {
   );
 }
 
+function DayHead({ day, today, plan }: { day: string; today: string; plan: DayPlan }) {
+  const study = minutesOf(plan, "study");
+  return (
+    <div className={s.head}>
+      <h1>{dayName(day, today)}</h1>
+      <p>
+        <span>{dateLine(day, today)}</span>
+        <span className={s.chip} data-kind={plan.school ? "school" : "study"}>
+          <Icon path={plan.school ? D.cap : D.book} size={13} />
+          {plan.school ? `School ${span(plan.school.leave, plan.school.home)}` : study ? `No school · ${fmtMinutes(study)} of study` : "No school"}
+        </span>
+      </p>
+    </div>
+  );
+}
+
 function WeekStrip({ week, day, today, onPick }: { week: string[]; day: string; today: string; onPick: (day: string) => void }) {
   return (
-    <div className={s.week} role="group" aria-label="Pick a day">
+    <div className={s.strip} role="group" aria-label="Pick a day">
       {week.map((d) => {
         const plan = planFor(d);
         const date = dayDate(d);
@@ -175,17 +243,17 @@ function WeekStrip({ week, day, today, onPick }: { week: string[]; day: string; 
           <button
             key={d}
             type="button"
-            className={s.weekDay}
+            className={s.stripDay}
             aria-pressed={d === day}
             data-today={d === today || undefined}
             aria-label={`${dayName(d, today)}, ${date.toLocaleDateString("en-US", { month: "long", day: "numeric" })}${plan.school ? ", school" : ""}`}
             onClick={() => onPick(d)}
           >
-            <span className={s.weekName}>{date.toLocaleDateString("en-US", { weekday: "short" })}</span>
-            <span className={s.weekDate}>{date.getDate()}</span>
-            <span className={s.weekBar} aria-hidden>
-              {plan.blocks.map((b, i) => (
-                <span key={i} data-kind={b.kind} style={{ flexGrow: b.end - b.start }} />
+            <span className={s.stripDow}>{date.toLocaleDateString("en-US", { weekday: "short" })}</span>
+            <span className={s.stripDate}>{date.getDate()}</span>
+            <span className={s.stripShape} aria-hidden>
+              {plan.blocks.map((b) => (
+                <span key={b.start} data-kind={b.kind} style={{ flexGrow: b.end - b.start }} />
               ))}
             </span>
           </button>
@@ -195,37 +263,69 @@ function WeekStrip({ week, day, today, onPick }: { week: string[]; day: string; 
   );
 }
 
+/** "1h 24m" with the numbers large and the units small. */
+function Countdown({ minutes }: { minutes: number }) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return (
+    <b aria-hidden>
+      {h > 0 && (
+        <>
+          {h}
+          <small>h</small>
+        </>
+      )}
+      {(m > 0 || h === 0) && (
+        <>
+          {m}
+          <small>m</small>
+        </>
+      )}
+    </b>
+  );
+}
+
 function NowCard({ moment }: { moment: Moment }) {
   const { block, next, progress, left } = moment;
+  const asleep = block.kind === "sleep";
+  const until = asleep ? `until ${clock(block.end)}` : "left";
   return (
     <section className={s.now} data-kind={block.kind} aria-label="Now">
       <div className={s.nowTop}>
-        <div className={s.nowText}>
-          <span className={s.eyebrow}>
-            <span className={s.liveDot} aria-hidden />
-            Now · {span(block.start, block.end)}
-          </span>
-          <h2 className={s.nowTitle}>{block.title}</h2>
-        </div>
+        <span className={s.eyebrow}>
+          <span className={s.liveDot} aria-hidden />
+          Now
+        </span>
+        <span className={s.nowSpan}>{span(block.start, block.end)}</span>
+      </div>
+      <div className={s.nowName}>
         <span className={s.badge} aria-hidden>
-          <Icon path={KIND_ICON[block.kind]} size={24} />
+          <Icon path={KIND_ICON[block.kind]} size={22} />
         </span>
+        <h2>{block.title}</h2>
       </div>
-      <div
-        className={s.bar}
-        role="progressbar"
-        aria-label={`How far through ${block.title.toLowerCase()}`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(progress * 100)}
-      >
-        <span style={{ transform: `scaleX(${progress})` }} />
-      </div>
-      <div className={s.barLegend}>
-        <span>
-          <b>{fmtMinutes(left)}</b> left
+      <p className={s.count}>
+        <Countdown minutes={left} />
+        <span aria-hidden>{until}</span>
+        <span className="sr-only">
+          {fmtMinutes(left)} {until}
         </span>
-        <span>{block.kind === "sleep" ? `Up at ${clock(block.end)}` : `Ends ${clock(block.end)}`}</span>
+      </p>
+      <div>
+        <div
+          className={s.track}
+          role="progressbar"
+          aria-label={`How far through ${block.title.toLowerCase()}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <span style={{ transform: `scaleX(${progress})` }} />
+        </div>
+        <div className={s.trackEnds} aria-hidden>
+          <span>{clock(block.start)}</span>
+          <span>{clock(block.end)}</span>
+        </div>
       </div>
       <div className={s.next} data-kind={next.kind}>
         <span className={s.nextLabel}>Next</span>
@@ -239,21 +339,26 @@ function NowCard({ moment }: { moment: Moment }) {
   );
 }
 
-function Split({ plan }: { plan: DayPlan }) {
+/** Where the waking hours go, each kind as its share of them. */
+function Hours({ plans, title }: { plans: DayPlan[]; title: string }) {
+  const awake = plans.reduce((sum, p) => sum + p.sleep - p.wake, 0);
   return (
-    <section className={s.split} aria-labelledby="day-split">
-      <h2 id="day-split">How the day is split</h2>
-      <div className={s.splitBar} aria-hidden>
-        {plan.blocks.map((b, i) => (
-          <span key={i} data-kind={b.kind} style={{ flexGrow: b.end - b.start }} />
-        ))}
+    <section className={s.hours} aria-labelledby="day-hours">
+      <div className={s.hoursHead}>
+        <h2 id="day-hours">{title}</h2>
+        <span>{fmtMinutes(awake)} awake</span>
       </div>
-      <ul className={s.splitList}>
-        {splitOf(plan).map(({ kind, minutes }) => (
-          <li key={kind} data-kind={kind}>
-            <i aria-hidden />
-            <span>{KIND_LABEL[kind]}</span>
+      <ul className={s.hoursList}>
+        {splitOf(...plans).map(({ kind, minutes }, i) => (
+          <li key={kind} data-kind={kind} style={{ "--i": i } as CSSProperties}>
+            <span className={s.hoursName}>
+              <i aria-hidden />
+              {KIND_LABEL[kind]}
+            </span>
             <b>{fmtMinutes(minutes)}</b>
+            <span className={s.hoursBar} aria-hidden>
+              <span style={{ transform: `scaleX(${minutes / awake})` }} />
+            </span>
           </li>
         ))}
       </ul>
@@ -261,80 +366,200 @@ function Split({ plan }: { plan: DayPlan }) {
   );
 }
 
-type RowState = "past" | "now" | undefined;
+function Tonight({ day, today }: { day: string; today: string }) {
+  const night = nightAfter(day);
+  const next = planFor(addDays(day, 1));
+  const name = day === today ? "Tonight" : `${dayName(day, today)} night`;
+  return (
+    <section className={s.tonight} data-kind="sleep" aria-label={name}>
+      <span className={s.tonightIcon} aria-hidden>
+        <Icon path={ICON.tonight} size={18} />
+      </span>
+      <div className={s.tonightText}>
+        <h2>{name}</h2>
+        <p>
+          {clock(night.sleep)} to {clock(night.wake)}
+        </p>
+      </div>
+      <b className={s.tonightLength}>
+        {fmtMinutes(night.minutes)}
+        <small>of sleep</small>
+      </b>
+      <p className={s.tonightNext}>
+        <span>{dayName(next.day, today)}</span>
+        <span>{next.school ? `School ${span(next.school.leave, next.school.home)}` : `No school, up at ${clock(next.wake)}`}</span>
+      </p>
+    </section>
+  );
+}
 
-/** The day top to bottom. On today, what's done steps back and the block the clock is in fills as it goes. */
-function Timeline({ plan, minutes }: { plan: DayPlan; minutes: number | null }) {
-  const list = useRef<HTMLOListElement>(null);
-  const stateOf = (start: number, end: number): RowState => (minutes === null || minutes < start ? undefined : minutes >= end ? "past" : "now");
-  const upNext = planFor(addDays(plan.day, 1)).wake;
+/* ── the timeline ──────────────────────────────────────────────────────── */
 
-  // On a wide window the timeline sits beside the now card, so the current block is brought into view when
-  // it opens below the fold. A phone shows the now card first and stays at the top.
+/**
+ * Days on one clock: the hours down the left, a column a day, each block as
+ * tall as it is long. On today the hours already gone step back, the block
+ * the clock is in is ringed, and a line marks the minute.
+ */
+function TimeGrid({ plans, today, minutes, view, onOpen }: { plans: DayPlan[]; today: string; minutes: number; view: View; onOpen: (day: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const axis = axisOf(plans);
+  const length = axis.end - axis.start;
+  const at = (m: number) => (m - axis.start) / length;
+  const hours: number[] = [];
+  for (let h = axis.start; h <= axis.end; h += 60) hours.push(h);
+  const nowShown = plans.some((p) => p.day === today) && minutes >= axis.start && minutes < axis.end;
+  // The minute's tag takes the place of an hour label it would half cover.
+  const labelled = hours.filter((h) => !nowShown || Math.abs(h - minutes) >= 24);
+
+  // On a short window the line for now can open below the fold; bring it up once.
   useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>('[aria-current="time"]');
-    if (!row || !window.matchMedia("(min-width: 900px)").matches) return;
-    const { top, bottom } = row.getBoundingClientRect();
-    if (top < 0 || bottom > window.innerHeight) row.scrollIntoView({ block: "center" });
+    const line = ref.current?.querySelector<HTMLElement>("[data-now-line]");
+    if (!line || !window.matchMedia("(min-width: 900px)").matches) return;
+    const { top, bottom } = line.getBoundingClientRect();
+    if (top < 0 || bottom > window.innerHeight) line.scrollIntoView({ block: "center" });
   }, []);
 
-  const marker = (i: number, kind: string, time: number, icon: string, title: string, state: RowState, meta?: string) => (
-    <li
-      className={`${s.row} ${s.marker}`}
-      data-kind={kind}
-      data-state={state}
-      aria-current={state === "now" ? "time" : undefined}
-      style={{ "--i": i } as CSSProperties}
-    >
-      <span className={s.time}>{clock(time)}</span>
-      <span className={s.pill} aria-hidden>
-        <Icon path={icon} size={18} />
-      </span>
-      <span className={s.body}>
-        <span className={s.title}>
-          {title}
-          {state === "now" && <span className={s.nowChip}>Now</span>}
-        </span>
-        {meta && <span className={s.meta}>{meta}</span>}
-      </span>
-    </li>
-  );
-
   return (
-    <ol ref={list} className={s.timeline} aria-label={`${dayDate(plan.day).toLocaleDateString("en-US", { weekday: "long" })}, hour by hour`}>
-      {marker(0, "wake", plan.wake, D.sun, "Wake up", minutes !== null && minutes >= plan.wake ? "past" : undefined)}
-      {plan.blocks.map((b, i) => {
-        const state = stateOf(b.start, b.end);
-        const length = b.end - b.start;
-        const progress = state === "now" ? (minutes! - b.start) / length : 0;
-        return (
-          <li
-            key={b.start}
-            className={s.row}
-            data-kind={b.kind}
-            data-state={state}
-            aria-current={state === "now" ? "time" : undefined}
-            style={{ "--i": i + 1, "--h": `${pillHeight(length)}px`, "--p": progress } as CSSProperties}
-          >
-            <span className={s.time}>{clock(b.start)}</span>
-            <span className={s.pill} aria-hidden>
-              <span className={s.fill} />
-              <Icon path={KIND_ICON[b.kind]} size={18} />
+    <div ref={ref} className={s.grid} data-view={view} style={{ "--hours": length / 60, "--cols": plans.length } as CSSProperties}>
+      {view === "week" && (
+        <div className={s.heads}>
+          {plans.map((p) => (
+            <ColumnHead key={p.day} plan={p} today={today} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+      <div className={s.body}>
+        <div className={s.gutter} aria-hidden>
+          {labelled.map((h) => (
+            <span key={h} style={{ "--at": at(h) } as CSSProperties}>
+              {hourLabel(h)}
             </span>
-            <span className={s.body}>
-              <span className={s.title}>
-                {b.title}
-                {state === "now" && <span className={s.nowChip}>Now</span>}
-              </span>
-              <span className={s.meta}>
-                {state === "now" ? `${fmtMinutes(b.end - minutes!)} left` : fmtMinutes(length)}
-                {b.kind === "school" && ` · home by ${clock(b.end)}`}
-              </span>
+          ))}
+          {nowShown && (
+            <span className={s.nowTag} style={{ "--at": at(minutes) } as CSSProperties}>
+              {clock(minutes).slice(0, -3)}
             </span>
-          </li>
-        );
-      })}
-      {marker(plan.blocks.length + 1, "sleep", plan.sleep, ICON.tonight, "Sleep", stateOf(plan.sleep, DAY_MINUTES), `Up at ${clock(upNext)}`)}
-    </ol>
+          )}
+        </div>
+        <div className={s.cols}>
+          <div className={s.rules} aria-hidden>
+            {hours.map((h) => (
+              <i key={h} style={{ "--at": at(h) } as CSSProperties} />
+            ))}
+          </div>
+          {plans.map((p, c) => (
+            <Column key={p.day} plan={p} column={c} axis={axis} now={p.day === today ? minutes : null} view={view} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColumnHead({ plan, today, onOpen }: { plan: DayPlan; today: string; onOpen: (day: string) => void }) {
+  const date = dayDate(plan.day);
+  const study = minutesOf(plan, "study");
+  return (
+    <button
+      type="button"
+      className={s.colHead}
+      data-today={plan.day === today || undefined}
+      onClick={() => onOpen(plan.day)}
+      aria-label={`Open ${dayName(plan.day, today)}, ${date.toLocaleDateString("en-US", { month: "long", day: "numeric" })}`}
+    >
+      <span className={s.colDay}>
+        <span className={s.colDow}>{date.toLocaleDateString("en-US", { weekday: "short" })}</span>
+        <span className={s.colDate}>{date.getDate()}</span>
+      </span>
+      <span className={s.colNote} data-kind={plan.school ? "school" : "study"}>
+        <Icon path={plan.school ? D.cap : D.book} size={12} />
+        {plan.school ? (
+          <>
+            <span className={s.colLong}>{brief(plan.school.leave, plan.school.home)}</span>
+            {/* A laptop's narrower columns drop AM and PM: school hours can't be mistaken. */}
+            <span className={s.colShort}>{brief(plan.school.leave, plan.school.home).replace(/ [AP]M/g, "")}</span>
+          </>
+        ) : (
+          <span>{study ? `${fmtMinutes(study)} study` : "No school"}</span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+type BlockState = "past" | "now" | undefined;
+
+function Column({
+  plan,
+  column,
+  axis,
+  now,
+  view,
+}: {
+  plan: DayPlan;
+  column: number;
+  axis: { start: number; end: number };
+  /** The minute it is, on today's column only. */
+  now: number | null;
+  view: View;
+}) {
+  const length = axis.end - axis.start;
+  const at = (m: number) => (m - axis.start) / length;
+  const stateOf = (start: number, stop: number): BlockState => (now === null || now < start ? undefined : now >= stop ? "past" : "now");
+  // Weekends start later than the clock does; the morning they sleep in is drawn as sleep.
+  const sleptIn = at(plan.wake);
+  const night = nightAfter(plan.day);
+  return (
+    <div className={s.col} data-today={(now !== null && view === "week") || undefined}>
+      {sleptIn > 0 && (
+        <span className={s.asleep} aria-hidden style={{ "--top": 0, "--len": sleptIn } as CSSProperties}>
+          Up at {clock(plan.wake)}
+        </span>
+      )}
+      <ol className={s.blocks} aria-label={dayDate(plan.day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}>
+        {plan.blocks.map((b, i) => {
+          const state = stateOf(b.start, b.end);
+          const minutes = b.end - b.start;
+          return (
+            <li
+              key={b.start}
+              className={s.block}
+              data-kind={b.kind}
+              data-state={state}
+              data-size={minutes <= 30 ? "s" : minutes < 60 ? "m" : minutes < 90 ? "l" : "xl"}
+              aria-current={state === "now" ? "time" : undefined}
+              style={
+                {
+                  "--top": at(b.start),
+                  "--len": minutes / length,
+                  "--i": column * 2 + i,
+                  "--p": state === "now" ? (now! - b.start) / minutes : 0,
+                } as CSSProperties
+              }
+            >
+              {view === "day" && (
+                <span className={s.blockIcon} aria-hidden>
+                  <Icon path={KIND_ICON[b.kind]} size={15} />
+                </span>
+              )}
+              <span className={s.blockText}>
+                <span className={s.blockTitle}>{b.title}</span>
+                <span className={s.blockTime}>{view === "week" ? brief(b.start, b.end) : span(b.start, b.end)}</span>
+              </span>
+              {/* A day on its own has room for the length on the right edge, or what's left of it. */}
+              {view === "day" &&
+                (state === "now" ? <span className={s.blockLeft}>{fmtMinutes(b.end - now!)} left</span> : <span className={s.blockLength}>{fmtMinutes(minutes)}</span>)}
+            </li>
+          );
+        })}
+      </ol>
+      <span className={s.asleep} aria-hidden style={{ "--top": at(plan.sleep), "--len": (axis.end - plan.sleep) / length } as CSSProperties}>
+        <Icon path={ICON.tonight} size={11} />
+        {view === "week" ? "Sleep" : `Sleep at ${clock(night.sleep)}, up at ${clock(night.wake)}`}
+      </span>
+      {now !== null && now >= axis.start && now < axis.end && (
+        <span className={s.nowLine} data-now-line aria-hidden style={{ "--top": at(now) } as CSSProperties} />
+      )}
+    </div>
   );
 }
