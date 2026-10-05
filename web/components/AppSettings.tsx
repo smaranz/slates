@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 
 import {
-  APPS,
   REFRESH_CHOICES,
+  useDeviceApps,
   useHiddenApps,
   useHiddenRegistries,
   useHostApps,
@@ -60,7 +60,8 @@ function Row({ title, sub, children }: { title: string; sub?: string; children: 
 export function GeneralSettings() {
   const [hidden, setVisible] = useHiddenApps();
   const { unavailable } = useHostApps();
-  const visibleCount = APPS.filter((a) => !hidden.includes(a.mode)).length;
+  const apps = useDeviceApps();
+  const visibleCount = apps.filter((a) => !hidden.includes(a.mode)).length;
 
   return (
     <Page>
@@ -69,7 +70,7 @@ export function GeneralSettings() {
         note="Which apps get a door on the home screen. A hidden app keeps everything it saved, and its settings tab comes back when you turn it on again."
       >
         <ul className="app-settings-list">
-          {APPS.map((app) => {
+          {apps.map((app) => {
             if (unavailable.includes(app.mode)) {
               return (
                 <Row key={app.mode} title={app.title} sub={`${app.blurb} · needs Slates hosted on a Mac`}>

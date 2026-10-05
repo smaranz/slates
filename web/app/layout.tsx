@@ -3,6 +3,7 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./wide.css";
 import DesktopInbox from "@/components/DesktopInbox";
+import NativeStatusBar from "@/components/NativeStatusBar";
 import { CounselorProvider } from "@/lib/counselor/store";
 import { IdentityProvider } from "@/lib/identity";
 import { ModeProvider } from "@/lib/mode";
@@ -38,6 +39,8 @@ export default function RootLayout(props: LayoutProps<"/">) {
       <body suppressHydrationWarning>
         {/* On the Mac app, files agents send land in Downloads wherever you are in Slates. */}
         <DesktopInbox />
+        {/* In the phone app, the clock, signal and battery in white over the dark top. */}
+        <NativeStatusBar />
         {/* Identity is outermost: both halves of the app read the student's
             name and photo from it, so it has to exist before either store. */}
         <IdentityProvider>

@@ -61,7 +61,9 @@ const config: CapacitorConfig = {
       showSpinner: false,
     },
     StatusBar: {
-      style: "LIGHT",
+      // Capacitor names the background, so "DARK" draws the clock, signal and
+      // battery in white over the dark top (web/components/NativeStatusBar.tsx).
+      style: "DARK",
       backgroundColor: SHELL_BG,
       overlaysWebView: true,
     },

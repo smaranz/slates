@@ -84,6 +84,28 @@ export const APPS: { mode: Mode; title: string; blurb: string }[] = [
   { mode: "vitals", title: "Vitals", blurb: "What's using this Mac, app by app, and the dev servers it's running" },
 ];
 
+/* ── which apps the phone app leaves out ───────────────────────────────── */
+
+/**
+ * The phone app has no door for these at all, at the student's request: the
+ * UI shelf is for building on a computer. Its web view adds "SlatesApp" to
+ * the user agent (mobile/capacitor.config.ts); the Mac app and browsers don't.
+ */
+const NOT_IN_PHONE_APP: readonly Mode[] = ["ui"];
+const NONE: readonly Mode[] = [];
+const unchanging = () => () => {};
+
+function useLeftOut(): readonly Mode[] {
+  const phone = useSyncExternalStore(unchanging, () => navigator.userAgent.includes("SlatesApp"), () => false);
+  return phone ? NOT_IN_PHONE_APP : NONE;
+}
+
+/** The apps this device offers at all: every one, less any the phone app leaves out. */
+export function useDeviceApps() {
+  const leftOut = useLeftOut();
+  return useMemo(() => APPS.filter((a) => !leftOut.includes(a.mode)), [leftOut]);
+}
+
 /* ── which apps the host can serve ─────────────────────────────────────── */
 
 interface HostApps {
@@ -125,23 +147,24 @@ export function useHostApps(): HostApps {
 
 /**
  * Apps the launcher leaves out: the ones switched off in Settings, plus any
- * the host can't serve. Only the first are stored, so the same record opened
+ * the host can't serve or the phone app leaves out. Only the first are stored, so the same record opened
  * against a Mac host again brings AI Usage straight back.
  */
 export function useHiddenApps() {
   const [raw, set] = useStored("slates.apps.hidden.v1");
   const chosen = useMemo(() => parseList(raw) as Mode[], [raw]);
   const { unavailable } = useHostApps();
-  const hidden = useMemo(() => [...new Set([...chosen, ...unavailable])], [chosen, unavailable]);
+  const leftOut = useLeftOut();
+  const hidden = useMemo(() => [...new Set([...chosen, ...unavailable, ...leftOut])], [chosen, unavailable, leftOut]);
 
   const setVisible = useCallback(
     (mode: Mode, visible: boolean) => {
       const next = visible ? chosen.filter((m) => m !== mode) : [...new Set([...chosen, mode])];
       // A launcher with no doors is a dead end, so the last app stays.
-      if (APPS.every((a) => next.includes(a.mode) || unavailable.includes(a.mode))) return;
+      if (APPS.every((a) => next.includes(a.mode) || unavailable.includes(a.mode) || leftOut.includes(a.mode))) return;
       set(next.length ? JSON.stringify(next) : null);
     },
-    [chosen, unavailable, set],
+    [chosen, unavailable, leftOut, set],
   );
 
   return [hidden, setVisible] as const;

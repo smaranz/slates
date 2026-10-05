@@ -3398,7 +3398,12 @@ button {
 /* A phone: the mark and Settings make a header row under the status bar,
    where Settings used to sit behind the clock. */
 @media (max-width: 760px) {
+  /* When the doors outgrow the screen they start under that header row and
+     the page scrolls, rather than centring up into the mark. */
   .launcher {
+    height: auto;
+    min-height: 100dvh;
+    justify-content: safe center;
     gap: 0;
     padding: calc(var(--safe-top) + 64px) 18px calc(var(--safe-bottom) + 20px);
   }
