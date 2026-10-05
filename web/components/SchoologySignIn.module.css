@@ -242,7 +242,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .done, .done * { animation: none; }
+  .done, .done * { animation: none !important; }
   .successCore path { stroke-dashoffset: 0; }
   .successRing { display: none; }
 }
