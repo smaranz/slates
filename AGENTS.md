@@ -84,6 +84,14 @@ The Health room (`web/components/health/`, server side in `web/lib/health/`) is 
 - The iPhone app needs `NSCameraUsageDescription` for Scan (WebKit offers "Take Photo" on any image input and iOS kills an app without the string). Builds with it say `SlatesCamera` in the user agent (`mobile/capacitor.config.ts`); older builds get a notice instead of a photo input (`cameraSafe` in `useHealth.ts`). So a rebuild and reinstall (above) turns scanning on.
 - `npx tsx --test lib/health/*.test.ts` in `web/`: the math, the validator with a fake model, the F45 parser against a trimmed fixture, the store in a throwaway home.
 
+## Schedule
+
+The Schedule room (`web/components/day/DayApp.tsx`, mode `day`) shows the student's day hour by hour: what's on now, how long it has left and what's next, the day as a timeline that fills in as it goes, the next six days a tap away, and how the day splits into coding, school, Instagram and the rest. One column on the phone; the now card beside the timeline on the Mac.
+- The week is a timetable in `web/lib/day/schedule.ts`: each row starts a block that runs until the next row, the last until sleep, so a change is one line and a deploy. As the student gave it: school 8:30–4:00 Mon/Tue/Thu, 11:00–3:15 Wed, 10:00–3:15 Fri (leaving home, then home again); up at 6:00 on school days, an hour to get ready, then coding + product until it's time to leave; after school a snack, coding + product until dinner at 7:00, Instagram content 7:30–9:00, free time, sleep at 10:30. Weekends: up at 8:00, study, coding + product, Instagram content.
+- It runs on the device's clock alone (nothing on the host), re-rendering as each minute turns and when the window comes back.
+- Eight launcher doors don't fit on one row of a laptop window, so the launcher folds them into rows of four there (`globals.css`, by `:has(> :nth-child(8))`).
+- `npx tsx --test lib/day/schedule.test.ts` in `web/`.
+
 ## Working here
 
 - In `web/`: `npx tsc --noEmit`, `npx eslint <paths>`, `npx tsx --test <file>.test.ts`. Tests that load a `server-only` module need a stub, since only Next provides it: point `NODE_PATH` at a folder holding an empty `server-only` package.

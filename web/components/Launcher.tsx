@@ -25,6 +25,7 @@ const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolea
   { mode: "media", title: "Media Gen Studio", accent: "oklch(0.8 0.13 25)", mark: (h) => <MediaMark hovered={h} /> },
   { mode: "agent", title: "Agent", accent: "oklch(0.8 0.12 215)", mark: (h) => <AgentMark hovered={h} /> },
   { mode: "health", title: "Health", accent: "oklch(0.86 0.17 132)", mark: (h) => <HealthMark hovered={h} /> },
+  { mode: "day", title: "Schedule", accent: "oklch(0.82 0.14 55)", mark: (h) => <DayMark hovered={h} /> },
 ];
 
 export default function Launcher() {
@@ -337,6 +338,31 @@ function HealthMark({ hovered }: { hovered: boolean }) {
         animate={{ pathLength: hovered ? [0, 1] : 1, opacity: hovered ? 1 : 0.75 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       />
+    </svg>
+  );
+}
+
+/** The sun's path over the horizon, morning so far; on hover it climbs to noon. */
+function DayMark({ hovered }: { hovered: boolean }) {
+  const spring = { type: "spring", stiffness: 140, damping: 20 } as const;
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      <path d="M6 38a21 21 0 0 1 42 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="2 3.4" opacity="0.45" />
+      <motion.path
+        d="M6 38a21 21 0 0 1 42 0"
+        stroke="var(--accent)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        initial={false}
+        animate={{ pathLength: hovered ? 0.5 : 0.11 }}
+        transition={spring}
+      />
+      <line x1="3" x2="51" y1="38" y2="38" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+      {/* Motion turns an SVG group about the middle of its own box, so an unpainted orbit centres that box on the horizon. */}
+      <motion.g initial={false} animate={{ rotate: hovered ? 70 : 0 }} transition={spring}>
+        <circle cx="27" cy="38" r="27" />
+        <circle cx="7.3" cy="30.8" r="5.5" fill="var(--accent)" />
+      </motion.g>
     </svg>
   );
 }

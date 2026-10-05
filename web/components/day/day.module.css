@@ -1,0 +1,689 @@
+/*
+ * Schedule. Slates' own surfaces and type (globals.css), a sunrise accent for
+ * "now", and a colour for each kind of block so a day reads at a glance:
+ * school, coding, Instagram, study, meals, getting ready, free time, sleep.
+ * Written for a 375-point phone first, then two columns on the Mac.
+ */
+
+.app {
+  --d-accent: oklch(0.82 0.14 55);
+  --d-accent-ink: oklch(0.26 0.06 55);
+  --d-accent-soft: oklch(0.82 0.14 55 / 0.14);
+  --d-school: oklch(0.8 0.1 250);
+  --d-build: oklch(0.82 0.12 158);
+  --d-content: oklch(0.78 0.13 355);
+  --d-study: oklch(0.8 0.1 295);
+  --d-meal: oklch(0.85 0.11 88);
+  --d-routine: oklch(0.8 0.025 250);
+  --d-free: oklch(0.82 0.08 200);
+  --d-sleep: oklch(0.75 0.09 272);
+  --d-card: oklch(0.301 0 0);
+  --d-time: 62px;
+  --d-rail: 44px;
+  --d-gap: 12px;
+}
+
+.app [data-kind="wake"] {
+  --k: var(--d-accent);
+}
+.app [data-kind="school"] {
+  --k: var(--d-school);
+}
+.app [data-kind="build"] {
+  --k: var(--d-build);
+}
+.app [data-kind="content"] {
+  --k: var(--d-content);
+}
+.app [data-kind="study"] {
+  --k: var(--d-study);
+}
+.app [data-kind="meal"] {
+  --k: var(--d-meal);
+}
+.app [data-kind="routine"] {
+  --k: var(--d-routine);
+}
+.app [data-kind="free"] {
+  --k: var(--d-free);
+}
+.app [data-kind="sleep"] {
+  --k: var(--d-sleep);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+/* ── frame ─────────────────────────────────────────────────────────────── */
+
+.top {
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.todayBtn {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--d-accent-soft);
+  color: var(--d-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: transform 0.15s var(--ease-out);
+}
+
+.todayBtn:active {
+  transform: scale(0.96);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.page {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 28px 56px;
+  animation: rise 0.3s var(--ease-out) both;
+}
+
+/*
+ * One column on a phone, in the order a glance wants it: the day, the week,
+ * now, the timeline, then the split. The side column only exists as a box on
+ * a wide window, where it holds still beside the timeline.
+ */
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.side {
+  display: contents;
+}
+
+.head {
+  order: 0;
+}
+
+.week {
+  order: 1;
+}
+
+.now {
+  order: 2;
+}
+
+.timeline {
+  order: 3;
+}
+
+.split {
+  order: 4;
+}
+
+/* ── the day's name ────────────────────────────────────────────────────── */
+
+.head {
+  padding: 0 2px;
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 760;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+/* The date, then school's hours as a chip that drops under it when the line is full. */
+.head p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.dayChip {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px 0 8px;
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--k) 14%, transparent);
+  color: var(--k);
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── the week ──────────────────────────────────────────────────────────── */
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  padding: 4px;
+  border-radius: 20px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.weekDay {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 10px;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease-out),
+    color 0.2s var(--ease-out);
+}
+
+.weekDay[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
+}
+
+.weekName {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.weekDate {
+  font-size: 17px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.weekDay[data-today] .weekDate {
+  color: var(--d-accent);
+}
+
+.weekBar {
+  display: flex;
+  width: 30px;
+  max-width: 80%;
+  height: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  opacity: 0.85;
+}
+
+.weekBar span {
+  flex-basis: 0;
+  background: var(--k);
+}
+
+/* ── now ───────────────────────────────────────────────────────────────── */
+
+.now {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: linear-gradient(165deg, color-mix(in oklch, var(--k) 14%, var(--d-card)) 0%, var(--d-card) 64%);
+  box-shadow: var(--shadow-card);
+}
+
+.nowTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.nowText {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--d-accent);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+.nowTitle {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.badge {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--k) 20%, transparent);
+  color: var(--k);
+}
+
+.bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: oklch(1 0 0 / 0.08);
+}
+
+.bar span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--k);
+  transform-origin: left;
+  transition: transform 0.8s var(--ease-out);
+}
+
+.barLegend {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.barLegend b {
+  color: var(--text);
+  font-weight: 720;
+}
+
+.next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.nextLabel {
+  width: 36px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.nextIcon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--k) 18%, transparent);
+  color: var(--k);
+}
+
+.nextTitle {
+  min-width: 0;
+  flex: 1;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.nextTime {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the split ─────────────────────────────────────────────────────────── */
+
+.split {
+  padding: 16px 18px 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--d-card);
+  box-shadow: var(--shadow-card);
+}
+
+.split h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.splitBar {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
+  gap: 2px;
+  border-radius: 9999px;
+}
+
+.splitBar span {
+  flex-basis: 0;
+  background: var(--k);
+}
+
+.splitList {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.splitList li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.splitList i {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--k);
+}
+
+.splitList span {
+  min-width: 0;
+  flex: 1;
+  color: var(--text-2);
+}
+
+.splitList b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 680;
+}
+
+/* ── the timeline ──────────────────────────────────────────────────────── */
+
+.timeline {
+  position: relative;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One rail behind every pill, wake-up to sleep. */
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  left: calc(var(--d-time) + var(--d-gap) + var(--d-rail) / 2 - 1px);
+  width: 2px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--d-time) var(--d-rail) minmax(0, 1fr);
+  column-gap: var(--d-gap);
+  align-items: start;
+  padding-bottom: 12px;
+  animation: rise 0.35s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 26ms);
+}
+
+.row:last-child {
+  padding-bottom: 0;
+}
+
+.time {
+  padding-top: 13px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pill {
+  position: relative;
+  display: grid;
+  height: var(--h, 44px);
+  align-content: start;
+  justify-items: center;
+  padding-top: 13px;
+  overflow: hidden;
+  border-radius: 22px;
+  background: color-mix(in oklch, var(--k) 15%, var(--bg));
+  color: var(--k);
+}
+
+.pill svg {
+  position: relative;
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklch, var(--k) 42%, var(--bg));
+  transform: scaleY(var(--p, 0));
+  transform-origin: top;
+  transition: transform 1s linear;
+}
+
+.row[data-state="now"] .pill {
+  box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--k) 55%, transparent);
+}
+
+.marker .pill {
+  border-radius: 9999px;
+}
+
+.body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 11px;
+}
+
+.title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nowChip {
+  flex-shrink: 0;
+  padding: 2px 8px 3px;
+  border-radius: 9999px;
+  background: var(--d-accent);
+  color: var(--d-accent-ink);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.row[data-state="now"] .time {
+  color: var(--d-accent);
+}
+
+.row[data-state="now"] .meta {
+  color: var(--text-2);
+}
+
+/* Done: the words and the pill both step back, so now and what's left stand out. */
+.row[data-state="past"] .time,
+.row[data-state="past"] .title {
+  color: var(--faint);
+}
+
+.row[data-state="past"] .title {
+  font-weight: 600;
+}
+
+.row[data-state="past"] .pill {
+  background: color-mix(in oklch, var(--k) 7%, var(--sunken));
+  color: color-mix(in oklch, var(--k) 45%, var(--dim));
+}
+
+.row[data-state="past"] .meta {
+  color: var(--dim);
+}
+
+@media (hover: hover) {
+  .weekDay:not([aria-pressed="true"]):hover {
+    background: oklch(1 0 0 / 0.04);
+    color: var(--text-2);
+  }
+}
+
+/* ── wider windows: now and the split beside the day ───────────────────── */
+
+@media (min-width: 900px) {
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    align-items: start;
+    gap: 40px;
+  }
+
+  .side {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .timeline {
+    margin-top: 6px;
+  }
+}
+
+/* ── a phone ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  .app {
+    --d-time: 56px;
+    --d-rail: 40px;
+    --d-gap: 10px;
+  }
+
+  .todayBtn {
+    height: 36px;
+    margin-right: 6px;
+  }
+
+  .page {
+    padding: 12px 14px calc(28px + var(--safe-bottom, 0px));
+  }
+
+  .head h1 {
+    font-size: 26px;
+  }
+
+  .pill {
+    border-radius: 20px;
+  }
+}
+
+/* An iPhone mini or SE: a little less of everything, the same layout. */
+@media (max-width: 380px) {
+  .nowTitle {
+    font-size: 24px;
+  }
+
+  .weekDate {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page,
+  .row,
+  .liveDot {
+    animation: none;
+  }
+
+  .bar span,
+  .fill {
+    transition: none;
+  }
+}

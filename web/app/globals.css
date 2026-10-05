@@ -3309,6 +3309,37 @@ button {
   }
 }
 
+/*
+ * Eight doors want about 1,610px on one row (1,925px at the 27" size in
+ * wide.css), more than a laptop window has, so short of that they fold into
+ * rows of four instead of running off both edges.
+ */
+@media (min-width: 641px) and (max-width: 1679px) {
+  .launcher-grid:has(> :nth-child(8)) {
+    display: flex;
+    max-width: calc(4 * 180px + 3 * 16px);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .launcher-grid:has(> :nth-child(8)) > .launcher-card {
+    width: 180px;
+  }
+}
+
+@media (min-width: 1800px) and (max-width: 1949px) {
+  .launcher-grid:has(> :nth-child(8)) {
+    display: flex;
+    max-width: calc(4 * 216px + 3 * 20px);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .launcher-grid:has(> :nth-child(8)) > .launcher-card {
+    width: 216px;
+  }
+}
+
 .launcher-card {
   display: flex;
   flex-direction: column;
