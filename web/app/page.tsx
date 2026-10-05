@@ -30,6 +30,7 @@ import MediaApp from "@/components/media/MediaApp";
 import AgentApp from "@/components/agent/AgentApp";
 import HealthApp from "@/components/health/HealthApp";
 import DayApp from "@/components/day/DayApp";
+import VitalsApp from "@/components/vitals/VitalsApp";
 
 export default function Page() {
   const { mode, ready, settingsOpen } = useMode();
@@ -38,7 +39,7 @@ export default function Page() {
 
   // Nothing renders until the saved choice has been read. A frame of the
   // launcher before jumping into School would be a flash of the wrong app.
-  if (!ready || (mode === "usage" && !host.known)) return <div className="shell" />;
+  if (!ready || ((mode === "usage" || mode === "vitals") && !host.known)) return <div className="shell" />;
   // Settings sits above every app rather than inside one, so it takes over
   // the window from wherever it was opened.
   if (settingsOpen) return <UnifiedSettings />;
@@ -51,6 +52,7 @@ export default function Page() {
   if (mode === "agent") return <AgentApp />;
   if (mode === "health") return <HealthApp />;
   if (mode === "day") return <DayApp />;
+  if (mode === "vitals") return <VitalsApp />;
   return <School />;
 }
 

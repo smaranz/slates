@@ -167,16 +167,17 @@ const ATTACH = process.env.SLATES_ATTACH === "1";
 const REMOTE = (process.env.SLATES_HOST || readUserEnv().SLATES_HOST || "").trim().replace(/\/+$/, "");
 
 /**
- * AI Usage stays on this Mac when the rest of Slates doesn't.
+ * AI Usage and Vitals stay on this Mac when the rest of Slates doesn't.
  *
- * It reads the coding tools installed on the computer you're using (Claude
- * Code, Codex, Cursor, Devin…), which a host elsewhere can't see. So in remote
- * mode the window gets a bridge (preload.cjs), and the first time AI Usage asks
- * for data this starts the bundled portal here, without the sync service or
- * its Chrome, and stops it once AI Usage has sat unused for a while.
+ * AI Usage reads the coding tools installed on the computer you're using
+ * (Claude Code, Codex, Cursor, Devin…), and Vitals reads its processes, which
+ * a host elsewhere can't see. So in remote mode the window gets a bridge
+ * (preload.cjs), and the first time either asks for data this starts the
+ * bundled portal here, without the sync service or its Chrome, and stops it
+ * once both have sat unused for a while.
  */
-const LOCAL_APPS = REMOTE && process.platform === "darwin" ? ["usage"] : [];
-const LOCAL_PATHS = /^\/api\/usage\/coding(?:\?|$)/;
+const LOCAL_APPS = REMOTE && process.platform === "darwin" ? ["usage", "vitals"] : [];
+const LOCAL_PATHS = /^\/api\/(?:usage\/coding|vitals)(?:\?|$)/;
 const LOCAL_IDLE_MS = 10 * 60_000;
 
 const children = [];

@@ -81,6 +81,7 @@ export const APPS: { mode: Mode; title: string; blurb: string }[] = [
   { mode: "agent", title: "Agent", blurb: "AI teammates that work on your PC" },
   { mode: "health", title: "Health", blurb: "Calories, macros, weight, and your F45 studio's workouts" },
   { mode: "day", title: "Schedule", blurb: "Your day hour by hour, and what's on right now" },
+  { mode: "vitals", title: "Vitals", blurb: "What's using this Mac, app by app, and the dev servers it's running" },
 ];
 
 /* ── which apps the host can serve ─────────────────────────────────────── */
@@ -88,7 +89,7 @@ export const APPS: { mode: Mode; title: string; blurb: string }[] = [
 interface HostApps {
   /** False until /api/host has answered. */
   known: boolean;
-  /** Apps the machine running the portal can't serve (AI Usage off a Mac). */
+  /** Apps the machine running the portal can't serve (AI Usage and Vitals off a Mac). */
   unavailable: Mode[];
 }
 

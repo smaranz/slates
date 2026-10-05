@@ -26,6 +26,7 @@ const DOORS: { mode: Mode; title: string; accent: string; mark: (hovered: boolea
   { mode: "agent", title: "Agent", accent: "oklch(0.8 0.12 215)", mark: (h) => <AgentMark hovered={h} /> },
   { mode: "health", title: "Health", accent: "oklch(0.86 0.17 132)", mark: (h) => <HealthMark hovered={h} /> },
   { mode: "day", title: "Schedule", accent: "oklch(0.82 0.14 55)", mark: (h) => <DayMark hovered={h} /> },
+  { mode: "vitals", title: "Vitals", accent: "oklch(0.8 0.13 350)", mark: (h) => <VitalsMark hovered={h} /> },
 ];
 
 export default function Launcher() {
@@ -363,6 +364,39 @@ function DayMark({ hovered }: { hovered: boolean }) {
         <circle cx="27" cy="38" r="27" />
         <circle cx="7.3" cy="30.8" r="5.5" fill="var(--accent)" />
       </motion.g>
+    </svg>
+  );
+}
+
+/** Apps as rows, an icon and a bar for what each is using; on hover the bars move like a fresh reading. */
+function VitalsMark({ hovered }: { hovered: boolean }) {
+  const widths = hovered ? [28, 13, 22, 9] : [24, 19, 12, 7];
+  return (
+    <svg viewBox="0 0 54 54" width="54" height="54" fill="none" aria-hidden>
+      {widths.map((width, i) => (
+        <g key={i}>
+          <rect
+            x="6.5"
+            y={7.75 + i * 10.25}
+            width="8.5"
+            height="8.5"
+            rx="2.6"
+            stroke={i === 0 ? "var(--accent)" : "currentColor"}
+            strokeWidth="1.6"
+            opacity={i === 0 ? 1 : 0.5}
+          />
+          <motion.rect
+            x="19.5"
+            y={9.75 + i * 10.25}
+            height="4.5"
+            rx="2.25"
+            fill={i === 0 ? "var(--accent)" : "currentColor"}
+            initial={false}
+            animate={{ width, opacity: i === 0 ? 1 : 0.42 }}
+            transition={{ type: "spring", stiffness: 240, damping: 22, delay: i * 0.04 }}
+          />
+        </g>
+      ))}
     </svg>
   );
 }

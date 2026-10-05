@@ -1,0 +1,1503 @@
+/*
+ * Vitals. Slates' own surfaces and type (globals.css), a rose accent for the
+ * room, and a cool blue for the second line of a chart (upload, writing, your
+ * apps). Numbers are tabular everywhere, since they change in place.
+ * Written for the Mac app's window: 1440 wide at home, 900 at its narrowest.
+ */
+
+.app {
+  --v-accent: oklch(0.8 0.13 350);
+  --v-accent-ink: oklch(0.27 0.06 350);
+  --v-accent-soft: oklch(0.8 0.13 350 / 0.14);
+  --v-second: oklch(0.8 0.1 235);
+  --v-app: var(--v-accent);
+  --v-wired: oklch(0.82 0.12 75);
+  --v-compressed: oklch(0.76 0.12 295);
+  --v-cached: oklch(0.7 0.06 235);
+  --v-free: oklch(1 0 0 / 0.1);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -320px 0;
+  }
+  to {
+    background-position: 320px 0;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* ── frame ─────────────────────────────────────────────────────────────── */
+
+.top {
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  min-width: 0;
+  gap: 2px;
+  margin-left: 8px;
+  padding: 3px;
+  overflow-x: auto;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  border: 0;
+  border-radius: 9999px;
+  padding: 6px 13px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease-out),
+    color 0.2s var(--ease-out);
+}
+
+.tabs button:hover {
+  color: var(--text);
+}
+
+.tabs button[aria-current="page"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
+}
+
+.tabs button:focus-visible,
+.live:focus-visible,
+.tile:focus-visible,
+.notice:focus-visible,
+.projectsTile:focus-visible,
+.appButton:focus-visible,
+.numHead button:focus-visible,
+.quit:focus-visible,
+.more:focus-visible,
+.tableMore:focus-visible,
+.calloutBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--v-accent);
+}
+
+.tabCount {
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--v-accent-soft);
+  color: var(--v-accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.live {
+  display: inline-flex;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.live[aria-pressed="true"] .liveDot {
+  background: var(--v-accent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.stale {
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+  background: oklch(0.82 0.14 80 / 0.08);
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.page {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 28px 64px;
+  animation: rise 0.3s var(--ease-out) both;
+}
+
+.stackCol {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.footnote {
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── loading and empty ─────────────────────────────────────────────────── */
+
+.loading {
+  display: grid;
+  gap: 14px;
+}
+
+.skeleton {
+  height: 150px;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--hover) 50%, var(--surface) 100%) no-repeat;
+  background-size: 320px 100%;
+  background-color: var(--surface);
+  animation: shimmer 1.4s linear infinite;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 34px 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty h2 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.empty p {
+  max-width: 46ch;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── overview ──────────────────────────────────────────────────────────── */
+
+.hostLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 0;
+  margin: 0 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.hostLine b {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.hostLine span::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--dim);
+}
+
+.notices {
+  display: grid;
+  gap: 8px;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.notice:hover {
+  background: var(--hover);
+}
+
+.notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.notice[data-tone="warn"] {
+  border-color: oklch(0.82 0.14 80 / 0.28);
+}
+
+.notice[data-tone="warn"] > svg {
+  color: var(--warn);
+}
+
+.notice[data-tone="bad"] {
+  border-color: oklch(0.78 0.18 25 / 0.35);
+  background: oklch(0.78 0.18 25 / 0.06);
+}
+
+.notice[data-tone="bad"] > svg {
+  color: var(--bad);
+}
+
+.notice > span {
+  display: grid;
+  gap: 2px;
+}
+
+.notice b {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.notice span span {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Three across, so six tiles make two full rows (five, on a Mac without a battery, read as three and two). */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 15px 18px 16px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    transform 0.2s var(--ease-out);
+}
+
+.tile:hover {
+  background: var(--hover);
+}
+
+.tile:active {
+  transform: scale(0.99);
+}
+
+.tileHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tileHead svg {
+  color: var(--v-accent);
+}
+
+.tileValue {
+  overflow: hidden;
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileValue small {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.tileSub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bars and charts sit along the bottom, level across a row whatever is above them. */
+.tileFoot {
+  display: block;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.tileSpark {
+  --spark-h: 38px;
+}
+
+.pair {
+  display: inline-flex;
+  gap: 16px;
+  font-size: 22px;
+}
+
+.pair > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pair svg {
+  color: var(--muted);
+}
+
+.pair > span:last-child svg {
+  color: var(--v-second);
+}
+
+.projectsTile {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.projectsTile:hover {
+  background: var(--hover);
+}
+
+.projectsTile > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.projectsTile b {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.projectsTile span span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectsTile > svg {
+  color: var(--dim);
+}
+
+/* ── charts and bars ───────────────────────────────────────────────────── */
+
+.spark {
+  display: block;
+  width: var(--spark-w, 100%);
+  height: var(--spark-h, 100%);
+  overflow: visible;
+}
+
+.sparkBase {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.sparkArea {
+  fill: oklch(0.8 0.13 350 / 0.16);
+}
+
+.sparkLine {
+  fill: none;
+  stroke: var(--v-accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.sparkSecond {
+  fill: none;
+  stroke: var(--v-second);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.meter {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: oklch(1 0 0 / 0.07);
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--v-accent);
+  transform-origin: left;
+  transition: transform 0.6s var(--ease-out);
+}
+
+.meter[data-tone="good"] > span {
+  background: var(--good);
+}
+
+.meter[data-tone="warn"] > span {
+  background: var(--warn);
+}
+
+.meter[data-tone="bad"] > span {
+  background: var(--bad);
+}
+
+.meter[data-tone="muted"] > span {
+  background: var(--muted);
+}
+
+.stack {
+  display: flex;
+  height: 12px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 9999px;
+}
+
+.stack > span {
+  min-width: 3px;
+  transition: flex-grow 0.6s var(--ease-out);
+}
+
+.app [data-part="app"] {
+  --part: var(--v-app);
+}
+
+.app [data-part="wired"] {
+  --part: var(--v-wired);
+}
+
+.app [data-part="compressed"] {
+  --part: var(--v-compressed);
+}
+
+.app [data-part="cached"] {
+  --part: var(--v-cached);
+}
+
+.app [data-part="free"] {
+  --part: var(--v-free);
+}
+
+.stack > span[data-part] {
+  background: var(--part);
+}
+
+/* ── one thing's view ──────────────────────────────────────────────────── */
+
+.hero {
+  display: grid;
+  gap: 18px;
+  padding: 18px 20px 16px;
+}
+
+.heroStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px 20px;
+}
+
+.stat {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 2px;
+}
+
+.statLabel {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.statValue {
+  overflow: hidden;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statValue[data-tone="good"] {
+  color: var(--good);
+}
+
+.statValue[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.statValue[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.statSub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartWrap {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.chart {
+  --spark-h: 120px;
+}
+
+.chartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chartLegend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chartLegend i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--v-accent);
+}
+
+.chartLegend [data-line] i {
+  background: var(--v-second);
+}
+
+.chartLegend .chartSpan {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.cores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.core {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.coreBar {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 46px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+}
+
+.coreBar > span {
+  position: absolute;
+  inset: 0;
+  background: var(--v-accent);
+  transform-origin: bottom;
+  transition: transform 0.6s var(--ease-out);
+}
+
+.core[data-kind="E"] .coreBar > span {
+  background: var(--v-second);
+}
+
+.coreLabel {
+  color: var(--dim);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.coreKey {
+  align-self: center;
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 18px;
+  margin: -6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.legend i {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--part);
+}
+
+.legend li[data-part="free"] i {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.legend span {
+  color: var(--muted);
+}
+
+.legend b {
+  margin-left: auto;
+  font-weight: 650;
+}
+
+.capacity {
+  display: grid;
+  gap: 6px;
+}
+
+.capacity > span {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ── sections and the app table ────────────────────────────────────────── */
+
+.section {
+  display: grid;
+  gap: 10px;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 0 4px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.sectionNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.tableCard {
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.table th,
+.table td {
+  padding: 8px 14px;
+  font-weight: inherit;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table thead th {
+  padding-top: 10px;
+  padding-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.appHead {
+  padding-left: 46px !important;
+}
+
+.numHead,
+.num,
+.primary {
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.numHead {
+  width: 1%;
+}
+
+.numHead button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  padding: 2px 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.numHead button:hover,
+.numHead button[data-on] {
+  color: var(--text);
+}
+
+.trendHead {
+  width: 140px;
+}
+
+.actionHead {
+  width: 78px;
+}
+
+.row {
+  border-top: 1px solid var(--line);
+}
+
+.row:hover,
+.row:focus-within {
+  background: oklch(1 0 0 / 0.025);
+}
+
+.row[data-open] {
+  background: oklch(1 0 0 / 0.03);
+}
+
+.appCell {
+  max-width: 0;
+  width: 100%;
+  padding-left: 8px !important;
+}
+
+.appButton {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  padding: 2px 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chevron {
+  display: grid;
+  width: 16px;
+  flex-shrink: 0;
+  place-items: center;
+  color: var(--dim);
+  transform: rotate(-90deg);
+  transition: transform 0.2s var(--ease-out);
+}
+
+.row[data-open] .chevron {
+  transform: none;
+}
+
+.appIcon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.appGlyph {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 8px;
+  background: oklch(1 0 0 / 0.08);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.appGlyph[data-kind="macos"] {
+  background: var(--v-accent-soft);
+  color: var(--v-accent);
+}
+
+.appText {
+  display: grid;
+  min-width: 0;
+}
+
+.appName {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appSub {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.primary {
+  font-weight: 650;
+}
+
+.num {
+  color: var(--text-2);
+}
+
+.share {
+  display: block;
+  width: 72px;
+  height: 3px;
+  margin: 5px 0 0 auto;
+  overflow: hidden;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.06);
+}
+
+.share > span {
+  display: block;
+  height: 100%;
+  background: var(--v-accent);
+  transform-origin: left;
+  transition: transform 0.6s var(--ease-out);
+}
+
+/* A fixed width, since a table gives a cell of only a 100%-wide drawing nothing at all. */
+.trend {
+  height: 46px;
+  --spark-w: 124px;
+  --spark-h: 26px;
+}
+
+.action {
+  text-align: right !important;
+}
+
+.quit {
+  height: 28px;
+  border: 0;
+  border-radius: 9999px;
+  padding: 0 12px;
+  background: oklch(0.78 0.18 25 / 0.12);
+  color: var(--bad);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+
+.row:hover .quit,
+.row:focus-within .quit,
+.quit[data-always] {
+  opacity: 1;
+}
+
+.quit:hover {
+  background: oklch(0.78 0.18 25 / 0.2);
+}
+
+.procRow {
+  background: var(--sunken);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.procRow th,
+.procRow td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.procCell {
+  max-width: 0;
+  padding-left: 76px !important;
+}
+
+.procLine {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.procName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pid {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.moreCell {
+  padding-left: 76px !important;
+}
+
+.more {
+  border: 0;
+  border-radius: 8px;
+  padding: 3px 4px;
+  background: none;
+  color: var(--v-accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tableMore {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 11px 22px 10px;
+  background: none;
+  color: var(--v-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tableMore:hover {
+  background: oklch(1 0 0 / 0.025);
+}
+
+/* ── projects ──────────────────────────────────────────────────────────── */
+
+.callout {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 15px 18px;
+}
+
+.callout[data-tone="warn"] {
+  border-color: oklch(0.82 0.14 80 / 0.3);
+  background: oklch(0.82 0.14 80 / 0.06);
+}
+
+.calloutText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.calloutText h2 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.calloutText p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.calloutBtn {
+  height: 32px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 9999px;
+  padding: 0 16px;
+  background: oklch(0.82 0.14 80 / 0.16);
+  color: var(--warn);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.calloutBtn:hover {
+  background: oklch(0.82 0.14 80 / 0.24);
+}
+
+.project {
+  overflow: hidden;
+}
+
+.projectHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.projectIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--v-accent-soft);
+  color: var(--v-accent);
+}
+
+.projectText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.projectText h2 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectPath {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectMeta {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.projectMeta b {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.chip {
+  padding: 2px 9px;
+  border-radius: 9999px;
+  background: oklch(1 0 0 / 0.07);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.chip[data-state="working"] {
+  background: oklch(0.82 0.15 145 / 0.14);
+  color: var(--good);
+}
+
+.servers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.server {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto minmax(92px, auto);
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding: 10px 18px;
+}
+
+.ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.port {
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  color: var(--text-2);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.serverText {
+  display: grid;
+  min-width: 0;
+}
+
+.serverName {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.serverSub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server[data-state="quiet"] .serverSub {
+  color: var(--warn);
+}
+
+.serverMem {
+  font-size: 13px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.server .quit {
+  justify-self: end;
+}
+
+.locked {
+  color: var(--dim);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.portsCard {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px 18px;
+}
+
+.portList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portList li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.portName {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── confirming ────────────────────────────────────────────────────────── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: oklch(0 0 0 / 0.5);
+  animation: fade 0.15s ease-out both;
+}
+
+.dialog {
+  width: min(440px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  padding: 22px 22px 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: pop 0.2s var(--ease-out) both;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.dialogBody {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.dialogBody p {
+  margin: 0;
+}
+
+.dialogList {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--sunken);
+  list-style: none;
+}
+
+.dialogList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.dialogList span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  z-index: 70;
+  display: flex;
+  max-width: min(560px, calc(100vw - 32px));
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  font-size: 13.5px;
+  transform: translateX(-50%);
+  animation: fade 0.2s ease-out both;
+}
+
+.toast[data-tone="good"] > svg {
+  flex-shrink: 0;
+  color: var(--good);
+}
+
+.toast[data-tone="bad"] > svg {
+  flex-shrink: 0;
+  color: var(--bad);
+}
+
+.toast button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toast button:hover {
+  background: oklch(1 0 0 / 0.06);
+  color: var(--text);
+}
+
+/* ── narrower windows ──────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .trendHead,
+  .trend {
+    display: none;
+  }
+
+  /* Every tab still fits beside the Mac app's traffic lights at its narrowest. */
+  .tabs button {
+    padding: 6px 10px;
+  }
+}
+
+@media (max-width: 960px) {
+  .page {
+    padding: 18px 18px 56px;
+  }
+
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .server {
+    grid-template-columns: minmax(64px, auto) minmax(0, 1fr) auto auto;
+  }
+
+  .projectMeta > span:not(.chip) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page,
+  .backdrop,
+  .dialog,
+  .toast {
+    animation: none;
+  }
+
+  .live[aria-pressed="true"] .liveDot,
+  .skeleton {
+    animation: none;
+  }
+
+  .meter > span,
+  .share > span,
+  .coreBar > span,
+  .stack > span {
+    transition: none;
+  }
+}
