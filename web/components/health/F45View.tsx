@@ -42,6 +42,7 @@ export default function F45View({
   onLog,
   onExercise,
   onRefresh,
+  onBack,
 }: {
   schedule: F45Schedule | null;
   error: string | null;
@@ -50,15 +51,24 @@ export default function F45View({
   onLog: (day: string) => void;
   onExercise: (entry: ExerciseEntry) => void;
   onRefresh: () => void;
+  /** Back to Today, which is where a phone opens this page from. */
+  onBack: () => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const classes = useMemo(() => state.log.exercises.filter((e) => e.kind === "f45").sort((a, b) => b.day.localeCompare(a.day) || b.at - a.at), [state.log.exercises]);
   const logos = useMemo(() => new Map(schedule?.days.map((d) => [d.date, d.logo]) ?? []), [schedule]);
 
+  const back = (
+    <button type="button" className={s.backRow} onClick={onBack}>
+      <Icon path={ICON.chevronLeft} size={12} /> Today
+    </button>
+  );
+
   if (!schedule) {
     return (
       <div className={s.stack}>
+        {back}
         {error ? (
           <section className={`${s.card} ${s.empty}`}>
             <p className={s.emptyTitle}>The F45 schedule didn’t load</p>
@@ -96,6 +106,7 @@ export default function F45View({
 
   return (
     <div className={s.stack}>
+      {back}
       <section className={s.studio}>
         <div>
           <span className={s.eyebrow}>Your studio</span>

@@ -34,6 +34,9 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "me", label: "Me", icon: H.person },
 ];
 
+/** The phone's bottom bar. F45 opens from its card on Today instead. */
+const BAR_TABS = TABS.filter((t) => t.id !== "f45");
+
 const TAB_KEY = "slates.health.tab.v1";
 
 function savedTab(): Tab {
@@ -134,6 +137,7 @@ export default function HealthApp() {
         state={state}
         today={today}
         onRefresh={() => void f45.refresh()}
+        onBack={() => setTab("today")}
         onLog={(d) => setOpen({ kind: "exercise", start: { mode: "f45", day: d } })}
         onExercise={(entry) => setOpen({ kind: "exercise", start: { mode: "edit", entry } })}
       />
@@ -154,6 +158,7 @@ export default function HealthApp() {
         onFood={(entry) => setOpen({ kind: "food", start: { mode: "edit", entry } })}
         onExercise={(entry) => setOpen({ kind: "exercise", start: { mode: "edit", entry } })}
         onLogClass={(d) => setOpen({ kind: "exercise", start: { mode: "f45", day: d } })}
+        onOpenF45={() => setTab("f45")}
         onScan={photo}
         onDescribe={() => setOpen({ kind: "food", start: { mode: "describe" } })}
       />
@@ -196,14 +201,18 @@ export default function HealthApp() {
       </div>
 
       <nav className={s.tabbar} aria-label="Health">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" className={s.tabItem} aria-current={tab === t.id ? "page" : undefined} onClick={() => setTab(t.id)}>
-            <span className={s.tabIcon}>
-              <HIcon path={t.icon} size={19} />
-            </span>
-            <span>{t.label}</span>
-          </button>
-        ))}
+        {BAR_TABS.map((t) => {
+          // F45 is opened from Today, so Today stays lit while it's showing.
+          const current = tab === t.id || (t.id === "today" && tab === "f45");
+          return (
+            <button key={t.id} type="button" className={s.tabItem} aria-current={current ? "page" : undefined} onClick={() => setTab(t.id)}>
+              <span className={s.tabIcon}>
+                <HIcon path={t.icon} size={19} />
+              </span>
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
         <button type="button" className={s.fab} onClick={() => setOpen({ kind: "add" })} aria-label="Log food, a workout or weight">
           <Icon path={ICON.plus} size={26} />
         </button>

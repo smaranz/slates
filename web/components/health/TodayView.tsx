@@ -147,19 +147,22 @@ function nextClassLine(f45: F45Day, isToday: boolean): string {
   return `Next ${clock(next.start)} · ${next.status !== "active" ? "booking closed" : left > 0 ? `${left} open` : "full"}`;
 }
 
-function F45Today({ f45, day, today, logged, onLog, studio }: { f45: F45Day; day: string; today: string; logged: ExerciseEntry | undefined; onLog: () => void; studio: string }) {
+/** The day at the studio. The card opens the F45 page, which has no tab of its own on a phone. */
+function F45Today({ f45, day, today, logged, onLog, onOpen }: { f45: F45Day; day: string; today: string; logged: ExerciseEntry | undefined; onLog: () => void; onOpen: () => void }) {
   return (
     <section className={`${s.card} ${s.f45Card}`}>
-      <WorkoutLogo src={f45.logo} name={f45.workout} size={46} />
-      <div className={s.f45Text}>
-        <span className={s.eyebrow}>
-          {studio} · {dayLabel(day, today)}
+      <button type="button" className={s.f45Open} onClick={onOpen}>
+        <WorkoutLogo src={f45.logo} name={f45.workout} size={46} />
+        <span className={s.f45Text}>
+          <span className={s.eyebrow}>
+            F45 · {dayLabel(day, today)} <HIcon path={H.chevronRight} size={10} />
+          </span>
+          <span className={s.f45Name}>
+            {f45.workout} <TypeChip type={f45.type} />
+          </span>
+          <span className={s.f45Sub}>{logged ? `Logged${logged.f45?.time ? ` · ${clock(logged.f45.time)} class` : ""}` : nextClassLine(f45, day === today)}</span>
         </span>
-        <span className={s.f45Name}>
-          {f45.workout} <TypeChip type={f45.type} />
-        </span>
-        <span className={s.f45Sub}>{logged ? `Logged${logged.f45?.time ? ` · ${clock(logged.f45.time)} class` : ""}` : nextClassLine(f45, day === today)}</span>
-      </div>
+      </button>
       {logged ? (
         <span className={s.doneChip}>
           <Icon path={ICON.check} size={13} />
@@ -246,6 +249,7 @@ export default function TodayView({
   onFood,
   onExercise,
   onLogClass,
+  onOpenF45,
   onScan,
   onDescribe,
 }: {
@@ -258,6 +262,7 @@ export default function TodayView({
   onFood: (entry: FoodEntry) => void;
   onExercise: (entry: ExerciseEntry) => void;
   onLogClass: (day: string) => void;
+  onOpenF45: () => void;
   onScan: (file: File) => void;
   onDescribe: () => void;
 }) {
@@ -339,7 +344,7 @@ export default function TodayView({
               today={today}
               logged={loggedClass}
               onLog={() => onLogClass(day)}
-              studio={schedule!.studio.name.replace(/^F45\s*/i, "F45 ")}
+              onOpen={onOpenF45}
             />
           )}
 
