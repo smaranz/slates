@@ -119,20 +119,132 @@
 }
 
 .done {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  display: inline-flex;
+  --success-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 9999px;
-  background: oklch(0.3 0.06 145);
-  box-shadow: var(--shadow-pop);
+  justify-content: center;
+  gap: 28px;
+  text-align: center;
+  animation: successFade 300ms ease-out both;
+}
+
+.successMark {
+  position: relative;
+  display: grid;
+  width: 144px;
+  height: 144px;
+  place-items: center;
   color: var(--good);
-  font-size: 13px;
+}
+
+.successCore {
+  display: grid;
+  width: 88px;
+  height: 88px;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--good) 40%, transparent);
+  border-radius: 28px;
+  background: color-mix(in oklab, var(--good) 12%, var(--bg));
+  box-shadow: 0 0 64px color-mix(in oklab, var(--good) 15%, transparent);
+  animation: successSettle 650ms var(--success-ease) both;
+}
+
+.successCore svg {
+  width: 48px;
+  height: 48px;
+}
+
+.successCore path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: successDraw 480ms var(--success-ease) 240ms both;
+}
+
+.successRing {
+  position: absolute;
+  inset: 24px;
+  border: 1px solid color-mix(in oklab, var(--good) 35%, transparent);
+  border-radius: 50%;
+  animation: successPulse 1100ms var(--success-ease) 120ms both;
+}
+
+.successRing:nth-child(2) {
+  animation-delay: 340ms;
+}
+
+.successCopy {
+  padding: 0 16px;
+  animation: successRise 650ms var(--success-ease) 300ms both;
+}
+
+.successCopy h3 {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 4vw, 36px);
   font-weight: 600;
-  transform: translateX(-50%);
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.successCopy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.successTrail {
+  display: flex;
+  gap: 6px;
+  animation: successFade 400ms ease-out 600ms both;
+}
+
+.successTrail span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--good);
+  animation: successDot 1000ms ease-in-out infinite;
+}
+
+.successTrail span:nth-child(2) { animation-delay: 120ms; }
+.successTrail span:nth-child(3) { animation-delay: 240ms; }
+
+@keyframes successFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes successSettle {
+  from { opacity: 0; transform: translateY(18px) scale(0.75) rotate(-12deg); }
+  to { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+}
+
+@keyframes successDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes successPulse {
+  from { opacity: 0.7; transform: scale(0.8); }
+  to { opacity: 0; transform: scale(1.8); }
+}
+
+@keyframes successRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes successDot {
+  0%, 100% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .done, .done * { animation: none; }
+  .successCore path { stroke-dashoffset: 0; }
+  .successRing { display: none; }
 }
 
 .foot {

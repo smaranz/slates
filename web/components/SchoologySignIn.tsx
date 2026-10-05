@@ -244,11 +244,11 @@ function SignInOverlay({ domain, onClose, onSignedIn }: { domain?: string; onClo
         <div className={css.heading}>
           <h2 id={titleId} className={css.title}>
             <i aria-hidden="true" />
-            Sign in to Schoology
+            {done ? "Schoology connected" : "Sign in to Schoology"}
           </h2>
           <p className={css.sub}>
-            {shownDomain ? `${shownDomain}, open` : "Open"} in the browser Slates syncs with. What you type goes to
-            that browser and on to Schoology; Slates doesn&apos;t keep it.
+            {done ? "Your school is back in Slates." : <>{shownDomain ? `${shownDomain}, open` : "Open"} in the browser Slates syncs with. What you type goes to
+            that browser and on to Schoology; Slates doesn&apos;t keep it.</>}
           </p>
         </div>
         <button
@@ -282,6 +282,23 @@ function SignInOverlay({ domain, onClose, onSignedIn }: { domain?: string; onClo
           <button type="button" className="btn btn--primary" onClick={again}>
             Open it again
           </button>
+        </div>
+      ) : done ? (
+        <div className={css.done} role="status" aria-live="polite">
+          <div className={css.successMark} aria-hidden="true">
+            <span className={css.successRing} />
+            <span className={css.successRing} />
+            <span className={css.successCore}>
+              <svg viewBox="0 0 48 48" fill="none">
+                <path d="M13 24.5 21 32 35 17" pathLength="1" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          </div>
+          <div className={css.successCopy}>
+            <h3>You&apos;re connected.</h3>
+            <p>Bringing your school into Slates…</p>
+          </div>
+          <div className={css.successTrail} aria-hidden="true"><span /><span /><span /></div>
         </div>
       ) : (
         <div
@@ -362,16 +379,10 @@ function SignInOverlay({ domain, onClose, onSignedIn }: { domain?: string; onClo
               Opening Schoology…
             </div>
           )}
-          {done && (
-            <div className={css.done} role="status">
-              <Icon path={ICON.check} size={16} />
-              Signed in. Syncing your board…
-            </div>
-          )}
         </div>
       )}
 
-      <div className={css.foot}>
+      {!done && <div className={css.foot}>
         <form
           className={css.type}
           onSubmit={(e) => {
@@ -416,7 +427,7 @@ function SignInOverlay({ domain, onClose, onSignedIn }: { domain?: string; onClo
           <span className={css.mouse}>Click the page, then type. Paste works too, and Esc takes you out of the page.</span>
           <span className={css.touch}>Tap a field on the page, type it here, then press Send.</span>
         </p>
-      </div>
+      </div>}
     </div>,
     document.body
   );
@@ -448,11 +459,15 @@ export default function SchoologySignIn({
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
+  const closeTimer = useRef<number | undefined>(undefined);
   const close = () => setOpen(false);
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   // Back to the button once the overlay has gone; any sooner and the overlay pulls focus back in.
   useEffect(() => {
     if (wasOpen.current && !open) button.current?.focus();
+    if (!open) window.clearTimeout(closeTimer.current);
     wasOpen.current = open;
   }, [open]);
 
@@ -468,10 +483,10 @@ export default function SchoologySignIn({
           onSignedIn={() => {
             void store.syncScraper(true);
             // Told after it closes: the caller re-checking first would take this button, and the overlay, away.
-            window.setTimeout(() => {
+            closeTimer.current = window.setTimeout(() => {
               close();
               onSignedIn?.();
-            }, 1200);
+            }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 900 : 2200);
           }}
         />
       )}
