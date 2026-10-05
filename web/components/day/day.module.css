@@ -1,10 +1,10 @@
 /*
  * Schedule. Slates' own surfaces and type (globals.css), a sunrise accent for
  * now, and a colour for each kind of block so a week reads at a glance:
- * school, coding, Instagram, study, meals, breaks, free time, sleep. Blocks
- * are drawn as long as they last on one clock. Written for a 375-point phone
- * first (one day, the now card on top), then a rail beside the timeline, and
- * the whole week side by side once seven columns fit.
+ * school, coding, F45, Instagram, study, meals, breaks, free time, sleep.
+ * Blocks are drawn as long as they last on one clock. Written for a 375-point
+ * phone first (one day, the now card on top), then a rail beside the
+ * timeline, and the whole week side by side once seven columns fit.
  */
 
 .app {
@@ -13,6 +13,7 @@
   --d-accent-soft: oklch(0.8 0.15 55 / 0.14);
   --d-school: oklch(0.77 0.11 250);
   --d-build: oklch(0.8 0.13 158);
+  --d-workout: oklch(0.74 0.16 30);
   --d-content: oklch(0.77 0.14 2);
   --d-study: oklch(0.77 0.12 295);
   --d-meal: oklch(0.85 0.12 85);
@@ -29,6 +30,9 @@
 }
 .app [data-kind="build"] {
   --k: var(--d-build);
+}
+.app [data-kind="workout"] {
+  --k: var(--d-workout);
 }
 .app [data-kind="content"] {
   --k: var(--d-content);
@@ -957,6 +961,41 @@
   }
 }
 
+/*
+ * Three quarters of an hour (F45, and the coding after Monday's and Friday's
+ * class) keeps its two lines where the block is tall enough for them, as in
+ * the 27" week or a phone's day, and is drawn on one line like half an hour
+ * where it isn't, as in a laptop's week. The block is its own container so
+ * this follows its real height (inside its padding); only these blocks are,
+ * so the column stays the container the rules above ask.
+ */
+.block[data-size="m"] {
+  container-type: size;
+}
+
+@container (max-height: 24px) {
+  .block[data-size="m"] > * {
+    align-self: center;
+  }
+
+  .block[data-size="m"] .blockText {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .block[data-size="m"] .blockTime {
+    display: none;
+  }
+}
+
+@container (max-height: 24px) and (min-width: 260px) {
+  .block[data-size="m"] .blockTime {
+    display: block;
+    flex-shrink: 0;
+  }
+}
+
 /* An hour and a half or more in a week column: the name may take two lines. */
 .grid[data-view="week"] .block[data-size="xl"] .blockTitle {
   display: -webkit-box;
@@ -994,6 +1033,20 @@
 /* Half an hour's span already says how long it is, and the name needs the room. */
 .block[data-size="s"] .blockLength {
   display: none;
+}
+
+/*
+ * Under half an hour (the way home after Sunday's class): a line of the
+ * usual size doesn't fit, so smaller words and no icon. Specific enough that
+ * the day, week and phone sizes below don't reach it.
+ */
+.grid[data-view] .block[data-tiny] :is(.blockIcon, .blockLeft) {
+  display: none;
+}
+
+.grid[data-view] .block[data-tiny] :is(.blockTitle, .blockTime) {
+  font-size: 10.5px;
+  line-height: 1;
 }
 
 .blockLeft {

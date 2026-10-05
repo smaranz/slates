@@ -4,19 +4,26 @@
  * School days start at 6:00 with an hour to get ready, then coding and
  * product work until it's time to leave: 8:30 on Monday, Tuesday and
  * Thursday, 11:00 on Wednesday, 10:00 on Friday. After school (home at 4:00,
- * or 3:15 on Wednesday and Friday) every day has the same shape: a snack and
- * freshening up, coding and product work until dinner at 7:00, Instagram
- * content after dinner, free time, sleep at 10:30. Weekends are seven hours
- * of study in three sessions (9:00–12:00, 1:00–3:30 and 4:00–5:30, with lunch
- * and a snack between them), then coding and product work, dinner, Instagram
- * content and free time.
+ * or 3:15 on Wednesday and Friday) comes a snack and freshening up, then
+ * coding and product work around F45, dinner at 7:00, Instagram content
+ * after dinner, free time, sleep at 10:30.
+ *
+ * F45 is the Cupertino studio: the 5:30 class on Monday and the day's last
+ * class every other day, which is 5:30 on Friday, 6:30 from Tuesday to
+ * Thursday (dinner follows the class at 7:15, and Instagram content gets
+ * 7:45–9:00 so free time still starts at 9:00) and 10:00 at the weekend.
+ * The times are F45's own as of October 2026; Health reads the live
+ * schedule (`lib/health/f45.ts`). Weekends are still seven hours of study,
+ * in four sessions around the class (9:00–10:00, 11:00–1:00, 2:00–4:00 and
+ * 4:30–6:30, with lunch and a snack between them), then a little coding and
+ * product work, dinner, Instagram content and free time.
  *
  * Kept as a timetable so a change is one line: each row starts a block that
  * runs until the next row, and the last one runs until sleep. The device's
  * own clock says where "now" is, so nothing here needs the host.
  */
 
-export type Kind = "routine" | "build" | "school" | "content" | "study" | "meal" | "free" | "sleep";
+export type Kind = "routine" | "build" | "school" | "workout" | "content" | "study" | "meal" | "free" | "sleep";
 
 export interface Block {
   /** Minutes after midnight; past 1,440 for the part of a night that runs into tomorrow. */
@@ -44,15 +51,32 @@ interface Template {
   sleep: string;
 }
 
-const MON_TUE_THU: Template = {
+const MONDAY: Template = {
   rows: [
     ["06:00", "routine", "Get ready + breakfast"],
     ["07:00", "build", "Coding + product"],
     ["08:30", "school", "School"],
     ["16:00", "routine", "Snack + freshen up"],
     ["16:30", "build", "Coding + product"],
+    ["17:30", "workout", "F45"],
+    ["18:15", "build", "Coding + product"],
     ["19:00", "meal", "Dinner"],
     ["19:30", "content", "Instagram content"],
+    ["21:00", "free", "Free time"],
+  ],
+  sleep: "22:30",
+};
+
+const TUE_THU: Template = {
+  rows: [
+    ["06:00", "routine", "Get ready + breakfast"],
+    ["07:00", "build", "Coding + product"],
+    ["08:30", "school", "School"],
+    ["16:00", "routine", "Snack + freshen up"],
+    ["16:30", "build", "Coding + product"],
+    ["18:30", "workout", "F45"],
+    ["19:15", "meal", "Dinner"],
+    ["19:45", "content", "Instagram content"],
     ["21:00", "free", "Free time"],
   ],
   sleep: "22:30",
@@ -65,8 +89,9 @@ const WEDNESDAY: Template = {
     ["11:00", "school", "School"],
     ["15:15", "routine", "Snack + freshen up"],
     ["15:45", "build", "Coding + product"],
-    ["19:00", "meal", "Dinner"],
-    ["19:30", "content", "Instagram content"],
+    ["18:30", "workout", "F45"],
+    ["19:15", "meal", "Dinner"],
+    ["19:45", "content", "Instagram content"],
     ["21:00", "free", "Free time"],
   ],
   sleep: "22:30",
@@ -79,6 +104,8 @@ const FRIDAY: Template = {
     ["10:00", "school", "School"],
     ["15:15", "routine", "Snack + freshen up"],
     ["15:45", "build", "Coding + product"],
+    ["17:30", "workout", "F45"],
+    ["18:15", "build", "Coding + product"],
     ["19:00", "meal", "Dinner"],
     ["19:30", "content", "Instagram content"],
     ["21:00", "free", "Free time"],
@@ -86,15 +113,38 @@ const FRIDAY: Template = {
   sleep: "22:30",
 };
 
-const WEEKEND: Template = {
+/** Saturday's 10:00 class runs an hour. */
+const SATURDAY: Template = {
   rows: [
     ["08:00", "routine", "Get ready + breakfast"],
     ["09:00", "study", "Study session 1"],
-    ["12:00", "meal", "Lunch"],
-    ["13:00", "study", "Study session 2"],
-    ["15:30", "routine", "Snack + break"],
-    ["16:00", "study", "Study session 3"],
-    ["17:30", "build", "Coding + product"],
+    ["10:00", "workout", "F45"],
+    ["11:00", "study", "Study session 2"],
+    ["13:00", "meal", "Lunch"],
+    ["14:00", "study", "Study session 3"],
+    ["16:00", "routine", "Snack + break"],
+    ["16:30", "study", "Study session 4"],
+    ["18:30", "build", "Coding + product"],
+    ["19:00", "meal", "Dinner"],
+    ["19:30", "content", "Instagram content"],
+    ["21:00", "free", "Free time"],
+  ],
+  sleep: "22:30",
+};
+
+/** Sunday's is 45 minutes, so the study sessions match Saturday's and the quarter hour between gets home. */
+const SUNDAY: Template = {
+  rows: [
+    ["08:00", "routine", "Get ready + breakfast"],
+    ["09:00", "study", "Study session 1"],
+    ["10:00", "workout", "F45"],
+    ["10:45", "routine", "Head home"],
+    ["11:00", "study", "Study session 2"],
+    ["13:00", "meal", "Lunch"],
+    ["14:00", "study", "Study session 3"],
+    ["16:00", "routine", "Snack + break"],
+    ["16:30", "study", "Study session 4"],
+    ["18:30", "build", "Coding + product"],
     ["19:00", "meal", "Dinner"],
     ["19:30", "content", "Instagram content"],
     ["21:00", "free", "Free time"],
@@ -103,12 +153,13 @@ const WEEKEND: Template = {
 };
 
 /** Sunday first, the way `Date.getDay()` counts. */
-const WEEK: readonly Template[] = [WEEKEND, MON_TUE_THU, MON_TUE_THU, WEDNESDAY, MON_TUE_THU, FRIDAY, WEEKEND];
+const WEEK: readonly Template[] = [SUNDAY, MONDAY, TUE_THU, WEDNESDAY, TUE_THU, FRIDAY, SATURDAY];
 
 export const KIND_LABEL: Record<Kind, string> = {
   build: "Coding + product",
   content: "Instagram content",
   school: "School",
+  workout: "F45",
   study: "Study",
   meal: "Meals",
   routine: "Getting ready + breaks",

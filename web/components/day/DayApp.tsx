@@ -50,12 +50,15 @@ const D = {
   meal: "M6 2h1.4v6.2c0 .6.4 1 .9 1.2V2h1.4v7.4c.5-.2.9-.6.9-1.2V2H12v6.4a3 3 0 0 1-2 2.8V22H8.3V11.2A3 3 0 0 1 6 8.4zm11.3 0C19 2 20 4.4 20 7.6c0 2.3-.8 3.7-2 4.2V22h-1.8V2z",
   mug: "M4 7h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zm13 1h1.5a3 3 0 0 1 0 6H17v-2h1.5a1 1 0 0 0 0-2H17zM3 20h15v2H3zM8.2 2h1.6v3.2H8.2zm3.4 0h1.6v3.2h-1.6z",
   spark: "M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2zm7-1 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8z",
+  /** Health's F45 dumbbell. */
+  dumbbell: "M2 10h2V8h3v8H4v-2H2zm20 0h-2V8h-3v8h3v-2h2zM8 11h8v2H8z",
 } as const;
 
 const KIND_ICON: Record<Kind, string> = {
   routine: D.mug,
   build: D.code,
   school: D.cap,
+  workout: D.dumbbell,
   content: D.camera,
   study: D.book,
   meal: D.meal,
@@ -527,6 +530,7 @@ function Column({
               data-kind={b.kind}
               data-state={state}
               data-size={minutes <= 30 ? "s" : minutes < 60 ? "m" : minutes < 90 ? "l" : "xl"}
+              data-tiny={minutes < 30 || undefined}
               aria-current={state === "now" ? "time" : undefined}
               style={
                 {
