@@ -1,10 +1,10 @@
 /*
  * Schedule. Slates' own surfaces and type (globals.css), a sunrise accent for
  * now, and a colour for each kind of block so a week reads at a glance:
- * school, coding, F45, Instagram, study, meals, breaks, free time, sleep.
- * Blocks are drawn as long as they last on one clock. Written for a 375-point
- * phone first (one day, the now card on top), then a rail beside the
- * timeline, and the whole week side by side once seven columns fit.
+ * school, homework, coding, F45, Instagram, study, meals, breaks, free time,
+ * sleep. Blocks are drawn as long as they last on one clock. Written for a
+ * 375-point phone first (one day, the now card on top), then a rail beside
+ * the timeline, and the whole week side by side once seven columns fit.
  */
 
 .app {
@@ -12,6 +12,7 @@
   --d-accent-ink: oklch(0.25 0.06 55);
   --d-accent-soft: oklch(0.8 0.15 55 / 0.14);
   --d-school: oklch(0.77 0.11 250);
+  --d-homework: oklch(0.84 0.14 122);
   --d-build: oklch(0.8 0.13 158);
   --d-workout: oklch(0.74 0.16 30);
   --d-content: oklch(0.77 0.14 2);
@@ -27,6 +28,9 @@
 
 .app [data-kind="school"] {
   --k: var(--d-school);
+}
+.app [data-kind="homework"] {
+  --k: var(--d-homework);
 }
 .app [data-kind="build"] {
   --k: var(--d-build);
@@ -164,6 +168,41 @@
 }
 
 .todayBtn:active {
+  transform: scale(0.96);
+}
+
+/* The Mac app's alerts: lit in the now colour while on, stepped back while off. */
+.alertsBtn {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 0 13px 0 10px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--sunken);
+  box-shadow: var(--shadow-sunken);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background 0.2s var(--ease-out),
+    color 0.2s var(--ease-out),
+    transform 0.15s var(--ease-out);
+}
+
+.alertsBtn[aria-pressed="true"] {
+  background: var(--d-accent-soft);
+  box-shadow: none;
+  color: var(--d-accent);
+}
+
+.alertsBtn:active {
   transform: scale(0.96);
 }
 
@@ -962,37 +1001,50 @@
 }
 
 /*
- * Three quarters of an hour (F45, and the coding after Monday's and Friday's
- * class) keeps its two lines where the block is tall enough for them, as in
- * the 27" week or a phone's day, and is drawn on one line like half an hour
- * where it isn't, as in a laptop's week. The block is its own container so
- * this follows its real height (inside its padding); only these blocks are,
- * so the column stays the container the rules above ask.
+ * Three quarters of an hour (F45, and the homework after Monday's and
+ * Friday's class) keeps its two lines where the block is tall enough for
+ * them, as in the 27" week, and is drawn on one line like half an hour where
+ * it isn't: a laptop's week, and a day, whose bigger type needs more room
+ * than a phone gives it. The block is its own container so this follows its
+ * real height (measured inside its padding); only these blocks are, so the
+ * column stays the container the rules above ask.
  */
 .block[data-size="m"] {
   container-type: size;
 }
 
-@container (max-height: 24px) {
-  .block[data-size="m"] > * {
+/* A week column: the name alone, the clock down the side says the time. */
+@container (max-height: 25px) {
+  .grid[data-view="week"] .block[data-size="m"] > * {
     align-self: center;
   }
 
-  .block[data-size="m"] .blockText {
+  .grid[data-view="week"] .block[data-size="m"] .blockTime {
+    display: none;
+  }
+}
+
+/* A day: the name with its time beside it. */
+@container (max-height: 28px) {
+  .grid[data-view="day"] .block[data-size="m"] > * {
+    align-self: center;
+  }
+
+  .grid[data-view="day"] .block[data-size="m"] .blockText {
     flex-direction: row;
     align-items: baseline;
     gap: 8px;
   }
 
-  .block[data-size="m"] .blockTime {
-    display: none;
+  .grid[data-view="day"] .block[data-size="m"] .blockTime {
+    flex-shrink: 0;
   }
 }
 
-@container (max-height: 24px) and (min-width: 260px) {
-  .block[data-size="m"] .blockTime {
-    display: block;
-    flex-shrink: 0;
+/* On a phone, as with half an hour, the one on now drops its time for what's left. */
+@container (max-height: 28px) and (max-width: 420px) {
+  .grid[data-view="day"] .block[data-size="m"][data-state="now"] .blockTime {
+    display: none;
   }
 }
 

@@ -1,17 +1,18 @@
 /**
  * The student's week, block by block, and where the clock is in it.
  *
- * School days start at 6:00 with an hour to get ready, then coding and
- * product work until it's time to leave: 8:30 on Monday, Tuesday and
- * Thursday, 11:00 on Wednesday, 10:00 on Friday. After school (home at 4:00,
- * or 3:15 on Wednesday and Friday) comes a snack and freshening up, then
- * coding and product work around F45, dinner at 7:00, Instagram content
- * after dinner, free time, sleep at 10:30.
+ * School days start at 6:00 with an hour to get ready and an hour and a half
+ * of study, 7:00–8:30. Then it's time to leave: 8:30 on Monday, Tuesday and
+ * Thursday; Wednesday and Friday start later, so coding and product work
+ * fills the morning until 11:00 or 10:00. After school (home at 4:00, or
+ * 3:15 on Wednesday and Friday) comes a snack and freshening up, then at
+ * least three hours of homework, split around F45 and dinner, then an hour
+ * of Instagram content (45 minutes on Monday), free time and sleep at 10:30.
+ * Monday has the Codestarters meeting at 7:00 PM, so dinner is at 7:30.
  *
  * F45 is the Cupertino studio: the 5:30 class on Monday and the day's last
  * class every other day, which is 5:30 on Friday, 6:30 from Tuesday to
- * Thursday (dinner follows the class at 7:15, and Instagram content gets
- * 7:45–9:00 so free time still starts at 9:00) and 10:00 at the weekend.
+ * Thursday (dinner follows the class at 7:15) and 10:00 at the weekend.
  * The times are F45's own as of October 2026; Health reads the live
  * schedule (`lib/health/f45.ts`). Weekends are still seven hours of study,
  * in four sessions around the class (9:00–10:00, 11:00–1:00, 2:00–4:00 and
@@ -23,7 +24,7 @@
  * own clock says where "now" is, so nothing here needs the host.
  */
 
-export type Kind = "routine" | "build" | "school" | "workout" | "content" | "study" | "meal" | "free" | "sleep";
+export type Kind = "routine" | "build" | "school" | "homework" | "workout" | "content" | "study" | "meal" | "free" | "sleep";
 
 export interface Block {
   /** Minutes after midnight; past 1,440 for the part of a night that runs into tomorrow. */
@@ -54,15 +55,17 @@ interface Template {
 const MONDAY: Template = {
   rows: [
     ["06:00", "routine", "Get ready + breakfast"],
-    ["07:00", "build", "Coding + product"],
+    ["07:00", "study", "Study"],
     ["08:30", "school", "School"],
     ["16:00", "routine", "Snack + freshen up"],
-    ["16:30", "build", "Coding + product"],
+    ["16:30", "homework", "Homework"],
     ["17:30", "workout", "F45"],
-    ["18:15", "build", "Coding + product"],
-    ["19:00", "meal", "Dinner"],
-    ["19:30", "content", "Instagram content"],
-    ["21:00", "free", "Free time"],
+    ["18:15", "homework", "Homework"],
+    ["19:00", "build", "Codestarters meeting"],
+    ["19:30", "meal", "Dinner"],
+    ["20:00", "homework", "Homework"],
+    ["21:15", "content", "Instagram content"],
+    ["22:00", "free", "Free time"],
   ],
   sleep: "22:30",
 };
@@ -70,29 +73,33 @@ const MONDAY: Template = {
 const TUE_THU: Template = {
   rows: [
     ["06:00", "routine", "Get ready + breakfast"],
-    ["07:00", "build", "Coding + product"],
+    ["07:00", "study", "Study"],
     ["08:30", "school", "School"],
     ["16:00", "routine", "Snack + freshen up"],
-    ["16:30", "build", "Coding + product"],
+    ["16:30", "homework", "Homework"],
     ["18:30", "workout", "F45"],
     ["19:15", "meal", "Dinner"],
-    ["19:45", "content", "Instagram content"],
-    ["21:00", "free", "Free time"],
+    ["19:45", "homework", "Homework"],
+    ["20:45", "content", "Instagram content"],
+    ["21:45", "free", "Free time"],
   ],
   sleep: "22:30",
 };
 
+/** Home at 3:15, so homework starts earlier and runs to 3¾ hours. */
 const WEDNESDAY: Template = {
   rows: [
     ["06:00", "routine", "Get ready + breakfast"],
-    ["07:00", "build", "Coding + product"],
+    ["07:00", "study", "Study"],
+    ["08:30", "build", "Coding + product"],
     ["11:00", "school", "School"],
     ["15:15", "routine", "Snack + freshen up"],
-    ["15:45", "build", "Coding + product"],
+    ["15:45", "homework", "Homework"],
     ["18:30", "workout", "F45"],
     ["19:15", "meal", "Dinner"],
-    ["19:45", "content", "Instagram content"],
-    ["21:00", "free", "Free time"],
+    ["19:45", "homework", "Homework"],
+    ["20:45", "content", "Instagram content"],
+    ["21:45", "free", "Free time"],
   ],
   sleep: "22:30",
 };
@@ -100,14 +107,16 @@ const WEDNESDAY: Template = {
 const FRIDAY: Template = {
   rows: [
     ["06:00", "routine", "Get ready + breakfast"],
-    ["07:00", "build", "Coding + product"],
+    ["07:00", "study", "Study"],
+    ["08:30", "build", "Coding + product"],
     ["10:00", "school", "School"],
     ["15:15", "routine", "Snack + freshen up"],
-    ["15:45", "build", "Coding + product"],
+    ["15:45", "homework", "Homework"],
     ["17:30", "workout", "F45"],
-    ["18:15", "build", "Coding + product"],
+    ["18:15", "homework", "Homework"],
     ["19:00", "meal", "Dinner"],
-    ["19:30", "content", "Instagram content"],
+    ["19:30", "homework", "Homework"],
+    ["20:00", "content", "Instagram content"],
     ["21:00", "free", "Free time"],
   ],
   sleep: "22:30",
@@ -159,6 +168,7 @@ export const KIND_LABEL: Record<Kind, string> = {
   build: "Coding + product",
   content: "Instagram content",
   school: "School",
+  homework: "Homework",
   workout: "F45",
   study: "Study",
   meal: "Meals",

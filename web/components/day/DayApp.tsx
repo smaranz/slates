@@ -23,6 +23,7 @@ import {
 import { fmtMinutes } from "@/lib/format";
 import { useMode } from "@/lib/mode";
 import { Icon, ICON } from "../ui";
+import { alertsOn, chime, onTheMacApp, setAlertsOn } from "./ScheduleAlerts";
 import s from "./day.module.css";
 
 /**
@@ -52,12 +53,15 @@ const D = {
   spark: "M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2zm7-1 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8z",
   /** Health's F45 dumbbell. */
   dumbbell: "M2 10h2V8h3v8H4v-2H2zm20 0h-2V8h-3v8h3v-2h2zM8 11h8v2H8z",
+  pencil: "M4 16.5 15.5 5 19 8.5 7.5 20H4zM17 3.5l1.5-1.5a1.4 1.4 0 0 1 2 0L22 3.5a1.4 1.4 0 0 1 0 2L20.5 7z",
+  bell: "M12 2a1.5 1.5 0 0 1 1.5 1.5v.6a6.5 6.5 0 0 1 5 6.4v4.2l1.8 2.4a.8.8 0 0 1-.6 1.3H4.3a.8.8 0 0 1-.6-1.3l1.8-2.4v-4.2a6.5 6.5 0 0 1 5-6.4v-.6A1.5 1.5 0 0 1 12 2zm-2.5 17.5h5a2.5 2.5 0 0 1-5 0z",
 } as const;
 
 const KIND_ICON: Record<Kind, string> = {
   routine: D.mug,
   build: D.code,
   school: D.cap,
+  homework: D.pencil,
   workout: D.dumbbell,
   content: D.camera,
   study: D.book,
@@ -113,6 +117,13 @@ function useWeekFits(): boolean {
   return useSyncExternalStore(subscribeWidth, () => window.matchMedia(WEEK_FITS).matches, () => false);
 }
 
+const neverChanges = () => () => {};
+
+/** Alerts only sound in the Mac app, so only the Mac app gets their switch. */
+function useMacApp(): boolean {
+  return useSyncExternalStore(neverChanges, onTheMacApp, () => false);
+}
+
 type View = "day" | "week";
 
 const VIEW_KEY = "slates.schedule.view";
@@ -148,6 +159,8 @@ export default function DayApp() {
   const { clear } = useMode();
   const { day: today, minutes } = clockAt(useMinute());
   const weekFits = useWeekFits();
+  const mac = useMacApp();
+  const [alerts, setAlerts] = useState(alertsOn);
   const [preferred, setPreferred] = useState<View>(savedView);
   const [picked, setPicked] = useState<string | null>(null);
   const week = Array.from({ length: 7 }, (_, i) => addDays(today, i));
@@ -167,6 +180,13 @@ export default function DayApp() {
     } catch {
       // Storage blocked: the choice holds until the room closes.
     }
+  };
+
+  const toggleAlerts = () => {
+    setAlerts(!alerts);
+    setAlertsOn(!alerts);
+    // Turned on, it says what it sounds like.
+    if (!alerts) chime();
   };
 
   // The traffic lights sit over the header's left end in the desktop shell.
@@ -197,6 +217,18 @@ export default function DayApp() {
           {!isToday && !(weekFits && preferred === "week") && (
             <button type="button" className={s.todayBtn} onClick={() => setPicked(null)}>
               Back to today
+            </button>
+          )}
+          {mac && (
+            <button
+              type="button"
+              className={s.alertsBtn}
+              aria-pressed={alerts}
+              onClick={toggleAlerts}
+              title="A notification and a chime as each block starts, and an alarm 15 minutes before F45"
+            >
+              <Icon path={D.bell} size={14} />
+              Alerts
             </button>
           )}
         </header>

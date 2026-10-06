@@ -4,9 +4,10 @@ import test from "node:test";
 import { addDays, axisOf, brief, clock, clockAt, DAY_MINUTES, hourLabel, momentAt, nightAfter, NIGHT_TAIL, planFor, span, splitOf } from "./schedule";
 
 // The week the student gave: school 8:30–4:00 Mon/Tue/Thu, 11:00–3:15 Wed,
-// 10:00–3:15 Fri, up at 6:00 on school days, the evening split into coding
-// and product work, F45, then Instagram content, and seven hours of study on
-// each weekend day around a 10:00 class.
+// 10:00–3:15 Fri, up at 6:00 on school days with an hour and a half of
+// study before school, at least three hours of homework after it around F45,
+// then Instagram content and free time; Codestarters on Monday evenings; and
+// seven hours of study on each weekend day around a 10:00 class.
 
 const SUNDAY = "2026-10-04";
 const MONDAY = "2026-10-05";
@@ -43,58 +44,84 @@ test("school is when the student said: leave, then home", () => {
   assert.equal(planFor(SUNDAY).school, null);
 });
 
-test("school days start at 6:00 and code until it's time to leave", () => {
+test("school days start at 6:00: an hour to get ready, then study until 8:30", () => {
   for (const day of [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]) {
     const plan = planFor(day);
     assert.equal(plan.wake, at("06:00"));
-    const [ready, code] = plan.blocks;
+    const [ready, study] = plan.blocks;
     assert.deepEqual([ready!.start, ready!.end, ready!.kind], [at("06:00"), at("07:00"), "routine"]);
-    assert.deepEqual([code!.start, code!.end, code!.kind], [at("07:00"), plan.school!.leave, "build"]);
+    assert.deepEqual([study!.start, study!.end, study!.kind], [at("07:00"), at("08:30"), "study"]);
   }
+  // Wednesday and Friday start later, and the rest of the morning is coding.
+  assert.deepEqual(rows(WEDNESDAY).slice(2, 4), ["8:30 AM Coding + product", "11:00 AM School"]);
+  assert.deepEqual(rows(FRIDAY).slice(2, 4), ["8:30 AM Coding + product", "10:00 AM School"]);
 });
 
-test("after school: a snack, coding, F45, dinner, Instagram until 9:00, sleep at 10:30", () => {
-  // Monday's 5:30 class sits in the coding; dinner stays at 7:00.
+test("after school: a snack, homework around F45 and dinner, Instagram, free time, sleep at 10:30", () => {
+  // Monday: the 5:30 class, then Codestarters at 7:00, so dinner is at 7:30.
   assert.deepEqual(rows(MONDAY).slice(3), [
     "4:00 PM Snack + freshen up",
-    "4:30 PM Coding + product",
+    "4:30 PM Homework",
     "5:30 PM F45",
-    "6:15 PM Coding + product",
-    "7:00 PM Dinner",
-    "7:30 PM Instagram content",
-    "9:00 PM Free time",
+    "6:15 PM Homework",
+    "7:00 PM Codestarters meeting",
+    "7:30 PM Dinner",
+    "8:00 PM Homework",
+    "9:15 PM Instagram content",
+    "10:00 PM Free time",
   ]);
-  // Friday is home 45 minutes earlier, and its last class is 5:30 too.
-  assert.deepEqual(rows(FRIDAY).slice(3), [
-    "3:15 PM Snack + freshen up",
-    "3:45 PM Coding + product",
-    "5:30 PM F45",
-    "6:15 PM Coding + product",
-    "7:00 PM Dinner",
-    "7:30 PM Instagram content",
-    "9:00 PM Free time",
-  ]);
-  // The 6:30 class runs past 7:00: dinner follows it, and Instagram gives up
-  // a quarter of an hour so free time still starts at 9:00.
+  // The 6:30 class runs past 7:00, so dinner follows it.
   for (const day of [TUESDAY, THURSDAY]) {
     assert.deepEqual(rows(day).slice(3), [
       "4:00 PM Snack + freshen up",
-      "4:30 PM Coding + product",
+      "4:30 PM Homework",
       "6:30 PM F45",
       "7:15 PM Dinner",
-      "7:45 PM Instagram content",
-      "9:00 PM Free time",
+      "7:45 PM Homework",
+      "8:45 PM Instagram content",
+      "9:45 PM Free time",
     ]);
   }
-  assert.deepEqual(rows(WEDNESDAY).slice(3), [
+  // Home 45 minutes earlier on Wednesday and Friday; it goes to homework.
+  assert.deepEqual(rows(WEDNESDAY).slice(4), [
     "3:15 PM Snack + freshen up",
-    "3:45 PM Coding + product",
+    "3:45 PM Homework",
     "6:30 PM F45",
     "7:15 PM Dinner",
-    "7:45 PM Instagram content",
+    "7:45 PM Homework",
+    "8:45 PM Instagram content",
+    "9:45 PM Free time",
+  ]);
+  assert.deepEqual(rows(FRIDAY).slice(4), [
+    "3:15 PM Snack + freshen up",
+    "3:45 PM Homework",
+    "5:30 PM F45",
+    "6:15 PM Homework",
+    "7:00 PM Dinner",
+    "7:30 PM Homework",
+    "8:00 PM Instagram content",
     "9:00 PM Free time",
   ]);
   for (let i = 0; i < 7; i++) assert.equal(planFor(addDays(SUNDAY, i)).sleep, at("22:30"));
+});
+
+test("every school day has at least three hours of homework and an hour and a half of study", () => {
+  const minutes = (day: string, kind: string) => planFor(day).blocks.reduce((sum, b) => sum + (b.kind === kind ? b.end - b.start : 0), 0);
+  for (const day of [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]) {
+    assert.ok(minutes(day, "homework") >= 3 * 60, `${day} has ${minutes(day, "homework")} minutes of homework`);
+    assert.equal(minutes(day, "study"), 90);
+  }
+  // Wednesday's early finish makes it three and three quarter hours.
+  assert.equal(minutes(WEDNESDAY, "homework"), 3 * 60 + 45);
+  // What's left goes to an hour of Instagram (45 minutes on Monday), then free time.
+  assert.deepEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY].map((day) => minutes(day, "content")), [45, 60, 60, 60, 60]);
+  assert.deepEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY].map((day) => minutes(day, "free")), [30, 45, 45, 45, 90]);
+});
+
+test("Codestarters meets on Monday evenings, 7:00–7:30", () => {
+  const meetings = (day: string) => planFor(day).blocks.filter((b) => b.title === "Codestarters meeting").map((b) => span(b.start, b.end));
+  assert.deepEqual(meetings(MONDAY), ["7:00 – 7:30 PM"]);
+  for (let i = 0; i < 7; i++) if (addDays(SUNDAY, i) !== MONDAY) assert.deepEqual(meetings(addDays(SUNDAY, i)), []);
 });
 
 test("F45 is the 5:30 class on Monday and the studio's last class every other day", () => {
@@ -132,18 +159,23 @@ test("each weekend day is still seven hours of study, in four sessions around F4
     // Seven hours is the most of anything on a weekend day.
     assert.equal(splitOf(plan)[0]!.kind, "study");
   }
-  // Weekdays have none: school is their studying.
-  for (const day of [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]) assert.ok(!planFor(day).blocks.some((b) => b.kind === "study"));
+  // Weekend hours stay study, the student's pick: none of them is labelled homework.
+  for (const day of [SATURDAY, SUNDAY]) assert.ok(!planFor(day).blocks.some((b) => b.kind === "homework"));
 });
 
 test("the split adds up to the waking day", () => {
   const plan = planFor(MONDAY);
   const split = splitOf(plan);
   assert.equal(split.reduce((sum, s) => sum + s.minutes, 0), plan.sleep - plan.wake);
-  assert.deepEqual(split[0], { kind: "school", minutes: 450 });
-  assert.equal(split.find((s) => s.kind === "build")!.minutes, 195);
+  assert.deepEqual(split.slice(0, 2), [
+    { kind: "school", minutes: 450 },
+    { kind: "homework", minutes: 180 },
+  ]);
+  assert.equal(split.find((s) => s.kind === "study")!.minutes, 90);
   assert.equal(split.find((s) => s.kind === "workout")!.minutes, 45);
-  assert.equal(split.find((s) => s.kind === "content")!.minutes, 90);
+  assert.equal(split.find((s) => s.kind === "content")!.minutes, 45);
+  // Monday's only coding + product is the Codestarters meeting.
+  assert.equal(split.find((s) => s.kind === "build")!.minutes, 30);
 });
 
 test("the split adds up over a week too", () => {
@@ -151,7 +183,10 @@ test("the split adds up over a week too", () => {
   const split = splitOf(...week);
   const awake = week.reduce((sum, p) => sum + p.sleep - p.wake, 0);
   assert.equal(split.reduce((sum, s) => sum + s.minutes, 0), awake);
-  assert.equal(split.find((s) => s.kind === "study")!.minutes, 14 * 60);
+  // Seven hours each weekend day, an hour and a half each school day.
+  assert.equal(split.find((s) => s.kind === "study")!.minutes, 2 * 7 * 60 + 5 * 90);
+  // Three hours a school day, three and three quarters on Wednesday.
+  assert.equal(split.find((s) => s.kind === "homework")!.minutes, 4 * 180 + 225);
   // 7:30 on Monday, Tuesday and Thursday, 4:15 on Wednesday, 5:15 on Friday.
   assert.equal(split.find((s) => s.kind === "school")!.minutes, 3 * 450 + 255 + 315);
   // Seven classes, Saturday's an hour long.
@@ -176,17 +211,18 @@ test("days side by side share one clock, from the earliest wake-up to just past 
 
 test("now is the block the clock is in, with how far through and what's next", () => {
   const m = momentAt(TUESDAY, at("17:30"));
-  assert.equal(m.block.title, "Coding + product");
+  assert.equal(m.block.title, "Homework");
   assert.equal(m.progress, 0.5);
   assert.equal(m.left, 60);
   assert.equal(m.next.title, "F45");
   const gym = momentAt(MONDAY, at("17:45"));
   assert.equal(gym.block.title, "F45");
   assert.equal(gym.left, 30);
-  assert.equal(gym.next.title, "Coding + product");
+  assert.equal(gym.next.title, "Homework");
   // A boundary belongs to the block starting there.
-  assert.equal(momentAt(MONDAY, at("19:00")).block.title, "Dinner");
-  assert.equal(momentAt(MONDAY, at("21:30")).next.kind, "sleep");
+  assert.equal(momentAt(MONDAY, at("19:00")).block.title, "Codestarters meeting");
+  assert.equal(momentAt(MONDAY, at("19:30")).block.title, "Dinner");
+  assert.equal(momentAt(MONDAY, at("22:15")).next.kind, "sleep");
 });
 
 test("before waking up it's still last night", () => {

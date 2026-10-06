@@ -4,13 +4,15 @@ import { useEffect } from "react";
 
 import type { SentFile } from "@/lib/agent/types";
 import { canSaveToComputer, saveToComputer } from "@/lib/desktop-bridge";
+import ScheduleAlerts from "./day/ScheduleAlerts";
 
 /**
  * The Mac app's inbox: a file an agent sends lands in Downloads › Slates with
  * a notification, whichever part of Slates is open, and ones sent while the
  * app was closed (a routine at 7am, say) are picked up when it next opens.
  * Anywhere without the desktop bridge this does nothing; the file is still in
- * the agent's chat to open.
+ * the agent's chat to open. The Schedule's alerts ride along, since they need
+ * the same place: mounted on every page of the Mac app.
  */
 
 const ON_KEY = "slates.desktop.receiveFiles";
@@ -99,5 +101,5 @@ export default function DesktopInbox() {
     };
   }, []);
 
-  return null;
+  return <ScheduleAlerts />;
 }
