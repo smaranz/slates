@@ -1,0 +1,46 @@
+/*
+ * Scrollbars you can always see and grab, for a computer whose mouse can't
+ * scroll (the student's broke). On a Mac without a mouse plugged in,
+ * Chromium draws overlay bars that only show while you're already
+ * scrolling, and several rows (class and day chips, tabs, segmented
+ * controls) hide theirs altogether. Bars styled with ::-webkit-scrollbar are
+ * never overlay bars, and Chromium only uses that styling while
+ * scrollbar-width and scrollbar-color are auto, so both are put back to
+ * auto, important enough to win over every room's own rules. Touch screens
+ * scroll by swiping and keep their own bars.
+ */
+@media not ((hover: none) and (pointer: coarse)) {
+  * {
+    scrollbar-width: auto !important;
+    scrollbar-color: auto !important;
+  }
+
+  ::-webkit-scrollbar {
+    display: block !important;
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: color-mix(in oklch, var(--text) 6%, transparent) !important;
+  }
+
+  /* A wide thumb inset in its track: easy to see, easy to grab. */
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent !important;
+    border-radius: 9999px !important;
+    background: color-mix(in oklch, var(--text) 40%, transparent) padding-box !important;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--text) 58%, transparent) !important;
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    background-color: color-mix(in oklch, var(--text) 72%, transparent) !important;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent !important;
+  }
+}
