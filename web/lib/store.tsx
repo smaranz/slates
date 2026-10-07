@@ -13,7 +13,7 @@ import {
 
 import { useIdentity } from "./identity";
 import { estimateAssignments } from "./estimate";
-import { normalizeSnapshot } from "./normalize";
+import { isAfterDeadline, normalizeSnapshot, refreshDates } from "./normalize";
 import { htmlToPlainText, looksLikeHtml, sanitizeSubmissionHtml, toSubmissionHtml } from "./submission-html";
 import { emptyOwnWork, isOwnWork, toAssignment, withOwnWork, type OwnWork } from "./own-work";
 import { EMPTY_SNAPSHOT, IMPACT_LABEL } from "./demo";
@@ -605,6 +605,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /*
+   * The board's columns are days, so they have to move when the day does —
+   * even with no sync to carry the change (left open overnight, offline, an
+   * expired session). At local midnight, and whenever the window comes back,
+   * every card's due day is counted again from today.
+   */
+  useEffect(() => {
+    const timer: { id?: ReturnType<typeof setTimeout> } = {};
+    const recount = () => setSnapshot((current) => refreshDates(current));
+    const schedule = () => {
+      const next = new Date();
+      next.setHours(24, 0, 5, 0);
+      timer.id = setTimeout(() => {
+        recount();
+        schedule();
+      }, next.getTime() - Date.now());
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recount();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(timer.id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   /* ---- connection ---- */
 
   /**
@@ -779,16 +807,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    *
    * A placement holds until you drag the card again or it lands back on the
    * column its due date would have picked anyway (`moveTo` drops the override
-   * in that case). It does *not* get compared against the live due-date
-   * bucket to decide whether it's still "worth" honoring — `a.bucket` is
-   * recomputed fresh on every call, so it's never behind; a guard like that
-   * would fire the instant you dragged a card anywhere less urgent than where
-   * its due date already had it, undoing the drag before the next render.
+   * in that case). The one thing it can't do is sit past the work's own due
+   * day: the columns are days, so a card dragged to Tomorrow yesterday is due
+   * today now and comes back to Today. Pulling work *earlier* — next week's
+   * essay into Today — always sticks.
    */
   const bucketOf = useCallback(
     (a: Assignment): Bucket => {
       if (a.bucket === "done") return "done";
-      return buckets[a.id] ?? a.bucket;
+      const placed = buckets[a.id];
+      if (!placed || isAfterDeadline(placed, a.dateOffset)) return a.bucket;
+      return placed;
     },
     [buckets]
   );

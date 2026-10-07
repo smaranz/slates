@@ -1,0 +1,1027 @@
+/* Scan Whirl's own folder only — the rest of Slates is plain CSS and never
+   loads this stylesheet (the Agent app has its own root layout). */
+@import "tailwindcss" source("./");
+@import "gradient-border-plugin";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./fonts.css";
+@import "./accents.css";
+@import "./tint.css";
+@import "./mobile.css";
+
+/* Streamdown builds its markdown UI out of Tailwind utilities that only
+   exist in its dist bundle — point the compiler at them or code blocks and
+   tables render naked. */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Native scrollbars and form controls follow the theme (Slates). */
+:root {
+  color-scheme: light;
+}
+:root.dark {
+  color-scheme: dark;
+}
+
+/* Active while the sidebar is collapsed to a rail. The attribute lives on
+   <html> (set pre-paint by the layout script, toggled by lib/sidebar.ts) so
+   collapsed layout is pure CSS and survives reloads without a flash. */
+@custom-variant sidebar-collapsed (&:where([data-sidebar-collapsed], [data-sidebar-collapsed] *));
+
+/* Touch-first devices — no hover to reveal things with, so hover-gated
+   affordances (row ⋯ menus, message action icons) stay visible. Same query
+   as lib/coarse-pointer.ts; keep the two in step. */
+@custom-variant coarse (@media (hover: none) and (pointer: coarse));
+
+/* Content riding the sidebar collapse: the same duration/curve as the width
+   glide in sidebar.tsx, so padding/margin shifts move as one piece with the
+   sliding edge instead of jumping when the attribute flips. Pair with a
+   transition-[...] utility naming the properties. */
+.sidebar-glide {
+  transition-duration: 240ms;
+  transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Strict monochrome, but with real tonal structure. Both modes run the same
+   ladder, measured off the reference build: the content surface is the
+   plane everything else is placed against, chrome (the sidebar rail) steps
+   away from it, and every hover/press is a lightness move — never a hue.
+   Light descends from white; dark climbs from near-black. */
+:root {
+  --surface: #ffffff;
+  /* Hand-mixed translucent popover (frosted menus): bg-popover/70 dies in
+     the build — the /alpha color-mix over an @theme-inline var() gets
+     stripped by the compiler's browser-target downgrade, leaving solid.
+     Mostly opaque — just enough see-through for the frost to read without
+     the content behind muddying the menu. */
+  --popover-translucent: rgb(255 255 255 / 0.88);
+  /* A hairline, not a rule: #ededed where it lands on the white surface. */
+  --border: rgb(0 0 0 / 0.07);
+  /* Chrome (sidebar backdrop): a quiet neutral grey the white surface
+     panel sits proud of. Rows on it tint DOWN to --accent on hover. */
+  --background: #f3f3f3;
+  /* The recess for components sunk INTO the surface (composer, prompt
+     bubbles, starter capsules, in-menu search fields) — the rail's tone
+     borrowed onto white, with the edge treatment below carrying
+     definition. */
+  --well: #f3f3f3;
+  /* The wells' edge: a very thin uniform outline whose top edge catches
+     light. Painted via an inset shadow utility (see composer/capsules) so
+     it composes with Tailwind's ring shadows. */
+  --well-outline: rgb(0 0 0 / 0.05);
+  --well-highlight: rgb(255 255 255 / 0.9);
+  /* The floating thread composer: the same well tone, but see-through so
+     messages sliding beneath it read through the frost. Hand-mixed for the
+     same reason as --popover-translucent. */
+  --well-translucent: rgb(243 243 243 / 0.72);
+  --foreground: #141414;
+  /* Softened ink for chrome text and marks (sidebar labels, the logo):
+     full --foreground reads as pure black on the grey rail. Its own token —
+     text-foreground/80 would compile solid (see the translucent-popover
+     note above). */
+  --foreground-soft: oklch(0.45 0 0);
+  --card: #ffffff;
+  --card-foreground: #141414;
+  --popover: #ffffff;
+  --popover-foreground: #141414;
+  --primary: oklch(0.17 0 0);
+  /* Solid hover tone — bg-primary/90 would compile to solid (see the
+     translucent-popover note), so the hover shade is its own token. */
+  --primary-hover: oklch(0.28 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.2 0 0);
+  /* A step below the chrome so skeleton bones stay visible on the rail. */
+  --muted: oklch(0.91 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  /* One hover tone for the whole app: sidebar rows (hovered and selected),
+     menu items, anything on the chrome. Pressing releases it back toward
+     whatever it sits on rather than digging further in. */
+  --accent: #e7e8e8;
+  --accent-pressed: #eeeeee;
+  --accent-foreground: oklch(0.2 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  /* A wash of the destructive hue for notice panels, and its edge. Hand-mixed
+     for the same reason as --well-translucent: bg-destructive/8 compiles
+     solid, which is a red box instead of a red hint. */
+  --destructive-soft: rgb(220 38 38 / 0.07);
+  --destructive-outline: rgb(220 38 38 / 0.16);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.6 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  /* Chart series colors. The one sanctioned break from the monochrome rule:
+     a chart that encodes identity has to use hue, and greys can't carry more
+     than two series. This is the validated categorical palette, kept in its
+     adjacent-pair order — the ordering IS the colorblind-safety mechanism,
+     so slots are assigned in sequence and never re-shuffled or cycled. The
+     dark column is the same eight hues re-stepped for #181818, not a second
+     palette. Validated against both of whirl's surfaces: worst adjacent CVD
+     ΔE 9.1 light / 8.4 dark, normal-vision 19.6 / 19.3. Aqua, yellow, and
+     magenta sit under 3:1 on white, so a chart always ships a legend and
+     hover values (the relief rule) — see lib/chart-palette.ts. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  /* The Platinum wordmark's metal, painted through a mask of the badge art
+     (see components/platinum/platinum-wordmark.tsx). The one place a hint of
+     chroma is allowed outside the chart series: "platinum" has to look like
+     metal, and metal isn't grey — it's cool grey with a highlight. Light mode
+     runs dark→mid so the mark reads on white; dark mode is the badge's own
+     gradient, which was drawn for a dark ground. */
+  --platinum-metal-from: #5a6169;
+  --platinum-metal-to: #9ba2aa;
+  --radius: 0.75rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-well: var(--well);
+  --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-border: var(--border);
+  /* Inter, self-hosted (app/fonts.css). Behind it, the OS's own UI face for
+     the moment before the woff2 lands and for the load where it doesn't:
+     `system-ui` carries every platform on its own, and the named families
+     are for the browsers that don't resolve it. No `ui-sans-serif` — Chrome
+     doesn't know the keyword and matches nothing, so it only ever costs a
+     lookup. */
+  --font-sans:
+    InterVariable, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --radius-xs: 0.75rem;
+  --radius-sm: 0.75rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 0.75rem;
+  --radius-3xl: 0.75rem;
+  --radius-4xl: 0.75rem;
+
+  --font-heading: var(--font-sans);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-sidebar-border: var(--sidebar-border);
+
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+
+  --color-sidebar-accent: var(--sidebar-accent);
+
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+
+  --color-sidebar-primary: var(--sidebar-primary);
+
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --color-sidebar: var(--sidebar);
+
+  --color-chart-5: var(--chart-5);
+
+  --color-chart-4: var(--chart-4);
+
+  --color-chart-3: var(--chart-3);
+
+  --color-chart-2: var(--chart-2);
+
+  --color-chart-1: var(--chart-1);
+
+  --color-ring: var(--ring);
+
+  --color-input: var(--input);
+
+  --color-destructive: var(--destructive);
+
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-accent-pressed: var(--accent-pressed);
+
+  --color-accent: var(--accent);
+
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-muted: var(--muted);
+
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-secondary: var(--secondary);
+
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-primary: var(--primary);
+
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-popover: var(--popover);
+
+  --color-card-foreground: var(--card-foreground);
+
+  --color-card: var(--card);
+}
+
+.dark {
+  /* Dark climbs: the content surface is the floor and everything else
+     steps up off it — surface → chrome → well → popover → accent. The rail
+     reads as the frame around a recessed page, which is why it lands
+     lighter than the panel it borders. */
+  --surface: #181818;
+  --background: #202020;
+  /* Wells go LIGHTER than the panel, not darker — same tonal elevation the
+     popovers use; a darker pit read muddy. */
+  --well: #242424;
+  --well-outline: rgb(255 255 255 / 0.05);
+  --well-highlight: rgb(255 255 255 / 0.12);
+  --well-translucent: rgb(36 36 36 / 0.72);
+  --popover-translucent: rgb(38 38 38 / 0.88);
+  --foreground: #f0f0f0;
+  --foreground-soft: oklch(0.78 0 0);
+  --border: rgb(255 255 255 / 0.06);
+  --card: #181818;
+  --card-foreground: #f0f0f0;
+  /* Floating surfaces clear both grounds they can open over, the panel and
+     the rail — dark-mode elevation is tonal, an outline alone can't
+     separate #181818 from #181818. */
+  --popover: #262626;
+  --popover-foreground: #f0f0f0;
+  --primary: oklch(0.9 0 0);
+  --primary-hover: oklch(0.95 0 0);
+  --primary-foreground: oklch(0.17 0 0);
+  --secondary: #292929;
+  --secondary-foreground: oklch(0.985 0 0);
+  /* Clears the rail as well as the panel, or skeleton bones vanish into
+     the sidebar they load in. */
+  --muted: #303030;
+  --muted-foreground: oklch(0.72 0 0);
+  /* A step above the lifted popover (#262626), or menu-row hovers drown. */
+  --accent: #313131;
+  --accent-pressed: #2a2a2a;
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  /* Lighter mix on dark: the same 7% over #181818 would barely register. */
+  --destructive-soft: rgb(248 113 113 / 0.1);
+  --destructive-outline: rgb(248 113 113 / 0.2);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.56 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  /* Same eight hues, stepped for the dark surface (all clear 3:1 on
+     #181818). Green is mode-invariant — its light step already sits in the
+     dark band. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  /* The badge art's own gradient, drawn for a dark ground. */
+  --platinum-metal-from: #939ea9;
+  --platinum-metal-to: #fcfbfc;
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* Spelled out rather than pulled through var(--font-sans). A custom property
+   that fails to resolve makes the whole font-family declaration invalid at
+   computed-value time, and on the ROOT element that computes to `initial` —
+   Times New Roman, for every word in the app. That is exactly what a stale
+   stylesheet outliving the markup that defined its font var looks like, and
+   a literal can't do it. Keep in step with --font-sans above.
+
+   The feature settings are rsms.me/inter's own advice: Chrome has shipped
+   builds that leave ligatures and contextual alternates off unless they're
+   asked for by name. */
+html,
+body {
+  font-family:
+    InterVariable, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
+}
+
+/* /platinum is its own room. It stays dark whatever the app theme is doing,
+   and darker than the app's own dark — the wordmark is polished metal, and
+   metal needs something deep to sit on.
+
+   Applied alongside `dark` on the same element, which is what does the real
+   work: the token block below re-points the vars for the subtree, and the
+   `dark` class makes descendants match the `dark:` variant
+   (`&:where(.dark, .dark *)`) so component-level dark styling fires too.
+   Anything that portals out of the page (the request dialog) has to carry
+   both classes itself or it lands back in the app's theme. */
+.platinum-page {
+  --background: #08090a;
+  --surface: #121316;
+  --well: #17181b;
+  --border: rgb(255 255 255 / 0.08);
+  --foreground: #f5f5f6;
+  --foreground-soft: oklch(0.78 0 0);
+  --card: #121316;
+  --card-foreground: #f5f5f6;
+  --popover: #17181b;
+  --popover-foreground: #f5f5f6;
+  --popover-translucent: rgb(23 24 27 / 0.9);
+  /* Buttons invert to near-white on this ground, so the primary pair flips. */
+  --primary: #eceded;
+  --primary-hover: #ffffff;
+  --primary-foreground: #0a0b0c;
+  --secondary: #1e2024;
+  --secondary-foreground: #f5f5f6;
+  --muted: #1b1d20;
+  --muted-foreground: oklch(0.7 0 0);
+  --accent: #24262a;
+  --accent-pressed: #1e2024;
+  --accent-foreground: #f5f5f6;
+  --input: rgb(255 255 255 / 0.14);
+  --ring: oklch(0.58 0 0);
+}
+
+/* The ground is a separate class from the tokens above, because the request
+   dialog wants the palette but NOT the page's backdrop — it has a popover
+   surface of its own. A single cold highlight behind the masthead, as if the
+   page were lit from above. Painted on the element's own background: no extra
+   element, and no filter (a filter here would pin the whole page into its own
+   render surface — see lib/motion.ts). */
+.platinum-ground {
+  background-color: var(--background);
+  background-image: radial-gradient(
+    120% 100% at 50% 0%,
+    rgb(147 158 169 / 0.17) 0%,
+    rgb(147 158 169 / 0.05) 40%,
+    transparent 72%
+  );
+  background-repeat: no-repeat;
+  /* Pinned to the masthead rather than left at `auto`, which would size the
+     gradient to the whole page box — on a long page that stretches one
+     highlight over the entire scroll instead of lighting the top of it. */
+  background-size: 100% 760px;
+  background-position: top center;
+}
+
+/* Hairline in the wordmark's own metal, for section rules. */
+.platinum-rule {
+  height: 1px;
+  border: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgb(147 158 169 / 0.32) 22%,
+    rgb(147 158 169 / 0.32) 78%,
+    transparent
+  );
+}
+
+/* Shimmering text (ai-sdk elements style): the glyphs go transparent and
+   wear a sweeping gradient via background-clip — a dimmed base with a
+   full-strength band gliding left to right. --shimmer-dur sets the pace
+   (default 720ms; override for a slower drift). */
+.text-shimmer {
+  --shimmer-base: color-mix(in oklab, var(--foreground) 50%, transparent);
+  background-image: linear-gradient(
+    90deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 40%,
+    var(--foreground) 50%,
+    var(--shimmer-base) 60%,
+    var(--shimmer-base) 100%
+  );
+  /* 250% makes the loop seamless: the band's leading edge starts exactly
+     at the element's edge and its trailing edge exits exactly as the
+     cycle wraps — at 200% the band was half-visible at both ends of the
+     cycle, so every wrap teleported it from right back to left. */
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: text-shimmer var(--shimmer-dur, 720ms) linear infinite;
+}
+/* Torph splits the label into transformed glyphs. phase-motion sizes and
+   offsets this same gradient across them so they read as one continuous sweep. */
+.text-shimmer[torph-root] {
+  background-image: none;
+  color: transparent;
+  animation: none;
+}
+.text-shimmer[torph-root] [torph-item] {
+  background-image: linear-gradient(
+    90deg,
+    var(--shimmer-base) 0,
+    var(--shimmer-base) 40%,
+    var(--foreground) 50%,
+    var(--shimmer-base) 60%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+@keyframes text-shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: 0% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer {
+    animation: none;
+    color: var(--muted-foreground);
+    background-image: none;
+  }
+  .text-shimmer[torph-root] [torph-item] {
+    color: var(--muted-foreground);
+    background-image: none;
+  }
+}
+
+/* Per-character fade-in for streamed prose.
+
+   Streamdown wraps every streamed character in a `[data-sd-animate]` span
+   and means to fade only the genuinely-new ones — it stamps already-shown
+   chars with `--sd-duration:0ms`, and its base rule reads that var. The
+   catch: it decides which chars are "new" with a rehype plugin that
+   mutates shared state during render, and that state desyncs whenever a
+   block re-parses or React replays a render — so old text re-faded all
+   over the message while new text sometimes snapped in with no fade.
+
+   So don't depend on the var. Pin one fixed animation here instead: a CSS
+   animation fires when an element is inserted, and as the typewriter
+   reveals text only the new trailing characters mount as fresh spans —
+   those fade in once; the reused leading characters keep an unchanged
+   computed `animation`, so the browser never restarts them. */
+[data-sd-animate] {
+  animation: sd-fadeIn 300ms ease both !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sd-animate] {
+    animation: none !important;
+  }
+}
+
+/* The artifact cards' indeterminate "working" bar. CSS, not motion: the
+   cards re-render on every streamed delta, and a JS keyframe loop would
+   restart each time — freezing the bar off-screen. CSS runs on the
+   compositor, untouched by React re-renders. */
+@keyframes artifact-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(330%);
+  }
+}
+
+.artifact-progress-bar {
+  animation: artifact-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes artifact-progress-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-progress-bar {
+    animation: artifact-progress-pulse 1.4s ease-in-out infinite;
+    transform: none;
+  }
+}
+
+/* One-shot ease-in for content that lands after a loading state (artifact
+   panel bodies, the thread transcript). Opacity only — no transforms
+   (raster snap) and never near an iframe (frozen-iframe compositing, see
+   html-frame-view.tsx). */
+@keyframes body-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.body-fade-in {
+  animation: body-fade-in 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .body-fade-in {
+    animation: none;
+  }
+}
+
+/* The gleam sweeping across a generated image's placeholder square. Same
+   CSS-not-motion rule as the bar above — the message row re-renders on
+   every reactive update while the paint is in flight. */
+@keyframes image-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.image-shimmer-gleam {
+  animation: image-shimmer 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-shimmer-gleam {
+    animation: artifact-progress-pulse 1.4s ease-in-out infinite;
+    transform: none;
+  }
+}
+
+/* The open-source hero's slow orbits (components/open-source). Each ring
+   and each satellite on it runs this one turn, the satellites in the
+   opposite direction, so they stay upright. Duration and direction come
+   inline per orbit. It animates `rotate`, never `transform`, so motion's
+   entrance transforms on the same subtree never fight it. */
+@keyframes oss-orbit {
+  to {
+    rotate: 360deg;
+  }
+}
+
+.oss-orbit {
+  animation: oss-orbit 60s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oss-orbit {
+    animation: none;
+  }
+}
+
+/* ---- TipTap document editor (artifact side panel) ---- */
+.tiptap-prose {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+.tiptap-prose:focus {
+  outline: none;
+}
+.tiptap-prose > * + * {
+  margin-top: 0.85em;
+}
+.tiptap-prose h1,
+.tiptap-prose h2,
+.tiptap-prose h3,
+.tiptap-prose h4 {
+  font-weight: 650;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  color: var(--foreground);
+}
+.tiptap-prose h1 {
+  font-size: 1.6em;
+}
+.tiptap-prose h2 {
+  font-size: 1.3em;
+}
+.tiptap-prose h3 {
+  font-size: 1.12em;
+}
+.tiptap-prose ul,
+.tiptap-prose ol {
+  padding-left: 1.4em;
+}
+.tiptap-prose ul {
+  list-style: disc;
+}
+.tiptap-prose ol {
+  list-style: decimal;
+}
+.tiptap-prose li > * + * {
+  margin-top: 0.3em;
+}
+.tiptap-prose li::marker {
+  color: var(--muted-foreground);
+}
+.tiptap-prose a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dark .tiptap-prose a {
+  color: #7aa2ff;
+}
+.tiptap-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1em;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.tiptap-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.12em 0.36em;
+  border-radius: 5px;
+}
+.dark .tiptap-prose code {
+  background: rgba(255, 255, 255, 0.08);
+}
+.tiptap-prose pre {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+}
+.dark .tiptap-prose pre {
+  background: rgba(255, 255, 255, 0.06);
+}
+.tiptap-prose pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.86em;
+}
+.tiptap-prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+.tiptap-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-lg);
+}
+.tiptap-prose img.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.tiptap-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}
+
+/* ---- Tables ---- */
+.tiptap-prose .tableWrapper {
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.tiptap-prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: 0.95em;
+  table-layout: fixed;
+  overflow: hidden;
+}
+.tiptap-prose .tableWrapper table {
+  margin: 0;
+}
+.tiptap-prose th,
+.tiptap-prose td {
+  position: relative;
+  min-width: 4em;
+  border: 1px solid var(--border);
+  padding: 0.45em 0.65em;
+  vertical-align: top;
+  text-align: left;
+}
+.tiptap-prose th {
+  background: rgba(0, 0, 0, 0.035);
+  font-weight: 620;
+}
+.dark .tiptap-prose th {
+  background: rgba(255, 255, 255, 0.05);
+}
+.tiptap-prose th > *,
+.tiptap-prose td > * {
+  margin: 0;
+}
+/* The cell(s) under an active table selection. */
+.tiptap-prose .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 130, 242, 0.1);
+  pointer-events: none;
+}
+/* Column resize affordance (resizable tables). */
+.tiptap-prose .column-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: -2px;
+  right: -2px;
+  width: 4px;
+  background: #0c82f2;
+  pointer-events: none;
+}
+.tiptap-prose.resize-cursor {
+  cursor: col-resize;
+}
+
+/* ---- Math (KaTeX) ---- */
+.tiptap-prose .katex {
+  font-size: 1.05em;
+}
+/* Block math centers itself via the node view; cancel KaTeX's own margins
+   so spacing comes from the wrapper, not both. */
+.tiptap-prose .katex-display {
+  margin: 0;
+}
+.tiptap-prose [data-type="block-math"] .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15em 0;
+}
+
+/*
+ * Transient highlight painted over a region whirl just edited (see
+ * components/editor/edit-highlight.ts). A soft amber wash eases in, holds
+ * for a beat, then fades out on its own — so the decoration only has to be
+ * applied, not animated in JS.
+ */
+.tiptap-prose .edit-flash {
+  border-radius: 3px;
+  animation: editFlash 1.6s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@keyframes editFlash {
+  0% {
+    background-color: rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+  14% {
+    background-color: rgba(251, 191, 36, 0.34);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.22);
+  }
+  55% {
+    background-color: rgba(251, 191, 36, 0.34);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.16);
+  }
+  100% {
+    background-color: rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+}
+.dark .tiptap-prose .edit-flash {
+  animation-name: editFlashDark;
+}
+@keyframes editFlashDark {
+  0% {
+    background-color: rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+  14% {
+    background-color: rgba(251, 191, 36, 0.26);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.16);
+  }
+  55% {
+    background-color: rgba(251, 191, 36, 0.26);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.12);
+  }
+  100% {
+    background-color: rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+}
+
+/* Depth for dark mode: inverted drop shadows don't read on dark surfaces,
+   so raised elements (cards, menus, dialogs, toasts) get a hairline inset
+   highlight instead — a 1px lit top edge plus a faint 0.5px trace around,
+   as if lit from above. Inert in light mode, where the hairline borders
+   already carry the depth. */
+.dark .raised {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 0 0 0.5px rgb(255 255 255 / 0.04);
+}
+
+/* Transitions.dev — Skeleton loader and reveal
+   Used via <SkeletonReveal> (components/skeleton-reveal.tsx), which owns
+   the is-revealed / is-resetting choreography. */
+:root {
+  --pulse-dur: 1000ms;
+  --pulse-count: 1;
+  --pulse-min: 0.5;
+  --reveal-dur: 400ms;
+  --reveal-blur: 2px;
+  --reveal-ease: ease-in-out;
+}
+
+/* The wrap stacks two layers on the same coordinates. The
+   skeleton owns the cold pulse + the fade-out side of the
+   reveal; the content owns the fade-in side. They share the
+   same duration / ease so the swap reads as one motion. */
+.t-skel { position: relative; }
+.t-skel-skeleton,
+.t-skel-content {
+  position: absolute;
+  inset: 0;
+}
+
+/* A filter is borrowed here, never kept. Any filter — blur(0) included —
+   pins its element into its own render surface for as long as the property
+   is set, and BOTH layers below stay mounted for the life of the list. Left
+   set, the revealed content (the sidebar's thread list) would scroll and
+   hover through a filter pass forever. So every resting value is `none`,
+   which still interpolates against blur() while the reveal runs.
+
+   The skeleton gets no blur at all on its way out: it's on its way to
+   invisible, and a 2px radius under 0.1 opacity is nobody's idea of a
+   dissolve. The incoming content keeps the sharpening — that half reads. */
+.t-skel-skeleton {
+  z-index: 1;
+  opacity: 1;
+  filter: none;
+  /* Never interactive — and after the reveal it must not eat hovers. */
+  pointer-events: none;
+  transition: opacity var(--reveal-dur) var(--reveal-ease);
+}
+.t-skel-content {
+  z-index: 2;
+  opacity: 0;
+  filter: blur(var(--reveal-blur));
+  transition:
+    opacity var(--reveal-dur) var(--reveal-ease),
+    filter  var(--reveal-dur) var(--reveal-ease);
+}
+/* Invisible content shouldn't be clickable before the reveal. */
+.t-skel:not(.is-revealed) .t-skel-content { pointer-events: none; }
+.t-skel.is-revealed .t-skel-skeleton {
+  opacity: 0;
+}
+.t-skel.is-revealed .t-skel-content {
+  opacity: 1;
+  filter: none;
+}
+/* Snap-back when replaying: kill transitions so the reverse
+   (revealed → skeleton) is instant. Drop `.is-resetting`
+   after a forced reflow and the next reveal animates again. */
+.t-skel.is-resetting .t-skel-skeleton,
+.t-skel.is-resetting .t-skel-content {
+  transition: none !important;
+}
+
+/* Pulse: place the animation on the bar/avatar children, not
+   on the skeleton itself, so the skeleton's own opacity stays
+   free for the cross-fade transition above. */
+.t-skel-skeleton.is-pulsing > * {
+  animation: t-skel-pulse var(--pulse-dur) ease-in-out var(--pulse-count);
+}
+@keyframes t-skel-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: var(--pulse-min); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-skel-skeleton, .t-skel-content {
+    transition: none !important;
+  }
+  .t-skel-skeleton.is-pulsing > * { animation: none !important; }
+}
+
+/* Transitions.dev — Page side-by-side
+   Used via <PageSlide> (components/page-slide.tsx): two stacked pages that
+   swap with a short blur-slide. Page 1 exits to the left, page 2 to the
+   right, so the pair reads as neighbors on a strip. */
+:root {
+  /* Short and hard-out: the swap should feel like a flick, not a glide —
+     and a lighter blur is also much cheaper to composite on a full pane. */
+  --page-slide-dur: 180ms;
+  --page-fade-dur: 180ms;
+  --page-slide-distance: 8px;
+  --page-blur: 2px;
+  --page-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --page-fade-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.t-page-slide {
+  position: relative;
+}
+.t-page-slide .t-page[data-page-id="1"] {
+  --t-page-from-x: calc(var(--page-slide-distance) * -1);
+}
+.t-page-slide .t-page[data-page-id="2"] {
+  --t-page-from-x: var(--page-slide-distance);
+}
+.t-page-slide .t-page {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* Rides the fade with a delay: the hidden page leaves the tab order and
+     the accessibility tree, but only after its exit finishes. */
+  visibility: hidden;
+  transform: translateX(var(--t-page-from-x, 0px));
+  filter: blur(var(--page-blur));
+  transition:
+    opacity    var(--page-fade-dur)  var(--page-fade-ease),
+    transform  var(--page-slide-dur) var(--page-slide-ease),
+    filter     var(--page-slide-dur) var(--page-slide-ease),
+    visibility 0s linear var(--page-fade-dur);
+  will-change: opacity, transform, filter;
+}
+.t-page-slide[data-page="1"] .t-page[data-page-id="1"],
+.t-page-slide[data-page="2"] .t-page[data-page-id="2"] {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transform: translateX(0);
+  /* Settled pages must shed the filter AND the will-change hint: Chromium
+     refuses to render any descendant backdrop-filter (the floating
+     composer's frost) while an ancestor carries either. `none` still
+     animates to/from blur() — it interpolates as blur(0). */
+  filter: none;
+  will-change: auto;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-page-slide .t-page {
+    transition: none !important;
+  }
+}
+
+/* With link safety on, Streamdown renders prose links as <button>s — which
+   lose the hand cursor a link is supposed to have. (Tables need no
+   overrides here: they render through components/thread/markdown-table.tsx.) */
+[data-streamdown="link"] {
+  cursor: pointer;
+}
+
+/* Streamdown renders one <span> per code line but only marks lines
+   display:block when line numbers are on (the `block` rides the numbered
+   variant's class) — with our lineNumbers={false} every line lands inline
+   on a single row. Pin line spans block-level; empty lines carry a lone
+   "\n" that pre's white-space turns into the blank row. */
+[data-streamdown="code-block-body"] pre > code > span {
+  display: block;
+}
+
+/* Math in thread prose: long equations scroll sideways instead of pushing
+   the pane, and KaTeX's own display margins yield to the prose rhythm
+   (space-y-4 on the markdown root). Inherited `currentColor` keeps it
+   right in both light and dark. */
+.t-markdown .katex {
+  font-size: 1.06em;
+}
+.t-markdown .katex-display {
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15em 0.1em;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+    /* The document scrollbar reserves its lane up front, so a page growing
+       past the fold never nudges the layout sideways. Inner scrollers that
+       toggle at runtime (transcript, pickers, settings panes) carry their
+       own scrollbar-gutter utilities. */
+    scrollbar-gutter: stable;
+  }
+}

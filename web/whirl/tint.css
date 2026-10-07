@@ -1,0 +1,28 @@
+/* Canvas tint: the user's own background color, picked in Settings →
+   Personalization. The chosen color washes the sidebar rail and gently
+   tints the surface family, riding <html data-tinted> plus inline
+   --tint-* custom properties (set pre-paint by the root layout script,
+   switched by lib/tint.ts).
+
+   These are plain var() passthroughs on purpose: the compiler's
+   browser-target downgrade mangles color functions built from vars (see
+   the translucent-popover note in globals.css), so the full oklch strings
+   are computed in lib/tint.ts and land here ready-made. Selectors are
+   html-scoped so they outrank :root and .dark regardless of import
+   order. */
+
+html[data-tinted] {
+  --background: var(--tint-bg-l);
+  --surface: var(--tint-surface-l);
+  --card: var(--tint-surface-l);
+  --popover: var(--tint-surface-l);
+  --well: var(--tint-well-l);
+}
+
+html.dark[data-tinted] {
+  --background: var(--tint-bg-d);
+  --surface: var(--tint-surface-d);
+  --card: var(--tint-surface-d);
+  --popover: var(--tint-popover-d);
+  --well: var(--tint-well-d);
+}

@@ -38,11 +38,71 @@ function fallbackMinutes(kind: string, title: string, brief: string): number {
   return 40;
 }
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/**
+ * Whole calendar days from `now`'s date to `date`'s, both read in local time.
+ * Counted on UTC dates so a daylight-saving change can't turn a day into 23 or
+ * 25 hours and round the wrong way.
+ */
+export function daysBetween(now: Date, date: Date): number {
+  const a = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const b = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((a - b) / 86_400_000);
+}
+
+/**
+ * The date shapes Schoology actually prints, read by hand rather than trusted
+ * to Date.parse — which rejects "Sept", guesses at "9/24", and reads a bare
+ * ISO day as UTC midnight (the evening before, anywhere west of London):
+ *   "September 24, 2026"   "Sept 24"   "Sep 24th, 2026"   "9/24/2026"   "9/24"   "2026-09-24"
+ * A date without a year takes whichever year puts it nearest today, so late
+ * December's "Jan 5" is next month, not eleven months ago.
+ */
+function calendarDate(text: string, now: Date): Date | null {
+  let year: number | null = null;
+  let month = -1;
+  let day = 0;
+
+  const named = text.match(/^([a-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/i);
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const numeric = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
+  if (named) {
+    month = MONTHS.indexOf(named[1].slice(0, 3).toLowerCase());
+    day = Number(named[2]);
+    year = named[3] ? Number(named[3]) : null;
+  } else if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]) - 1;
+    day = Number(iso[3]);
+  } else if (numeric) {
+    month = Number(numeric[1]) - 1;
+    day = Number(numeric[2]);
+    year = numeric[3] ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3]) : null;
+  } else {
+    return null;
+  }
+  if (month < 0 || month > 11 || day < 1 || day > 31) return null;
+
+  const build = (y: number) => {
+    const d = new Date(y, month, day);
+    // Reject roll-overs like "Feb 31" quietly becoming March 3.
+    return d.getMonth() === month && d.getDate() === day ? d : null;
+  };
+  if (year !== null) return build(year);
+  const options = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
+    .map(build)
+    .filter((d): d is Date => d !== null);
+  if (!options.length) return null;
+  return options.reduce((best, d) => (Math.abs(daysBetween(now, d)) < Math.abs(daysBetween(now, best)) ? d : best));
+}
+
 /**
  * Schoology renders due dates in several shapes depending on skin and locale:
- *   "Due Friday, September 5, 2026 11:59 pm"
- *   "Due Sep 5"           "Due Tomorrow"        "Due Today"
- * Returns whole days from today, or null when nothing parses.
+ *   "Due Friday, September 5, 2026 11:59 pm"   "Due Thursday, September 24, 2026 at"
+ *   "Due Sep 5"           "Due Tomorrow"        "Due Today"          "Due Friday at 8:30 am"
+ * Returns whole calendar days from today (0 = today, 1 = tomorrow), or null
+ * when nothing parses.
  */
 export function parseDueOffset(text: string, now = new Date()): number | null {
   if (!text) return null;
@@ -53,17 +113,18 @@ export function parseDueOffset(text: string, now = new Date()): number | null {
 
   const t = text
     .replace(/^\s*this was due on\s*/i, "") // completed / overdue phrasing
-    .replace(/^\s*due\s*/i, "")
+    .replace(/^\s*due(\s+on)?\s*/i, "")
+    .replace(/\s+/g, " ")
     .trim();
   if (!t) return null;
 
-  if (/^earlier today\b/i.test(t)) return 0;
-  if (/^today\b/i.test(t)) return 0;
+  if (/^(earlier )?today\b/i.test(t) || /^tonight\b/i.test(t)) return 0;
   if (/^tomorrow\b/i.test(t)) return 1;
   if (/^yesterday\b/i.test(t)) return -1;
 
+  // A bare weekday is the next one on or after today; "next Friday" is the week after.
   const weekday = t.match(
-    /^(next\s+)?(sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?)(?:\s+at\b.*)?$/i
+    /^(next\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?)\b(?:,?\s*at\b.*)?$/i
   );
   if (weekday) {
     const names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -72,37 +133,27 @@ export function parseDueOffset(text: string, now = new Date()): number | null {
     return weekday[1] ? upcoming + 7 : upcoming;
   }
 
-  // Strip a leading weekday name, which Date.parse handles inconsistently
-  // when it disagrees with the numeric date. Then drop Schoology's " at HH:MM
-  // am" clause — Date.parse rejects the literal "at", and the time of day
-  // never changes which day the item lands on.
+  // Drop a leading weekday (the date after it is what counts) and whatever
+  // time follows the date — " at 11:59 pm", " 11:59 pm", or the bare trailing
+  // " at" Schoology leaves when an item has a date but no time. The time of day
+  // never changes which day an item is due.
   const cleaned = t
-    .replace(/^(sun|mon|tues?|wed(nes)?|thur?s?|fri|satur?)(day)?,?\s*/i, "")
-    .replace(/\s+at\s+\d{1,2}(:\d{2})?\s*(am|pm)?\s*$/i, "")
+    .replace(/^(sun|mon|tues?|wed(nes)?|thur?s?|fri|satur?)(day)?\.?,?\s*/i, "")
+    .replace(/,?\s+at\b.*$/i, "")
+    .replace(/,?\s+\d{1,2}(:\d{2})?\s*(am|pm)\s*$/i, "")
+    .replace(/,?\s+\d{1,2}:\d{2}\s*$/, "")
+    .replace(/[.,]\s*$/, "")
     .trim();
 
-  const hasYear = /\b\d{4}\b/.test(cleaned);
-  const candidates = hasYear
-    ? [cleaned]
-    : [cleaned, `${cleaned} ${now.getFullYear()}`, `${cleaned} ${now.getFullYear() + 1}`];
+  const explicit = calendarDate(cleaned, now);
+  if (explicit) return daysBetween(now, explicit);
 
-  // Schoology omits the year for near-term dates. Prefer this year, but permit
-  // the next year around winter break instead of turning January into 11 months ago.
-  for (const candidate of candidates) {
-    const ms = Date.parse(candidate);
-    if (Number.isNaN(ms)) continue;
-
-    const due = new Date(ms);
-    const a = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-    const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const days = Math.round((a.getTime() - b.getTime()) / 86_400_000);
-
-    // A parsed date more than a term away is almost certainly a misparse
-    // (e.g. a bare "5" reading as year 2005).
-    if (days < -30 || days > 365) continue;
-    return days;
-  }
-  return null;
+  // Anything else: let the engine try, and keep it only if it lands near today.
+  const ms = Date.parse(/\b\d{4}\b/.test(cleaned) ? cleaned : `${cleaned} ${now.getFullYear()}`);
+  if (Number.isNaN(ms)) return null;
+  const days = daysBetween(now, new Date(ms));
+  // A date more than a term away is almost certainly a misparse.
+  return days < -60 || days > 365 ? null : days;
 }
 
 /**
@@ -130,15 +181,32 @@ export function parseDueInstant(text: string, now = new Date()): string | null {
   return Number.isNaN(due.getTime()) ? null : due.toISOString();
 }
 
+/**
+ * The column a due date puts work in. The columns are named Today, Tomorrow
+ * and Later, and they mean exactly that: due today, due tomorrow, due after
+ * that. (Tomorrow's work used to sit under Today and the day after's under
+ * Tomorrow, which read as the board getting the date wrong.)
+ */
 export function bucketFor(offset: number | null): Bucket {
   if (offset === null) return "week"; // undated — still show it
-  // Past due gets its own column. It used to land in "tonight", where a week
-  // of missed work sat mixed in with tonight's homework and read as the same
-  // kind of thing.
+  // Past due gets its own column rather than mixing in with today's work.
   if (offset < 0) return "overdue";
-  if (offset <= 1) return "tonight";
-  if (offset <= 3) return "soon";
+  if (offset === 0) return "tonight";
+  if (offset === 1) return "soon";
   return "week";
+}
+
+const COLUMN_ORDER: Bucket[] = ["overdue", "tonight", "soon", "week"];
+
+/**
+ * True when a column is later than the day the work is due — somewhere a card
+ * can't sensibly sit (a Today assignment dragged to Tomorrow yesterday, say).
+ */
+export function isAfterDeadline(column: Bucket, offset: number | null): boolean {
+  if (offset === null || column === "done") return false;
+  // Overdue work can still be planned for today — that's the point of dragging it.
+  const latest = offset < 0 ? "tonight" : bucketFor(offset);
+  return COLUMN_ORDER.indexOf(column) > COLUMN_ORDER.indexOf(latest);
 }
 
 /**
@@ -412,18 +480,24 @@ type RawAssignment = Partial<Assignment> & {
 };
 
 /** Whole days from today to `iso`, in the viewer's timezone. */
-function offsetFromIso(iso: string, now: Date): number | null {
+function offsetFromIso(iso: string, now: Date, allDay = false): number | null {
+  // A bare day ("2026-09-24") or an all-day item stored at UTC midnight is a
+  // calendar date, not an instant — reading it as UTC puts it on the evening
+  // before anywhere west of Greenwich.
+  const day = iso.match(/^(\d{4})-(\d{2})-(\d{2})(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)?)?$/);
+  if (day && (allDay || iso.length === 10)) {
+    return daysBetween(now, new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])));
+  }
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return null;
-  const d = new Date(ms);
-  const a = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((a.getTime() - b.getTime()) / 86_400_000);
+  return daysBetween(now, new Date(ms));
 }
 
 /** "Due Mon, Aug 31 at 8:30 AM" — how the card reads. */
 function formatDue(iso: string, allDay: boolean): string {
-  const d = new Date(iso);
+  const ymd = allDay ? iso.match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+  // An all-day date is a calendar day; don't let UTC shift it to the day before.
+  const d = ymd ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])) : new Date(iso);
   const day = d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
   if (allDay) return `Due ${day}`;
   return `Due ${day} at ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
@@ -440,6 +514,23 @@ export interface RawSnapshot {
   messages?: SyncSnapshot["messages"];
   updates?: SyncSnapshot["updates"];
   syncedAt?: number;
+}
+
+/**
+ * Re-count every card's due day against `now` — for when the calendar moves
+ * under a board that hasn't re-synced (left open overnight, offline, an
+ * expired Schoology session). Returns the same object when nothing changed.
+ */
+export function refreshDates(snapshot: SyncSnapshot, now = new Date()): SyncSnapshot {
+  let changed = false;
+  const assignments = snapshot.assignments.map((a) => {
+    const offset =
+      (a.dueAt ? offsetFromIso(a.dueAt, now, a.allDay ?? false) : null) ?? parseDueOffset(a.due ?? "", now) ?? a.dateOffset;
+    if (offset === a.dateOffset) return a;
+    changed = true;
+    return { ...a, dateOffset: offset, bucket: a.bucket === "done" ? a.bucket : bucketFor(offset) };
+  });
+  return changed ? { ...snapshot, assignments } : snapshot;
 }
 
 export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnapshot {
@@ -480,13 +571,17 @@ export function normalizeSnapshot(raw: RawSnapshot, now = new Date()): SyncSnaps
       // (the iCal feed) provides one.
       const rawDueAt = a.dueAt && !Number.isNaN(Date.parse(a.dueAt)) ? a.dueAt : null;
       const dueAt = rawDueAt ?? (a.allDay ? null : parseDueInstant(a.due ?? "", now));
+      // Counted from the due date against today, every time — a stored offset
+      // was counted on the day it was scraped and goes stale overnight.
       const offset =
+        (rawDueAt ? offsetFromIso(rawDueAt, now, a.allDay ?? false) : null) ??
+        parseDueOffset(a.due ?? "", now) ??
         a.dateOffset ??
-        (rawDueAt ? offsetFromIso(rawDueAt, now) : null) ??
-        parseDueOffset(a.due ?? "", now);
+        null;
       const overdue = offset !== null && offset < 0;
       const dueLabel =
-        a.due?.trim() || (rawDueAt ? formatDue(rawDueAt, a.allDay ?? false) : "");
+        // Schoology leaves a dangling "at" on items with a date but no time.
+        a.due?.trim().replace(/\s+at\s*$/i, "") || (rawDueAt ? formatDue(rawDueAt, a.allDay ?? false) : "");
 
       return {
         id: a.id,

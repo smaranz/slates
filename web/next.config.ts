@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
+const onboardingSim = process.env.SLATES_ONBOARDING_SIM === "1";
+
 const nextConfig: NextConfig = {
+  ...(onboardingSim && {
+    distDir: ".next/dev-onboarding-sim",
+    typescript: { tsconfigPath: "tsconfig.onboarding-sim.json" },
+    redirects: async () => [{ source: "/", destination: "/onboarding-sim", permanent: false }],
+  }),
   /*
    * The desktop build ships a Next server inside the .app bundle. Standalone
    * output emits a self-contained server plus only the dependencies it actually

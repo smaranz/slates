@@ -49,6 +49,15 @@ function collection<T>(name: string) {
   };
 }
 
+/** Read or write a named collection; for modules beside this one (threads). */
+export function readCollection<T>(name: string): T[] {
+  return collection<T>(name).all();
+}
+
+export function writeCollection<T>(name: string, items: T[]): void {
+  collection<T>(name).save(items);
+}
+
 export const agents = collection<AgentProfile>("agents");
 export const groups = collection<AgentGroup>("groups");
 export const routines = collection<Routine>("routines");
@@ -88,7 +97,7 @@ const state = globalThis as typeof globalThis & { __slatesAgentChats?: Map<strin
 const chats = (state.__slatesAgentChats ??= new Map());
 
 function chatFile(chatId: string): string {
-  if (!/^(agt|grp)_[a-z0-9]{6,40}$/.test(chatId)) throw new Error("Invalid chat id.");
+  if (!/^(agt|grp|thr)_[a-z0-9]{6,40}$/.test(chatId)) throw new Error("Invalid chat id.");
   return path.join(CHATS_DIR, `${chatId}.jsonl`);
 }
 
@@ -152,6 +161,14 @@ export function putEvent(chatId: string, event: ChatEvent, persist = true): void
   fs.mkdirSync(CHATS_DIR, { recursive: true });
   fs.appendFileSync(chatFile(chatId), `${JSON.stringify(event)}\n`);
   cache.lines += 1;
+}
+
+/** Replace a chat's whole history (rollback, edit, branch). */
+export function writeChat(chatId: string, events: ChatEvent[]): void {
+  const cache: ChatCache = { events: [], index: new Map(), lines: 0 };
+  for (const event of events) place(cache, event);
+  chats.set(chatId, cache);
+  compact(chatId, cache);
 }
 
 export function clearChat(chatId: string): void {

@@ -30,15 +30,15 @@ function validEstimate(value: unknown): value is Estimate {
 }
 
 /**
- * The model reads what the work *is* — that a lab gets done in class, that a
- * posted syllabus needs nothing — which a due date alone can't tell you. It
- * doesn't get the last word, though: overdue work stays in Tonight no matter
- * how relaxed the description sounds.
+ * The columns are days — Today, Tomorrow, Later — so anything with a due date
+ * goes where its date says, whatever the model thought. The model placing
+ * dated work is what put today's work under Tomorrow and tomorrow's under
+ * Later. It still sizes every item, and it still places undated work, where
+ * reading what the work *is* is all there is to go on.
  */
 function placedBucket(assignment: Assignment, place: Place | undefined): Bucket {
   if (assignment.bucket === "done") return "done";
-  if (!place) return assignment.bucket;
-  if (assignment.dateOffset !== null && assignment.dateOffset < 0) return "tonight";
+  if (!place || assignment.dateOffset !== null) return assignment.bucket;
   return PLACE_BUCKET[place];
 }
 

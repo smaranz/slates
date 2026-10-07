@@ -139,5 +139,5 @@ export type HubMessage =
 export const DEFAULT_MODEL = "grok-4.7";
 
 export function isChatId(value: string): boolean {
-  return /^(agt|grp)_[a-z0-9]{6,40}$/.test(value);
+  return /^(agt|grp|thr)_[a-z0-9]{6,40}$/.test(value);
 }

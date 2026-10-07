@@ -1,0 +1,119 @@
+/* Accent themes: opt-in splashes of color, picked in Settings →
+   Personalization. The chosen accent rides <html data-accent="…"> (set
+   pre-paint by the root layout script, switched by lib/accent.ts) and
+   re-inks the --primary family plus the focus ring — anything painted
+   with bg-primary / text-primary-foreground follows along. No attribute
+   means graphite, the stock monochrome ink from globals.css.
+
+   Values are spelled out literally on purpose: the compiler's
+   browser-target downgrade mangles color functions built from vars (see
+   the translucent-popover note in globals.css). The swatches in
+   lib/accent.ts mirror each accent's light/dark --primary — keep the two
+   files in step. Selectors are html-scoped so they outrank :root and
+   .dark regardless of import order. */
+
+html[data-accent="cherry"] {
+  --primary: oklch(0.55 0.19 25);
+  --primary-hover: oklch(0.61 0.19 25);
+  --primary-foreground: oklch(0.985 0.01 25);
+  --ring: oklch(0.62 0.13 25);
+}
+html.dark[data-accent="cherry"] {
+  --primary: oklch(0.78 0.14 25);
+  --primary-hover: oklch(0.83 0.14 25);
+  --primary-foreground: oklch(0.23 0.06 25);
+  --ring: oklch(0.68 0.11 25);
+}
+
+html[data-accent="tangerine"] {
+  --primary: oklch(0.6 0.16 55);
+  --primary-hover: oklch(0.66 0.16 55);
+  --primary-foreground: oklch(0.985 0.015 55);
+  --ring: oklch(0.65 0.13 55);
+}
+html.dark[data-accent="tangerine"] {
+  --primary: oklch(0.8 0.14 60);
+  --primary-hover: oklch(0.85 0.14 60);
+  --primary-foreground: oklch(0.25 0.06 60);
+  --ring: oklch(0.7 0.11 60);
+}
+
+/* Honey runs light in both modes, so it's the one accent whose light-mode
+   ink is dark instead of white. */
+html[data-accent="honey"] {
+  --primary: oklch(0.75 0.13 85);
+  --primary-hover: oklch(0.8 0.13 85);
+  --primary-foreground: oklch(0.26 0.06 85);
+  --ring: oklch(0.7 0.11 85);
+}
+html.dark[data-accent="honey"] {
+  --primary: oklch(0.85 0.13 90);
+  --primary-hover: oklch(0.89 0.13 90);
+  --primary-foreground: oklch(0.26 0.06 90);
+  --ring: oklch(0.72 0.1 90);
+}
+
+html[data-accent="meadow"] {
+  --primary: oklch(0.55 0.12 150);
+  --primary-hover: oklch(0.61 0.12 150);
+  --primary-foreground: oklch(0.985 0.01 150);
+  --ring: oklch(0.62 0.1 150);
+}
+html.dark[data-accent="meadow"] {
+  --primary: oklch(0.8 0.13 150);
+  --primary-hover: oklch(0.85 0.13 150);
+  --primary-foreground: oklch(0.24 0.06 150);
+  --ring: oklch(0.68 0.1 150);
+}
+
+html[data-accent="lagoon"] {
+  --primary: oklch(0.55 0.1 195);
+  --primary-hover: oklch(0.61 0.1 195);
+  --primary-foreground: oklch(0.985 0.01 195);
+  --ring: oklch(0.62 0.09 195);
+}
+html.dark[data-accent="lagoon"] {
+  --primary: oklch(0.8 0.11 195);
+  --primary-hover: oklch(0.85 0.11 195);
+  --primary-foreground: oklch(0.24 0.05 195);
+  --ring: oklch(0.68 0.09 195);
+}
+
+html[data-accent="ocean"] {
+  --primary: oklch(0.55 0.15 250);
+  --primary-hover: oklch(0.61 0.15 250);
+  --primary-foreground: oklch(0.985 0.01 250);
+  --ring: oklch(0.62 0.11 250);
+}
+html.dark[data-accent="ocean"] {
+  --primary: oklch(0.78 0.12 250);
+  --primary-hover: oklch(0.83 0.12 250);
+  --primary-foreground: oklch(0.23 0.05 250);
+  --ring: oklch(0.66 0.1 250);
+}
+
+html[data-accent="grape"] {
+  --primary: oklch(0.53 0.17 295);
+  --primary-hover: oklch(0.59 0.17 295);
+  --primary-foreground: oklch(0.985 0.01 295);
+  --ring: oklch(0.62 0.12 295);
+}
+html.dark[data-accent="grape"] {
+  --primary: oklch(0.78 0.13 295);
+  --primary-hover: oklch(0.83 0.13 295);
+  --primary-foreground: oklch(0.23 0.06 295);
+  --ring: oklch(0.66 0.1 295);
+}
+
+html[data-accent="flamingo"] {
+  --primary: oklch(0.59 0.18 355);
+  --primary-hover: oklch(0.65 0.18 355);
+  --primary-foreground: oklch(0.985 0.01 355);
+  --ring: oklch(0.64 0.13 355);
+}
+html.dark[data-accent="flamingo"] {
+  --primary: oklch(0.8 0.13 350);
+  --primary-hover: oklch(0.85 0.13 350);
+  --primary-foreground: oklch(0.24 0.06 350);
+  --ring: oklch(0.68 0.11 350);
+}

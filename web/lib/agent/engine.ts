@@ -16,9 +16,11 @@ import { hasCutOffTurn } from "./runs";
 import { generalAgentPrompt } from "./prompt";
 import { nextRunAfter } from "./schedule";
 import {
-  agents, chatEvents, ensureDirs, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, updateAgent, WORKSPACE,
+  agents, chatEvents, ensureDirs, FILES_DIR, findAgentByName, getAgent, groups, newId, putEvent, routines, RUNTIME_DIR, updateAgent, WORKSPACE, writeChat,
 } from "./store";
+import { chatTarget, getThread, groupOfChat, membersOfChat, updateThread } from "./threads";
 import { agentNotes, buildTools, speakToFile } from "./tools";
+import { readState } from "@/lib/whirl-server/state";
 import { DEFAULT_MODEL, type AgentProfile, type AgentState, type ChatEvent } from "./types";
 
 export { listModels };
@@ -114,19 +116,51 @@ export async function stop(agentId: string): Promise<void> {
 }
 
 export async function stopChat(chatId: string): Promise<void> {
-  const ids = chatId.startsWith("grp_") ? groups.all().find((g) => g.id === chatId)?.members ?? [] : [chatId];
-  await Promise.all(ids.map((id) => stop(id)));
+  // Only the turns for this chat: the same agent may be busy in another thread.
+  await Promise.all(membersOfChat(chatId).map((id) => stopIn(id, chatId)));
+}
+
+async function stopIn(agentId: string, chatId: string): Promise<void> {
+  const w = workers.get(agentId);
+  if (!w) return;
+  w.queue = w.queue.filter((job) => job.chatId !== chatId);
+  if (w.active && w.active.job.chatId === chatId) {
+    w.active.stopped = true;
+    await w.active.cancel?.().catch(() => {});
+  }
+  announce(agentId);
+}
+
+/** Chats with a turn running or waiting, for the sidebar's "working" marks. */
+export function busyChats(): Map<string, "working" | "queued"> {
+  const busy = new Map<string, "working" | "queued">();
+  for (const w of workers.values()) {
+    for (const job of w.queue) if (!busy.has(job.chatId)) busy.set(job.chatId, "queued");
+    if (w.active) busy.set(w.active.job.chatId, "working");
+  }
+  return busy;
 }
 
 /** A message from the student into a chat. */
-export function userMessage(chatId: string, text: string, images: SDKImage[] = [], imageFiles: string[] = [], speak = false): void {
-  if (chatId.startsWith("agt_") && !getAgent(chatId)) throw new Error("That agent doesn't exist.");
-  post(chatId, { id: newId("evt"), at: Date.now(), type: "user", text, images: imageFiles.length ? imageFiles : undefined });
-  if (chatId.startsWith("agt_")) {
-    enqueue({ agentId: chatId, chatId, text, images, source: "user", speak, hops: 0 });
+export function userMessage(chatId: string, text: string, images: SDKImage[] = [], imageFiles: string[] = [], speak = false): string {
+  const target = chatTarget(chatId);
+  if (!target) throw new Error(chatId.startsWith("grp_") ? "That group doesn't exist." : "That agent doesn't exist.");
+  if (target.kind === "agent" && !getAgent(target.id)) throw new Error("That agent doesn't exist.");
+  const eventId = newId("evt");
+  post(chatId, { id: eventId, at: Date.now(), type: "user", text, images: imageFiles.length ? imageFiles : undefined });
+  dispatch(chatId, text, images, speak);
+  return eventId;
+}
+
+/** Hand a student message in a chat to whoever should answer it. */
+function dispatch(chatId: string, text: string, images: SDKImage[], speak: boolean): void {
+  const target = chatTarget(chatId);
+  if (!target) throw new Error("That conversation doesn't exist.");
+  if (target.kind === "agent") {
+    enqueue({ agentId: target.id, chatId, text, images, source: "user", speak, hops: 0 });
     return;
   }
-  const group = groups.all().find((g) => g.id === chatId);
+  const group = groups.all().find((g) => g.id === target.id);
   if (!group) throw new Error("That group doesn't exist.");
   const members = group.members.map((id) => getAgent(id)).filter((a): a is AgentProfile => !!a);
   if (!members.length) throw new Error("This group has no agents in it.");
@@ -135,6 +169,31 @@ export function userMessage(chatId: string, text: string, images: SDKImage[] = [
   for (const agent of mentioned.length ? mentioned : [members[0]!]) {
     enqueue({ agentId: agent.id, chatId, text, images, source: "user", speak, hops: 0 });
   }
+}
+
+/**
+ * Answer a student message again: everything after it is dropped and the
+ * turn runs fresh. Retry, and editing a sent message, both land here.
+ */
+export async function rerun(chatId: string, userEventId: string, text?: string): Promise<void> {
+  await stopChat(chatId);
+  const events = chatEvents(chatId, 100_000);
+  const at = events.findIndex((e) => e.id === userEventId && e.type === "user");
+  if (at < 0) throw new Error("That message isn't in this chat anymore.");
+  const original = events[at] as Extract<ChatEvent, { type: "user" }>;
+  const edited = { ...original, text: text ?? original.text };
+  writeChat(chatId, [...events.slice(0, at), edited]);
+  publish({ kind: "event", chatId, event: edited });
+  const images: SDKImage[] = [];
+  for (const name of edited.images ?? []) {
+    try {
+      const ext = name.split(".").pop() ?? "png";
+      images.push({ data: fs.readFileSync(path.join(FILES_DIR, name)).toString("base64"), mimeType: ext === "jpg" ? "image/jpeg" : `image/${ext}` });
+    } catch {
+      // A missing image costs that image, not the retry.
+    }
+  }
+  dispatch(chatId, edited.text, images, false);
 }
 
 function mentionsIn(text: string, candidates: AgentProfile[]): AgentProfile[] {
@@ -229,6 +288,11 @@ function transcriptTail(chatId: string, limit = 14, skipLast = false): string {
   return (skipLast ? lines.slice(0, -1) : lines).map((line) => `${line.who}: ${line.text}`).join("\n\n").slice(-8000);
 }
 
+/** The Agent app's Personalization preferences, shared by every agent. */
+function userStyle(): string {
+  return readState().preferences?.text.trim().slice(0, 4000) ?? "";
+}
+
 function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: boolean): string {
   const team = agents.all().filter((a) => a.id !== profile.id);
   const pending = notes.get(profile.id) ?? [];
@@ -239,7 +303,7 @@ function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: b
       name: profile.name,
       job: profile.job,
       rules: profile.rules,
-      style: "",
+      style: userStyle(),
       platform: os.type(),
       workspace: WORKSPACE,
       browser,
@@ -251,13 +315,13 @@ function buildPrompt(profile: AgentProfile, job: Job, browser: boolean, fresh: b
     pending.length ? `Since your last turn:\n${pending.map((n) => `- ${n}`).join("\n")}` : "",
   ];
   // A runtime that couldn't be resumed starts with no idea what was said; the chat still has it.
-  if (fresh && !job.chatId.startsWith("grp_")) {
+  const group = groupOfChat(job.chatId);
+  if (fresh && !group) {
     // The message being answered is already the chat's last line, except on a routine run.
     const earlier = transcriptTail(job.chatId, 16, job.source !== "routine");
     if (earlier) lines.push(`Your working context was reset, so here is how this chat went before this message:\n${earlier}`);
   }
-  if (job.chatId.startsWith("grp_")) {
-    const group = groups.all().find((g) => g.id === job.chatId);
+  if (group) {
     const members = (group?.members ?? []).map((id) => getAgent(id)?.name).filter(Boolean).join(", ");
     lines.push(`This message is in the group chat "${group?.name ?? "Group"}" with ${members}. Recent messages:\n${transcriptTail(job.chatId)}\nReply to the group. To bring in a teammate, @mention them by name in your reply. Stay silent on things another member owns: reply with just "PASS" if you have nothing to add.`);
   } else if (job.viaTutor) {
@@ -314,7 +378,10 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const profile = getAgent(job.agentId);
   if (!profile) return;
   const models = await listModels();
-  const wanted = REPLACED[profile.model] ?? profile.model;
+  const thread = job.chatId.startsWith("thr_") ? getThread(job.chatId) : undefined;
+  // A thread can run on its own model; otherwise the agent's.
+  const chosen = thread?.model ?? profile.model;
+  const wanted = REPLACED[chosen] ?? chosen;
   const modelId = models.some((m) => m.id === wanted) ? wanted : DEFAULT_MODEL;
 
   // A Chrome of its own: its own tabs, and its own sign-ins.
@@ -338,9 +405,15 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     ...(mcp ? { mcpServers: { browser: mcp } } : {}),
   };
 
-  const runtimeId = profile.runtimeId && await runtimeStore.agents.get({ agentId: profile.runtimeId }).catch(() => null)
-    ? profile.runtimeId
+  // A thread carries its own context per agent; the agent's own chat uses the agent's.
+  const savedRuntimeId = thread ? thread.runtimes[profile.id] : profile.runtimeId;
+  const runtimeId = savedRuntimeId && await runtimeStore.agents.get({ agentId: savedRuntimeId }).catch(() => null)
+    ? savedRuntimeId
     : undefined;
+  const keepRuntime = (id: string) =>
+    thread
+      ? updateThread(thread.id, (t) => ({ ...t, runtimes: { ...t.runtimes, [profile.id]: id } }))
+      : updateAgent(profile.id, (agent) => ({ ...agent, runtimeId: id }));
   let sdk = runtimeId
     ? await Agent.resume(runtimeId, options).catch((error: unknown) => {
         console.error(`[agent] couldn't resume ${profile.name}'s context, starting a new one:`, error instanceof Error ? error.message : error);
@@ -350,7 +423,7 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
   const fresh = !sdk;
   if (!sdk) {
     sdk = await Agent.create(options);
-    updateAgent(profile.id, (agent) => ({ ...agent, runtimeId: sdk!.agentId }));
+    keepRuntime(sdk.agentId);
   }
 
   // A turn the host's restart cut off still counts as going, and the SDK
@@ -401,6 +474,8 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
       text = { ...text, text: text.text + u.text };
       flush();
     } else if (u.type === "thinking-delta" && u.text) {
+      // Text after a stretch of thinking is a new paragraph, not the same sentence.
+      if (!thinking) closeText();
       thinking ??= { id: newId("evt"), at: Date.now(), type: "thinking", agentId: profile.id, text: "", streaming: true };
       thinking = { ...thinking, text: thinking.text + u.text };
       flush();
@@ -471,8 +546,9 @@ async function runJob(job: Job, active: NonNullable<Worker["active"]>): Promise<
     }
   }
 
-  if (job.chatId.startsWith("grp_") && reply && job.hops < MAX_HOPS) {
-    const group = groups.all().find((g) => g.id === job.chatId);
+  const replyGroup = groupOfChat(job.chatId);
+  if (replyGroup && reply && job.hops < MAX_HOPS) {
+    const group = replyGroup;
     const others = (group?.members ?? []).filter((id) => id !== profile.id).map((id) => getAgent(id)).filter((a): a is AgentProfile => !!a);
     for (const agent of mentionsIn(reply, others)) {
       enqueue({ agentId: agent.id, chatId: job.chatId, text: `${profile.name} said: ${reply}`, source: "agent", from: profile.name, hops: job.hops + 1 });

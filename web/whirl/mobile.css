@@ -1,0 +1,121 @@
+/* Everything that only matters when Whirl is being held rather than
+   pointed at. Split out of globals.css because it reads as one subject —
+   touch, the keyboard, and the notch — and none of it should be hunted for
+   between the colour tokens and the page slide.
+
+   Rules here sit outside @layer on purpose: Tailwind's utilities are layered,
+   and an unlayered rule beats them regardless of source order. That is what
+   lets `.app-frame` override `h-dvh` and `.field-text` override a type size
+   without either one shouting !important. */
+
+/* ---- The shell's height ------------------------------------------------ */
+
+/* `100dvh` is the right answer until a keyboard opens. On Android it stays
+   right — the viewport export asks for `interactiveWidget: resizes-content`,
+   so the layout viewport shrinks with the keyboard. On iOS it does not: the
+   layout viewport holds its full height, the keyboard is drawn over the
+   bottom of it, and a docked composer ends up behind the keys. The inset is
+   measured from visualViewport (components/mobile/viewport-insets.tsx) and
+   is 0 whenever no keyboard is up, including everywhere on desktop — which
+   never reads it anyway, the query below sees to that. */
+@media (hover: none) and (pointer: coarse) {
+  .app-frame {
+    height: calc(100dvh - var(--keyboard-inset, 0px));
+  }
+}
+
+/* The app shell manages its own scrolling in panes; the document behind it
+   has nothing to scroll and shouldn't pretend otherwise — that is what turns
+   into rubber-banding, into pull-to-refresh firing mid-conversation, and on
+   iOS into the page sliding up under the keyboard.
+ *
+ * Scoped twice over. To pages that actually mount the shell, because the
+ * marketing routes and the public share viewer share this document and are
+ * ordinary scrolling pages. And to touch, because `overflow: hidden` on
+ * <html> takes the document out of scroll-container territory, which quietly
+ * cancels the `scrollbar-gutter: stable` reserved in globals.css — on a
+ * desktop with classic scrollbars that is a 15px lurch the moment the shell
+ * mounts, in aid of a problem desktop doesn't have. */
+@media (hover: none) and (pointer: coarse) {
+  html:has(.app-frame),
+  body:has(.app-frame) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+}
+
+/* The tab bar stands down while the keyboard is up, where it would otherwise
+   sit between the composer and the keys — a place no native app puts one,
+   and two rows of chrome between a thumb and what it's writing.
+ *
+ * Keyed off a measured keyboard and emphatically NOT off `:focus`: the
+ * composer autofocuses, and a mobile browser sets :focus without raising
+ * anything (the keyboard needs a real tap), so a focus-gated rule hides the
+ * bar from the moment the app loads and never brings it back. */
+@media (hover: none) and (pointer: coarse) {
+  [data-keyboard] .mobile-tab-bar {
+    display: none;
+  }
+}
+
+/* ---- Touch hygiene ---------------------------------------------------- */
+
+@media (hover: none) and (pointer: coarse) {
+  html {
+    /* iOS inflates text on rotation into landscape unless told not to. */
+    -webkit-text-size-adjust: 100%;
+    /* The grey flash a tap leaves on anything clickable. Every interactive
+       surface in here already has a press state of its own. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Chrome is furniture: a long press on it should do nothing, and a drag
+     across it should never start selecting label text. Prose, code blocks
+     and message bodies are deliberately left out — copying out of a reply
+     is a thing people do constantly. */
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"],
+  nav,
+  aside {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
+/* ---- Type in editable fields ------------------------------------------ */
+
+/* Safari zooms the whole page in when a field under 16px takes focus, and
+   then leaves it zoomed — which is why so many web apps jump sideways the
+   first time you tap a search box. Raising the floor is the entire fix, and
+   at these sizes a pixel is not a design decision. `1em` keeps anything
+   already larger exactly as it was. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"]),
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* 15px is the app's reading size for a draft, and on iOS it is also the
+   trigger for Safari to zoom the whole page in the moment the field takes
+   focus — which then leaves the composer half off-screen. 16px is the
+   threshold, and the difference is invisible.
+ *
+ * It has to be one class rather than a per-element utility because these
+ * sizes are measured, not just rendered: the composer lays the draft out in
+ * a hidden mirror span to decide when the pill expands, and the edit bubble
+ * sizes itself off a second copy of its own text. Mirror and field must
+ * always agree, so they share a declaration. */
+.field-text {
+  font-size: 15px;
+  line-height: 1.5rem;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .field-text {
+    font-size: 16px;
+  }
+}

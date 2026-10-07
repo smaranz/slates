@@ -1,0 +1,30 @@
+/* Inter v4.1, from rsms.me/inter — the variable cut only. That distribution
+   also ships eighteen static weights for browsers without variable-font
+   support, which is none of the browsers that can run this app; anything
+   that old falls through to the system face in the stack instead.
+
+   Self-hosted rather than linked off rsms.me: a third-party stylesheet
+   costs a DNS lookup and a TLS handshake before the font request can even
+   start, and the browser can't discover the font until that CSS parses.
+   These two files sit in public/fonts and the root layout preloads the
+   roman one by path.
+
+   The family is named literally, not handed through next/font — see the
+   note on the html/body rule in globals.css for why the font must never
+   depend on a custom property resolving. */
+
+@font-face {
+  font-family: InterVariable;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/whirl/fonts/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: InterVariable;
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/whirl/fonts/InterVariable-Italic.woff2") format("woff2");
+}
