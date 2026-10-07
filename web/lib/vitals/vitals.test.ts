@@ -16,9 +16,11 @@ import {
   parseNettop,
   parseProbe,
   parsePs,
+  parseSensors,
   parseSwap,
   parseSysctl,
   parseVmStat,
+  sensorKind,
 } from "./parse";
 
 // What macOS's tools print, trimmed from a real M4 Pro, and the rules that
@@ -421,4 +423,61 @@ test("quitting asks the app's own process, and never macOS or what Slates runs i
   assert.equal(quitPlan("/System/Library/CoreServices/Finder.app", MAC, opts).kind, "refuse");
   assert.equal(quitPlan("macos", MAC, opts).kind, "refuse");
   assert.equal((quitPlan("/Applications/Xcode.app", MAC, opts) as { reason: string }).reason, "Xcode isn't running.");
+});
+
+/* ── heat ──────────────────────────────────────────────────────────────── */
+
+test("SMC keys are filed by what they measure, and the rest left out", () => {
+  assert.equal(sensorKind("Tp1i"), "cpu");
+  assert.equal(sensorKind("Te05"), "cpu");
+  assert.equal(sensorKind("Ts0A"), "cpu");
+  assert.equal(sensorKind("Tg0K"), "gpu");
+  assert.equal(sensorKind("TH0x"), "ssd");
+  assert.equal(sensorKind("TB1T"), null);
+  assert.equal(sensorKind("TaLP"), null);
+  assert.equal(sensorKind("TW0P"), null);
+});
+
+test("the sensors' lines, with the SMC's placeholders kept out", () => {
+  const t = parseSensors(
+    [
+      "T\tTp1i\t75.55",
+      "T\tTp1o\t91.62",
+      "T\tTp0K\t40.00",
+      "T\tTp00\t-4.00",
+      "T\tTp01\t2.20",
+      "T\tTe05\t76.95",
+      "T\tTg05\t77.55",
+      "T\tTg0R\t69.95",
+      "T\tTH0x\t43.06",
+      "T\tTH0a\t43.00",
+      "F\t0\t5160\t2317\t7826\t5187\t0",
+      "F\t1\t0\t2317\t7826\t0\t1",
+      "W\t45.81",
+      "H\t2",
+      "",
+    ].join("\n"),
+  )!;
+  assert.equal(t.cpu!.sensors, 3);
+  assert.equal(t.cpu!.max, 91.62);
+  assert.ok(Math.abs(t.cpu!.avg - (75.55 + 91.62 + 76.95) / 3) < 1e-9);
+  assert.deepEqual(t.gpu, { avg: (77.55 + 69.95) / 2, max: 77.55, sensors: 2 });
+  assert.equal(t.ssd!.max, 43.06);
+  // A whole number is a limit, not a reading.
+  assert.equal(t.ssd!.sensors, 1);
+  assert.deepEqual(t.fans, [
+    { rpm: 5160, min: 2317, max: 7826, target: 5187, manual: false },
+    { rpm: 0, min: 2317, max: 7826, target: 0, manual: true },
+  ]);
+  assert.equal(t.power, 45.81);
+  assert.equal(t.pressure, "heavy");
+});
+
+test("a Mac without fans or an SMC to read", () => {
+  const fanless = parseSensors("T\tTp01\t48.31\nH\t0\n")!;
+  assert.deepEqual(fanless.fans, []);
+  assert.equal(fanless.pressure, "nominal");
+  assert.equal(fanless.power, null);
+  assert.equal(parseSensors(""), null);
+  assert.equal(parseSensors("H\t9\n"), null);
 });

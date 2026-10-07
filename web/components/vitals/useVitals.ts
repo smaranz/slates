@@ -32,6 +32,10 @@ export interface Point {
   write: number;
   /** What the battery is giving, or failing that what the apps are drawing. */
   power: number;
+  /** The hottest CPU and GPU sensors, °C, and the fans' mean rpm; 0 when unknown. */
+  cpuTemp: number;
+  gpuTemp: number;
+  fan: number;
 }
 
 export interface Trail {
@@ -44,6 +48,7 @@ const EMPTY: Trail = { points: [], apps: new Map() };
 const appPower = (apps: VitalsApp[]) => apps.reduce((sum, a) => sum + (a.power ?? 0), 0);
 
 function extend(trail: Trail, snap: VitalsSnapshot): Trail {
+  const fans = snap.thermal?.fans ?? [];
   const point: Point = {
     at: snap.at,
     cpu: snap.cpu.total,
@@ -55,6 +60,9 @@ function extend(trail: Trail, snap: VitalsSnapshot): Trail {
     read: snap.disk.read,
     write: snap.disk.write,
     power: snap.battery?.draw ?? appPower(snap.apps),
+    cpuTemp: snap.thermal?.cpu?.max ?? 0,
+    gpuTemp: snap.thermal?.gpu?.max ?? 0,
+    fan: fans.length ? fans.reduce((sum, f) => sum + f.rpm, 0) / fans.length : 0,
   };
   const apps = new Map<string, Record<Metric, number[]>>();
   for (const app of snap.apps) {

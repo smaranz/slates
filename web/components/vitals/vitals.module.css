@@ -783,6 +783,182 @@
   font-size: 12.5px;
 }
 
+/* ── heat and fans ─────────────────────────────────────────────────────── */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.thermalStrip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(120px, 220px) auto;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 18px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.thermalStrip:hover {
+  background: var(--hover);
+}
+
+.thermalStrip > svg {
+  color: var(--dim);
+}
+
+.thermalCells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+}
+
+.thermalCells > span {
+  display: grid;
+  gap: 1px;
+}
+
+.thermalCells small {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.thermalCells b {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.thermalCells b[data-tone="warn"] {
+  color: var(--warn);
+}
+
+.thermalCells b[data-tone="bad"] {
+  color: var(--bad);
+}
+
+.thermalSpark {
+  --spark-h: 34px;
+}
+
+.pressure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.pressure i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+.pressure[data-tone="warn"] i {
+  background: var(--warn);
+}
+
+.pressure[data-tone="bad"] i {
+  background: var(--bad);
+}
+
+.pressure b {
+  font-weight: 650;
+}
+
+.pressure span {
+  color: var(--muted);
+}
+
+.fans {
+  display: grid;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.fan {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 120px minmax(200px, 1.1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.fanGlyph {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--v-accent-soft);
+  color: var(--v-accent);
+}
+
+.fanGlyph svg {
+  animation: spin linear infinite;
+  animation-duration: inherit;
+  animation-play-state: paused;
+}
+
+.fanGlyph[data-spinning] svg {
+  animation-play-state: running;
+}
+
+.fanName {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.fanName b {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.fanName span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fanRpm {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fanRange {
+  display: grid;
+  gap: 6px;
+}
+
+.fanRange > span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.noFans {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* ── sections and the app table ────────────────────────────────────────── */
 
 .section {
@@ -1459,11 +1635,16 @@
 
   /* Every tab still fits beside the Mac app's traffic lights at its narrowest. */
   .tabs button {
-    padding: 6px 10px;
+    padding: 6px 8px;
   }
 }
 
 @media (max-width: 960px) {
+  /* The ninth tab (Thermals) needs the room title's place; the tabs themselves say which room this is. */
+  .top :global(.ui-top-title) {
+    display: none;
+  }
+
   .page {
     padding: 18px 18px 56px;
   }
@@ -1479,6 +1660,22 @@
   .projectMeta > span:not(.chip) {
     display: none;
   }
+
+  .thermalStrip {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .thermalSpark {
+    display: none;
+  }
+
+  .fan {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .fanRange {
+    grid-column: 2 / -1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1490,7 +1687,8 @@
   }
 
   .live[aria-pressed="true"] .liveDot,
-  .skeleton {
+  .skeleton,
+  .fanGlyph svg {
     animation: none;
   }
 

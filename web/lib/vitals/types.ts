@@ -6,7 +6,7 @@
  * Activity Monitor counts it, so a busy app on a 12-core Mac can pass 100.
  */
 
-export type VitalsTab = "overview" | "cpu" | "memory" | "disk" | "network" | "gpu" | "battery" | "projects";
+export type VitalsTab = "overview" | "cpu" | "memory" | "disk" | "network" | "gpu" | "battery" | "thermal" | "projects";
 
 /** One process, inside the app it belongs to. */
 export interface VitalsProc {
@@ -123,6 +123,38 @@ export interface VitalsBattery {
   adapter: { name: string; watts: number | null } | null;
 }
 
+export interface VitalsFan {
+  /** rpm; 0 while it's stopped, which Apple silicon Macs do when cool. */
+  rpm: number;
+  min: number;
+  max: number;
+  /** What macOS is steering it towards; null when the SMC doesn't say. */
+  target: number | null;
+  /** Set by hand (a fan-control app) rather than by macOS. */
+  manual: boolean;
+}
+
+/** A group of the SMC's temperature sensors: their mean and the hottest, °C. */
+export interface VitalsTemp {
+  avg: number;
+  max: number;
+  sensors: number;
+}
+
+export type ThermalPressure = "nominal" | "moderate" | "heavy" | "trapping" | "sleeping";
+
+export interface VitalsThermal {
+  cpu: VitalsTemp | null;
+  gpu: VitalsTemp | null;
+  ssd: VitalsTemp | null;
+  /** Empty on a Mac without fans. */
+  fans: VitalsFan[];
+  /** Watts the whole Mac is drawing, as the SMC measures it. */
+  power: number | null;
+  /** How hard macOS is holding the chip back to cool it; null when it doesn't say. */
+  pressure: ThermalPressure | null;
+}
+
 export type ServerState = "working" | "idle" | "quiet";
 
 /** A process listening on a port, run from a project folder. */
@@ -180,6 +212,8 @@ export interface VitalsSnapshot {
   disk: VitalsDisk;
   network: VitalsNetwork;
   battery: VitalsBattery | null;
+  /** Null without the probe, or where the SMC can't be read. */
+  thermal: VitalsThermal | null;
   apps: VitalsApp[];
   projects: VitalsProject[];
   ports: VitalsPort[];

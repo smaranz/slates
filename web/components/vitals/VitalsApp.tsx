@@ -3,10 +3,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useMode } from "@/lib/mode";
-import type { VitalsApp as App, VitalsProject, VitalsServer, VitalsSnapshot, VitalsTab } from "@/lib/vitals/types";
+import type { ThermalPressure, VitalsApp as App, VitalsFan, VitalsProject, VitalsServer, VitalsSnapshot, VitalsTab, VitalsTemp, VitalsThermal } from "@/lib/vitals/types";
 import { Icon, ICON } from "../ui";
 import AppTable from "./AppTable";
-import { andList, duration, memory, pct, plural, rate, space, watts } from "./format";
+import { andList, celsius, duration, memory, pct, plural, rate, rpm, space, watts } from "./format";
 import { Confirm, Meter, Spark, Stack, Toast, V } from "./parts";
 import ProjectsView, { quietServers } from "./ProjectsView";
 import { EVERY_MS, useAppIcons, useVitals, type Metric, type Trail } from "./useVitals";
@@ -30,6 +30,7 @@ const TABS: { id: VitalsTab; label: string }[] = [
   { id: "network", label: "Network" },
   { id: "gpu", label: "GPU" },
   { id: "battery", label: "Battery" },
+  { id: "thermal", label: "Thermals" },
   { id: "projects", label: "Projects" },
 ];
 
@@ -71,7 +72,7 @@ export default function VitalsApp() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const tabs = TABS.filter((t) => (t.id !== "battery" || !!snap?.battery) && (t.id !== "gpu" || !!snap?.gpu));
+  const tabs = TABS.filter((t) => (t.id !== "battery" || !!snap?.battery) && (t.id !== "gpu" || !!snap?.gpu) && (t.id !== "thermal" || !!snap?.thermal));
   const current = !snap || tabs.some((t) => t.id === tab) ? tab : "overview";
   const setTab = (next: VitalsTab) => {
     setTabState(next);
@@ -137,6 +138,9 @@ export default function VitalsApp() {
         break;
       case "battery":
         body = <BatteryView snap={snap} trail={trail} table={detailed ? table(["power", "cpu"], "Apps by power") : null} />;
+        break;
+      case "thermal":
+        body = <ThermalView snap={snap} trail={trail} table={table(detailed ? ["cpu", "power", "gpu"] : ["cpu", "gpu"], "Apps making the heat")} />;
         break;
       case "projects":
         body = <ProjectsView projects={snap.projects} ports={snap.ports} onStop={(servers) => setPending({ kind: "stop", servers })} />;
@@ -318,7 +322,17 @@ interface Notice {
 /** What's worth a look right now, worst first; three at most. */
 function notices(snap: VitalsSnapshot): Notice[] {
   const out: Notice[] = [];
-  const { disk, memory: m, battery } = snap;
+  const { disk, memory: m, battery, thermal } = snap;
+  if (thermal?.pressure && thermal.pressure !== "nominal") {
+    const fastest = thermal.fans.length ? rpm(Math.max(...thermal.fans.map((f) => f.rpm))) : null;
+    const hot = thermal.cpu ? ` The CPU is at ${celsius(thermal.cpu.max)}${fastest ? ` and the fans at ${fastest}` : ""}.` : fastest ? ` The fans are at ${fastest}.` : "";
+    out.push({
+      tone: thermal.pressure === "moderate" ? "warn" : "bad",
+      title: thermal.pressure === "moderate" ? "Your Mac is getting hot" : "Your Mac is slowing itself down to cool off",
+      detail: `${PRESSURE_SAYS[thermal.pressure]}.${hot}`,
+      tab: "thermal",
+    });
+  }
   const freeShare = disk.total > 0 ? disk.free / disk.total : 1;
   if (disk.total > 0 && (freeShare < 0.05 || disk.free < 10e9)) {
     out.push({
@@ -483,6 +497,8 @@ function Overview({ snap, trail, onTab, table }: { snap: VitalsSnapshot; trail: 
           </Tile>
         )}
       </div>
+
+      {snap.thermal && <ThermalStrip thermal={snap.thermal} trail={trail} onClick={() => onTab("thermal")} />}
 
       <Section title="Busiest apps right now" note={appsNote(snap)}>
         {table}
@@ -693,6 +709,154 @@ function BatteryView({ snap, trail, table }: { snap: VitalsSnapshot; trail: Trai
           {table}
         </Section>
       )}
+    </div>
+  );
+}
+
+/* ── heat and fans ─────────────────────────────────────────────────────── */
+
+const PRESSURE_LABEL: Record<ThermalPressure, string> = { nominal: "Normal", moderate: "Moderate", heavy: "Heavy", trapping: "Critical", sleeping: "Critical" };
+
+const PRESSURE_SAYS: Record<ThermalPressure, string> = {
+  nominal: "macOS isn't holding the chip back",
+  moderate: "macOS is starting to hold the chip back to keep it cool",
+  heavy: "macOS is slowing the chip to keep it cool, so everything runs slower",
+  trapping: "macOS is slowing the chip hard to keep it cool",
+  sleeping: "The Mac is so hot macOS is about to put it to sleep",
+};
+
+type Tone = "good" | "warn" | "bad" | undefined;
+
+const pressureTone = (p: ThermalPressure | null): Tone => (!p ? undefined : p === "nominal" ? "good" : p === "moderate" ? "warn" : "bad");
+
+/** Apple silicon runs at 90–100 °C under load as a matter of course, and holds itself back past about 105. */
+const tempTone = (c: number | undefined): Tone => (c === undefined ? undefined : c >= 108 ? "bad" : c >= 100 ? "warn" : undefined);
+
+function fanName(i: number, count: number) {
+  return count === 1 ? "Fan" : `Fan ${i + 1}`;
+}
+
+function fanState(fan: VitalsFan): string {
+  if (fan.manual) return "Set by hand, by a fan-control app";
+  if (fan.rpm < 100) return "Stopped: the Mac is cool enough without it";
+  return fan.target !== null && fan.target > 0 ? `macOS is aiming for ${rpm(fan.target)}` : "Run by macOS";
+}
+
+/** A fan that turns as fast as the real one, slowed down to be watchable. */
+function FanGlyph({ fan, size = 20 }: { fan: VitalsFan; size?: number }) {
+  const spinning = fan.rpm >= 100;
+  return (
+    <span className={s.fanGlyph} data-spinning={spinning || undefined} style={spinning ? { animationDuration: `${Math.max(0.25, 1500 / fan.rpm).toFixed(2)}s` } : undefined} aria-hidden>
+      <Icon path={V.fan} size={size} />
+    </span>
+  );
+}
+
+function fanSummary(fans: VitalsFan[]): string {
+  if (!fans.length) return "No fans";
+  if (fans.every((f) => f.rpm < 100)) return "Off";
+  return rpm(fans.reduce((sum, f) => sum + f.rpm, 0) / fans.length);
+}
+
+function ThermalStrip({ thermal: t, trail, onClick }: { thermal: VitalsThermal; trail: Trail; onClick: () => void }) {
+  const points = trail.points.slice(-TILE_SLOTS);
+  const cells: { label: string; value: string; tone?: "good" | "warn" | "bad" }[] = [
+    ...(t.cpu ? [{ label: "CPU", value: celsius(t.cpu.max), tone: tempTone(t.cpu.max) }] : []),
+    ...(t.gpu ? [{ label: "GPU", value: celsius(t.gpu.max), tone: tempTone(t.gpu.max) }] : []),
+    { label: t.fans.length === 1 ? "Fan" : "Fans", value: fanSummary(t.fans) },
+    ...(t.power !== null ? [{ label: "Whole Mac", value: watts(t.power) }] : []),
+    ...(t.pressure ? [{ label: "Thermal pressure", value: PRESSURE_LABEL[t.pressure], tone: pressureTone(t.pressure) }] : []),
+  ];
+  return (
+    <button type="button" className={`${s.card} ${s.thermalStrip}`} onClick={onClick}>
+      <span className={s.tileHead}>
+        <Icon path={V.heat} size={14} />
+        Thermals
+      </span>
+      <span className={s.thermalCells}>
+        {cells.map((c) => (
+          <span key={c.label}>
+            <small>{c.label}</small>
+            <b data-tone={c.tone === "good" ? undefined : c.tone}>{c.value}</b>
+          </span>
+        ))}
+      </span>
+      {t.cpu && <Spark values={points.map((p) => p.cpuTemp)} second={t.gpu ? points.map((p) => p.gpuTemp) : undefined} slots={TILE_SLOTS} max={110} className={s.thermalSpark} />}
+      <Icon path={V.chevronRight} size={12} />
+    </button>
+  );
+}
+
+function ThermalView({ snap, trail, table }: ViewProps) {
+  const t = snap.thermal!;
+  const points = trail.points;
+  const fanTop = Math.max(0, ...t.fans.map((f) => f.max));
+  const tempNote = (temp: VitalsTemp) => `Hottest of ${temp.sensors} · average ${celsius(temp.avg)}`;
+  return (
+    <div className={s.stackCol}>
+      <section className={`${s.card} ${s.hero}`} aria-label="Temperatures">
+        <div className={s.heroStats}>
+          {t.cpu && <Stat label="CPU" value={celsius(t.cpu.max)} sub={tempNote(t.cpu)} tone={tempTone(t.cpu.max)} />}
+          {t.gpu && <Stat label="GPU" value={celsius(t.gpu.max)} sub={tempNote(t.gpu)} tone={tempTone(t.gpu.max)} />}
+          {t.ssd && <Stat label="SSD" value={celsius(t.ssd.max)} sub="The internal drive" />}
+          {t.power !== null && <Stat label="Whole Mac" value={watts(t.power)} sub="Drawing, everything included" />}
+        </div>
+        {t.pressure && (
+          <p className={s.pressure} data-tone={pressureTone(t.pressure)}>
+            <i aria-hidden />
+            <b>Thermal pressure {PRESSURE_LABEL[t.pressure].toLowerCase()}</b>
+            <span>{PRESSURE_SAYS[t.pressure]}.</span>
+          </p>
+        )}
+        {t.cpu && (
+          <Chart
+            trail={trail}
+            values={points.map((p) => p.cpuTemp)}
+            second={t.gpu ? points.map((p) => p.gpuTemp) : undefined}
+            max={110}
+            legend={[{ label: "CPU, hottest sensor" }, ...(t.gpu ? [{ label: "GPU, hottest sensor", line: true }] : [])]}
+          />
+        )}
+      </section>
+
+      <section className={s.section}>
+        <header className={s.sectionHead}>
+          <h2 className={s.sectionTitle}>{t.fans.length === 1 ? "Fan" : "Fans"}</h2>
+          {t.fans.length > 0 && <span className={s.sectionNote}>Apple silicon Macs stop their fans when they’re cool</span>}
+        </header>
+        <div className={`${s.card} ${s.fans}`}>
+          {t.fans.length === 0 ? (
+            <p className={s.noFans}>
+              <Icon path={V.fan} size={18} />
+              This Mac has no fans. It cools without them, and slows the chip a little when it gets hot.
+            </p>
+          ) : (
+            <>
+              {t.fans.map((fan, i) => (
+                <div key={i} className={s.fan}>
+                  <FanGlyph fan={fan} />
+                  <span className={s.fanName}>
+                    <b>{fanName(i, t.fans.length)}</b>
+                    <span>{fanState(fan)}</span>
+                  </span>
+                  <span className={s.fanRpm}>{fan.rpm < 100 ? "Off" : rpm(fan.rpm)}</span>
+                  <span className={s.fanRange}>
+                    <Meter value={fan.rpm} max={fan.max || fanTop || 1} label={`${fanName(i, t.fans.length)} speed`} />
+                    <span>
+                      {pct(fan.max ? Math.min(100, (fan.rpm / fan.max) * 100) : 0)} of its top speed · {Math.round(fan.min).toLocaleString()}–{rpm(fan.max)}
+                    </span>
+                  </span>
+                </div>
+              ))}
+              <Chart trail={trail} values={points.map((p) => p.fan)} max={fanTop || undefined} legend={[{ label: t.fans.length === 1 ? "Fan speed" : "Fan speed, the fans’ average" }]} />
+            </>
+          )}
+        </div>
+      </section>
+
+      <Section title="Apps making the heat" note={`${appsNote(snap)} · the busiest warm the chip most`}>
+        {table}
+      </Section>
     </div>
   );
 }

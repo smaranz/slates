@@ -16,6 +16,7 @@ import {
   parseNettop,
   parseProbe,
   parsePs,
+  parseSensors,
   parseSwap,
   parseSysctl,
   parseVmStat,
@@ -27,13 +28,14 @@ import {
   type ProbeRow,
   type VmStat,
 } from "./parse";
-import { probeBinary, probeMissing, readProbe } from "./probe";
-import type { VitalsCpu, VitalsHost, VitalsMemory, VitalsNetwork, VitalsSnapshot } from "./types";
+import { probeBinary, probeMissing, readProbe, readSensors } from "./probe";
+import type { VitalsCpu, VitalsHost, VitalsMemory, VitalsNetwork, VitalsSnapshot, VitalsThermal } from "./types";
 
 /**
  * Reads this Mac, the way Activity Monitor does but from the command line:
  * `ps` for every process, the probe for what only the kernel knows, `nettop`
- * for each process's traffic, ioreg for the GPU, the disks and the battery.
+ * for each process's traffic, ioreg for the GPU, the disks and the battery,
+ * and the SMC (through the probe) for temperatures and fans.
  *
  * Nothing is kept between visits. Rates are the difference between two
  * readings, so the first request takes two a moment apart, and later ones
@@ -60,6 +62,7 @@ interface Reading {
   vm: VmStat;
   sysctl: Map<string, string>;
   gpu: GpuReading | null;
+  thermal: VitalsThermal | null;
 }
 
 function merge(psOut: string, probe: Probe | null): ProcInfo[] {
@@ -88,8 +91,9 @@ async function table(): Promise<{ psOut: string; probe: Probe | null }> {
 }
 
 async function read(): Promise<Reading> {
-  const [{ psOut, probe }, netOut, vmOut, sysOut, wireOut] = await Promise.all([
+  const [{ psOut, probe }, sensorsOut, netOut, vmOut, sysOut, wireOut] = await Promise.all([
     table(),
+    readSensors(),
     sh("/usr/bin/nettop", ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"]),
     sh("/usr/bin/vm_stat", []),
     sh("/usr/sbin/sysctl", ["vm.swapusage", "kern.memorystatus_vm_pressure_level"]),
@@ -111,6 +115,7 @@ async function read(): Promise<Reading> {
     vm: parseVmStat(vmOut),
     sysctl: parseSysctl(sysOut),
     gpu: probe ? probe.gpu : parseGpu(gpuOut),
+    thermal: sensorsOut ? parseSensors(sensorsOut) : null,
   };
 }
 
@@ -361,6 +366,7 @@ async function build(prev: Reading, cur: Reading): Promise<VitalsSnapshot> {
       iface: later.iface,
     },
     battery: later.battery,
+    thermal: cur.thermal,
     apps,
     projects,
     ports,

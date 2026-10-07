@@ -41,6 +41,10 @@ export function watts(n: number | null): string {
   return n < 1 ? `${Math.round(n * 1000)} mW` : `${n.toFixed(1)} W`;
 }
 
+export const celsius = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? "–" : `${Math.round(n)} °C`);
+
+export const rpm = (n: number) => `${Math.round(n).toLocaleString()} rpm`;
+
 /** "3 days", "5 h 12 min", "12 min". */
 export function duration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));

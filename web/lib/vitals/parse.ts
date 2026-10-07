@@ -4,6 +4,8 @@
  * and the tests can feed these fixtures.
  */
 
+import type { ThermalPressure, VitalsFan, VitalsTemp, VitalsThermal } from "./types";
+
 /** One row of `ps -axww -o pid=,ppid=,pgid=,uid=,time=,rss=,etime=,comm=`. */
 export interface PsRow {
   pid: number;
@@ -359,6 +361,77 @@ export function parseBattery(out: string): BatteryReading | null {
     draw,
     adapter: plugged ? { name: adapterName || "Power adapter", watts: adapterWatts > 0 ? adapterWatts : null } : null,
   };
+}
+
+/* ── heat ──────────────────────────────────────────────────────────────── */
+
+export type SensorKind = "cpu" | "gpu" | "ssd";
+
+/**
+ * What an SMC temperature key measures, as far as anyone outside Apple knows:
+ * Tp, Te and Ts are the CPU's clusters (performance, efficiency, M5's super
+ * cores), Tg the GPU, and TH the SSD. The rest (the battery, which ioreg
+ * already gives, airflow, skin, charger, Wi-Fi…) Vitals leaves out.
+ */
+export function sensorKind(key: string): SensorKind | null {
+  if (/^T[pes]/.test(key)) return "cpu";
+  if (key.startsWith("Tg")) return "gpu";
+  if (key.startsWith("TH")) return "ssd";
+  return null;
+}
+
+const PRESSURES: ThermalPressure[] = ["nominal", "moderate", "heavy", "trapping", "sleeping"];
+
+/**
+ * `probe sensors`, see probe.ts. Keys that read as a whole number or outside
+ * 10–130 °C are limits and placeholders the SMC keeps beside its sensors
+ * (an M4 Pro has six Tp keys stuck at 40 and dozens at 0 or below), so they
+ * stay out of the averages.
+ */
+export function parseSensors(out: string): VitalsThermal | null {
+  const groups: Record<SensorKind, number[]> = { cpu: [], gpu: [], ssd: [] };
+  const fans: VitalsFan[] = [];
+  let power: number | null = null;
+  let pressure: ThermalPressure | null = null;
+  let any = false;
+  for (const line of out.split("\n")) {
+    const f = line.split("\t");
+    switch (f[0]) {
+      case "T": {
+        const kind = sensorKind(f[1] ?? "");
+        const c = Number(f[2]);
+        if (kind && Number.isFinite(c) && c > 10 && c < 130 && !Number.isInteger(c)) groups[kind].push(c);
+        any = true;
+        break;
+      }
+      case "F": {
+        const [rpm, min, max, target] = f.slice(2, 6).map(Number) as [number, number, number, number];
+        if (!Number.isFinite(rpm)) break;
+        fans.push({
+          rpm: Math.max(0, Math.round(rpm)),
+          min: Math.max(0, min || 0),
+          max: Math.max(0, max || 0),
+          target: Number.isFinite(target) && target >= 0 ? target : null,
+          manual: f[6] === "1",
+        });
+        any = true;
+        break;
+      }
+      case "W": {
+        const w = Number(f[1]);
+        if (Number.isFinite(w) && w > 0 && w < 2000) power = w;
+        any = true;
+        break;
+      }
+      case "H":
+        pressure = PRESSURES[Number(f[1])] ?? null;
+        break;
+    }
+  }
+  if (!any && !pressure) return null;
+  const temp = (values: number[]): VitalsTemp | null =>
+    values.length ? { avg: values.reduce((sum, v) => sum + v, 0) / values.length, max: Math.max(...values), sensors: values.length } : null;
+  return { cpu: temp(groups.cpu), gpu: temp(groups.gpu), ssd: temp(groups.ssd), fans, power, pressure };
 }
 
 /** `networksetup -listallhardwareports`: device → the name System Settings uses ("en0" → "Wi-Fi"). */

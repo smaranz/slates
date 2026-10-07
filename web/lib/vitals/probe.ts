@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { sensorKind } from "./parse";
+
 /**
  * Two small helpers, compiled on this Mac the first time Vitals needs them.
  *
@@ -29,14 +31,26 @@ import path from "node:path";
  *   G busy% renderer% tiler% bytes cores model    the GPU
  *   C pid ns                                      GPU time each process has used
  *   D read written                                bytes through every disk since boot
+ *
+ * `probe smc-keys` lists the SMC's temperature keys, one `K key` a line. It
+ * walks all of them (about 3,000 on an M4 Pro, 1.5 s), so it's asked once.
+ * `probe sensors <key>…` reads those keys and the rest of what the SMC knows
+ * about heat:
+ *   T key °C                                      a temperature
+ *   F fan rpm min max target manual               each fan
+ *   W watts                                       the whole Mac's draw (PSTR)
+ *   H level                                       thermal pressure, 0 (nominal) to 4
  */
 const PROBE_C = String.raw`
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <dlfcn.h>
 #include <libproc.h>
+#include <notify.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/resource.h>
 
 typedef pid_t (*responsible_fn)(pid_t);
@@ -150,7 +164,138 @@ static void disks(void) {
   printf("D\t%lld\t%lld\n", read, written);
 }
 
-int main(void) {
+/* The SMC answers one struct in, one out; its layout is the kernel's own. */
+typedef struct { char major, minor, build, reserved; uint16_t release; } SMCVersion;
+typedef struct { uint16_t version, length; uint32_t cpu, gpu, mem; } SMCLimits;
+typedef struct { uint32_t size, type; uint8_t attributes; } SMCKeyInfo;
+typedef struct {
+  uint32_t key;
+  SMCVersion version;
+  SMCLimits limits;
+  SMCKeyInfo info;
+  uint8_t result, status, command;
+  uint32_t index;
+  uint8_t bytes[32];
+} SMCParam;
+
+enum { SMC_READ = 5, SMC_AT_INDEX = 8, SMC_INFO = 9 };
+static io_connect_t smc;
+
+static uint32_t fourcc(const char *s) {
+  return (uint32_t)(uint8_t)s[0] << 24 | (uint32_t)(uint8_t)s[1] << 16 | (uint32_t)(uint8_t)s[2] << 8 | (uint32_t)(uint8_t)s[3];
+}
+
+static int smc_call(SMCParam *in, SMCParam *out) {
+  size_t size = sizeof *out;
+  memset(out, 0, sizeof *out);
+  return IOConnectCallStructMethod(smc, 2, in, sizeof *in, out, &size) == KERN_SUCCESS && out->result == 0;
+}
+
+static int smc_open(void) {
+  io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"));
+  if (!service) return 0;
+  kern_return_t ok = IOServiceOpen(service, mach_task_self(), 0, &smc);
+  IOObjectRelease(service);
+  return ok == KERN_SUCCESS;
+}
+
+static int smc_info(uint32_t key, SMCKeyInfo *info) {
+  SMCParam in = {0}, out;
+  in.key = key;
+  in.command = SMC_INFO;
+  if (!smc_call(&in, &out)) return 0;
+  *info = out.info;
+  return 1;
+}
+
+static int smc_bytes(uint32_t key, uint32_t size, uint8_t *bytes) {
+  SMCParam in = {0}, out;
+  in.key = key;
+  in.info.size = size;
+  in.command = SMC_READ;
+  if (!smc_call(&in, &out)) return 0;
+  memcpy(bytes, out.bytes, sizeof out.bytes);
+  return 1;
+}
+
+/* Any number the SMC keeps: Apple silicon writes floats, older Macs fixed point. */
+static int smc_number(const char *name, double *value) {
+  SMCKeyInfo info;
+  uint8_t b[32];
+  uint32_t key = fourcc(name);
+  if (!smc_info(key, &info) || !smc_bytes(key, info.size, b)) return 0;
+  if (info.type == fourcc("flt ") && info.size == 4) { float f; memcpy(&f, b, 4); *value = f; }
+  else if (info.type == fourcc("fpe2") && info.size == 2) *value = ((b[0] << 8) | b[1]) / 4.0;
+  else if (info.type == fourcc("sp78") && info.size == 2) *value = (int16_t)((b[0] << 8) | b[1]) / 256.0;
+  else if (info.type == fourcc("ui8 ") || info.type == fourcc("flag")) *value = b[0];
+  else if (info.type == fourcc("ui16")) *value = (b[0] << 8) | b[1];
+  else if (info.type == fourcc("ui32")) *value = (uint32_t)b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3];
+  else return 0;
+  return 1;
+}
+
+static void smc_keys(void) {
+  double count;
+  if (!smc_number("#KEY", &count)) return;
+  for (uint32_t i = 0; i < (uint32_t)count; i++) {
+    SMCParam in = {0}, out;
+    in.command = SMC_AT_INDEX;
+    in.index = i;
+    if (!smc_call(&in, &out) || (out.key >> 24) != 'T') continue;
+    SMCKeyInfo info;
+    if (!smc_info(out.key, &info) || info.type != fourcc("flt ") || info.size != 4) continue;
+    printf("K\t%c%c%c%c\n", (char)(out.key >> 24), (char)(out.key >> 16), (char)(out.key >> 8), (char)out.key);
+  }
+}
+
+static void sensors(int argc, char **argv) {
+  /* Temperatures are all 4-byte floats (smc-keys keeps only those), so one call each. */
+  for (int i = 0; i < argc; i++) {
+    uint8_t b[32];
+    float f;
+    if (strlen(argv[i]) != 4 || !smc_bytes(fourcc(argv[i]), 4, b)) continue;
+    memcpy(&f, b, 4);
+    printf("T\t%s\t%.2f\n", argv[i], f);
+  }
+  double fans = 0;
+  smc_number("FNum", &fans);
+  for (int i = 0; i < (int)fans && i < 10; i++) {
+    char key[5];
+    double rpm = 0, min = 0, max = 0, target = -1, mode = 0;
+    snprintf(key, sizeof key, "F%dAc", i);
+    if (!smc_number(key, &rpm)) continue;
+    snprintf(key, sizeof key, "F%dMn", i);
+    smc_number(key, &min);
+    snprintf(key, sizeof key, "F%dMx", i);
+    smc_number(key, &max);
+    snprintf(key, sizeof key, "F%dTg", i);
+    smc_number(key, &target);
+    snprintf(key, sizeof key, "F%dMd", i);
+    smc_number(key, &mode);
+    printf("F\t%d\t%.0f\t%.0f\t%.0f\t%.0f\t%d\n", i, rpm, min, max, target, mode > 0);
+  }
+  double watts;
+  if (smc_number("PSTR", &watts)) printf("W\t%.2f\n", watts);
+}
+
+static void pressure(void) {
+  int token;
+  uint64_t level = 0;
+  if (notify_register_check("com.apple.system.thermalpressurelevel", &token) != NOTIFY_STATUS_OK) return;
+  if (notify_get_state(token, &level) == NOTIFY_STATUS_OK) printf("H\t%llu\n", (unsigned long long)level);
+  notify_cancel(token);
+}
+
+int main(int argc, char **argv) {
+  if (argc > 1 && !strcmp(argv[1], "smc-keys")) {
+    if (smc_open()) smc_keys();
+    return 0;
+  }
+  if (argc > 1 && !strcmp(argv[1], "sensors")) {
+    if (smc_open()) sensors(argc - 2, argv + 2);
+    pressure();
+    return 0;
+  }
   processes();
   gpu();
   disks();
@@ -265,6 +410,32 @@ export async function readProbe(): Promise<string | null> {
   if (!bin) return null;
   try {
     return await run(bin, [], 5_000);
+  } catch {
+    return null;
+  }
+}
+
+let smcKeys: Promise<string[] | null> | null = null;
+
+/** The SMC's temperature keys that Vitals shows, listed once: they're the same until the Mac changes. */
+function temperatureKeys(bin: string): Promise<string[] | null> {
+  smcKeys ??= run(bin, ["smc-keys"], 15_000).then(
+    (out) => out.split("\n").flatMap((line) => /^K\t(T[A-Za-z0-9]{3})$/.exec(line)?.slice(1, 2) ?? []).filter((key) => sensorKind(key) !== null),
+    () => {
+      smcKeys = null;
+      return null;
+    },
+  );
+  return smcKeys;
+}
+
+/** The SMC's temperatures, fans and draw, and the thermal pressure; null without the probe. */
+export async function readSensors(): Promise<string | null> {
+  const bin = await probeBinary();
+  if (!bin) return null;
+  const keys = await temperatureKeys(bin);
+  try {
+    return await run(bin, ["sensors", ...(keys ?? [])], 5_000);
   } catch {
     return null;
   }
